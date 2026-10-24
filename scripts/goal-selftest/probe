@@ -1,0 +1,5 @@
+#[cfg(feature = "goal")]
+#[test]
+fn goal_selftest_probe() {
+    panic!("goal selftest probe");
+}

@@ -1,0 +1,19 @@
+[package]
+name = "hali"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.89"
+description = "Keeps a standards-based RDF ontology describing local files in place"
+publish = false
+
+[features]
+# Compiles in HALI_TEST_NOW / HALI_TEST_ID_SEED (spec §14.2). Never enabled in release builds.
+test-hooks = []
+# Gates the red tests of the active PR goal (see "AI loop" in AGENTS.md); stays as the mechanism after settle.
+goal = []
+
+[dependencies]
+clap = { version = "=4.6.7", features = ["derive"] }
+
+[dev-dependencies]
+assert_cmd = "=2.2.2"

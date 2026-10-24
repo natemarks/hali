@@ -1,0 +1,3 @@
+# Gitleaks ignore patterns
+# Add file paths or patterns for false positives
+# Format: path/to/file.py:rule-name:line-number

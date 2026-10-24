@@ -1,0 +1,21 @@
+name: goal-settled
+
+# Red while a ready PR still carries goal scaffolding (.goal/, goal tags).
+# Draft PRs skip it: a draft's goal is expected to be in progress, and the
+# PR status block shows it. `make loop-protect` makes this a required check;
+# GitHub counts a skipped check as passing, and drafts cannot merge anyway.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  goal-settled:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - run: make goal-settled
