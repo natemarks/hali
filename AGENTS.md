@@ -13,7 +13,7 @@ Read on demand (these are not imported here):
 
 ## Commands
 
-These targets are specified in `docs/spec.md` §13.2 and don't exist until the scaffold lands.
+Specified in `docs/spec.md` §13.2. `make help` lists what exists so far; `make bench`, `make install`, `make lua-test` and the release targets arrive with their tickets. Pre-commit runs betterleaks (a gitleaks-compatible secret scanner) and `make static` (`pre-commit install` once per clone).
 
 | Command | Use |
 |---|---|
@@ -43,3 +43,102 @@ See `docs/spec.md` §12. In short: `src/{cli,core,ontology,storage,media_type,pa
 ## Git
 
 Feature branches off `main` and reviewed PRs; no direct pushes to `main`. Releases go through `make release-prepare` / `make release-publish` (spec §13.3).
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `natemarks/hali`, via the `gh` CLI, with native blocked-by dependencies. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: a root `GLOSSARY.md` and `docs/adr/`. See `docs/agents/domain.md`.
+
+## AI loop
+
+Each GitHub issue is a contract for one change. The human owns its goal, priority, acceptance criteria and acceptable risk, and merges the PR. Agents draft, implement and review.
+
+1. `/loop-status` (or `make loop-status`): what needs the human, with the next command for each item.
+2. `/groom-issue <issue>`: one approval of the contract and goal map, then a draft PR in `.claude/worktrees/<branch>` whose goal is red.
+3. `/drive-pr [pr] [rounds]`: agents loop until `make goal` is green, review, settle, and mark the PR ready. Progress shows in the PR's status block.
+4. The human reviews the diff and CI, merges, and turns follow-ups into issues.
+
+Each PR works in its own worktree under `.claude/worktrees/`; skills switch into it with `EnterWorktree`.
+
+### Goal
+
+The **goal** is the PR's executable definition of done.
+
+- `make goal`: `static-check`, goal-guard, goal-tagged tests, and `.goal/checks/*.sh`. The last line reads `GOAL GREEN` or `GOAL RED: <gates>`.
+- `make goal-tests`: goal-tagged tests only (`cargo test --features test-hooks,goal`, so goal tests can use `HALI_TEST_NOW` / `HALI_TEST_ID_SEED`). Never use `--all-features` in `static`, `static-check`, clippy or `unit`: it would compile the red goal tests and break the commit hook.
+- `make goal-settle`: untag the goal's tests so they join `make unit`, delete `.goal/`, commit `goal: settle #<issue>`.
+- `make goal-settled`: fails while goal scaffolding remains. A required CI check on ready PRs.
+- `make goal-selftest` and `make loop-doctor`: prove the loop works, and check what it depends on.
+- **Goal tag**: `#[cfg(feature = "goal")]` on a line of its own above the test or test module (cargo feature `goal`). It keeps a red test out of `make unit`, so the commit hook stays green.
+- **BDD**: none. Spec §14.1 already requires a `core` unit test, an `assert_cmd` CLI test and an `insta` golden snapshot per command, and acceptance criteria map onto those, so Gherkin would duplicate them. The goal map ties each criterion to tests and checks only.
+- **Golden snapshots**: a goal-tagged `insta` test ships with a hand-written `.snap` whose expected JSON comes from `docs/spec.md`, and that `.snap` is listed in `.goal/locked`. The red is then a real mismatch, and `make unit-update-golden` can't bless the implementer's own output.
+
+`.goal/` exists only on a PR branch and is deleted at settle:
+
+| Path | Holds |
+|---|---|
+| `ISSUE` | the issue number |
+| `plan.md` | the approved plan and goal map (criterion → checks) |
+| `locked` | goal-owned paths outside `.goal/`, one per line |
+| `checks/*.sh` | temporary completeness checks |
+| `last-run.log` | latest `make goal` output (untracked) |
+
+Goal-owned files (`.goal/` and every path in `locked`) change only in `goal: ...` commits; goal-guard enforces it.
+
+### PR status block
+
+`/groom-issue` and `/drive-pr` keep this block in the PR body through `scripts/goal-pr-status.sh <pr>`; `make loop-status` reads its first line.
+
+```markdown
+<!-- goal-state: red | green | stopped:<budget|no-progress|scope|guard> | ready -->
+**Goal: RED** · round 2 · updated 2026-10-24
+
+| # | Acceptance criterion | Checks | Status |
+|---|---|---|---|
+| 1 | Given …, when …, then … | `tests/some_test.rs::some_test` | ❌ |
+
+**Stopped:** <reason>. <the decision needed>. Resume: `<command>`
+
+<details><summary>Round log</summary>
+
+| Round | Red before | Agent (model) | Commits | Note |
+|---|---|---|---|---|
+
+</details>
+```
+
+The **Stopped** line appears only in a `stopped:` state.
+
+### Agents
+
+| Agent | Model | Tools | Role |
+|---|---|---|---|
+| planner | opus | read-only | contract gaps, goal map, approach, risks |
+| test-author | sonnet | edit | writes and corrects the goal |
+| implementer | sonnet | edit | makes the goal green |
+| reviewer | sonnet | read-only | bugs, acceptance, missing cases |
+| security-reviewer | opus | read-only | threat model and scanners |
+
+`/drive-pr` raises the implementer and reviewer to opus for cross-cutting changes and after a round without progress. On Bedrock, the aliases resolve through `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`; `make loop-doctor` checks they are pinned.
+
+The agent and skill files say `CLAUDE.md`; it reaches this file through its `@AGENTS.md` import.
+
+### Security-sensitive paths
+
+- `src/storage/`, `src/paths/`, `src/media_type/`
+- the `hali query` SPARQL path (read-only enforcement, `READ_ONLY_QUERY`)
+- `hali skill install`, which writes into `~/.claude`
+- `scripts/install.sh`
+- `Cargo.toml`, `Cargo.lock`
+- `.github/workflows/`
+
+A diff touching these, or an issue labelled `security`, gets the security-reviewer as well as the reviewer. An LLM review is one source of findings: security exceptions and consequential security calls stay with a qualified human.

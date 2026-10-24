@@ -1,0 +1,5 @@
+/target
+scratch.txt
+.goal/*.log
+.claude/worktrees/
+*.snap.new

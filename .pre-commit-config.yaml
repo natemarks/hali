@@ -1,0 +1,14 @@
+repos:
+  - repo: local
+    hooks:
+      - id: betterleaks
+        name: Scan staged changes for secrets (betterleaks)
+        entry: betterleaks git --pre-commit --staged --redact -v
+        language: system
+        pass_filenames: false
+
+      - id: make-static
+        name: Run make static
+        entry: make static
+        language: system
+        pass_filenames: false
