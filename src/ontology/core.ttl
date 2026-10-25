@@ -1,0 +1,13 @@
+@prefix dcat: <http://www.w3.org/ns/dcat#> .
+@prefix hali: <https://w3id.org/hali#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# hali core ontology (embedded in the binary, ADR-0003)
+<https://w3id.org/hali> a owl:Ontology ;
+    owl:versionInfo "0.1.0" .
+
+hali:Resource a owl:Class ;
+    rdfs:label "Resource"@en ;
+    rdfs:subClassOf dcat:Distribution , prov:Entity .
