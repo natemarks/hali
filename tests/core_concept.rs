@@ -11,12 +11,9 @@
 //!                        suggested_fix: Option<String>, suggested_command: Option<String> }`
 //!   core never touches the filesystem; it works on an in-memory `Store`.
 
-#[cfg(feature = "goal")]
 use hali::core::{Context, FixedClock, SeededIdGen, concept};
-#[cfg(feature = "goal")]
 use std::path::{Path, PathBuf};
 
-#[cfg(feature = "goal")]
 fn ctx(language: &str) -> Context {
     Context::new(
         language,
@@ -25,20 +22,17 @@ fn ctx(language: &str) -> Context {
     )
 }
 
-#[cfg(feature = "goal")]
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name)
 }
 
-#[cfg(feature = "goal")]
 fn empty_store() -> (hali::storage::Store, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     (hali::storage::load(dir.path()).unwrap(), dir)
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn slug_rules() {
     use hali::core::slug;
@@ -53,7 +47,6 @@ fn slug_rules() {
     assert_eq!(slug("日本語 データ"), "日本語-データ");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn add_writes_concept_triples_and_scheme() {
     let (mut store, _dir) = empty_store();
@@ -68,7 +61,6 @@ fn add_writes_concept_triples_and_scheme() {
     assert_eq!(got, want);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn add_normalises_whitespace_in_the_label() {
     let (mut store, _dir) = empty_store();
@@ -77,7 +69,6 @@ fn add_normalises_whitespace_in_the_label() {
     assert_eq!(c.id, "machine-learning");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn add_uses_the_configured_language_tag() {
     let (mut store, _dir) = empty_store();
@@ -89,7 +80,6 @@ fn add_uses_the_configured_language_tag() {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn colliding_slugs_get_numeric_suffixes() {
     let (mut store, _dir) = empty_store();
@@ -102,7 +92,6 @@ fn colliding_slugs_get_numeric_suffixes() {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn duplicate_label_is_label_taken() {
     let (mut store, _dir) = empty_store();
@@ -132,7 +121,6 @@ fn duplicate_label_is_label_taken() {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn label_taken_also_matches_alt_labels() {
     let mut store = hali::storage::load(&fixture("store")).unwrap();
@@ -141,7 +129,6 @@ fn label_taken_also_matches_alt_labels() {
     assert_eq!(err.details["concept"], "linked-data");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn same_label_in_another_language_is_not_taken() {
     let mut store = hali::storage::load(&fixture("store")).unwrap();
@@ -149,7 +136,6 @@ fn same_label_in_another_language_is_not_taken() {
     assert_eq!(c.label, "machine learning");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn invalid_labels_are_rejected() {
     let (mut store, _dir) = empty_store();
@@ -163,7 +149,6 @@ fn invalid_labels_are_rejected() {
     assert!(!ttl.contains("skos:Concept"), "nothing may be added: {ttl}");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn list_pages_and_sorts_by_label() {
     let store = hali::storage::load(&fixture("store")).unwrap();
@@ -199,7 +184,6 @@ fn list_pages_and_sorts_by_label() {
     assert_eq!(past_end.next_offset, None);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn list_on_an_empty_store_is_empty() {
     let (store, _dir) = empty_store();
@@ -212,7 +196,6 @@ fn list_on_an_empty_store_is_empty() {
 
 // ---- the scheme IRI is reserved: a Concept never takes the id "topics" -----------------
 
-#[cfg(feature = "goal")]
 fn assert_scheme_untouched(store: &hali::storage::Store) {
     let ttl = hali::storage::to_turtle(store, hali::storage::File::Vocabulary);
     assert_eq!(
@@ -225,7 +208,6 @@ fn assert_scheme_untouched(store: &hali::storage::Store) {
     assert!(ttl.contains("hali:topics-2 a skos:Concept"), "{ttl}");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn add_topics_on_an_empty_store_does_not_collide_with_the_scheme() {
     let (mut store, _dir) = empty_store();
@@ -235,7 +217,6 @@ fn add_topics_on_an_empty_store_does_not_collide_with_the_scheme() {
     assert_scheme_untouched(&store);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn add_case_variant_topics_does_not_collide_with_the_scheme() {
     let (mut store, _dir) = empty_store();
@@ -245,7 +226,6 @@ fn add_case_variant_topics_does_not_collide_with_the_scheme() {
     assert_scheme_untouched(&store);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn add_topics_after_another_concept_does_not_collide_with_the_scheme() {
     let (mut store, _dir) = empty_store();

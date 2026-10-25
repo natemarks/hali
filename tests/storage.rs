@@ -6,21 +6,17 @@
 //!   `hali::storage::to_turtle(store: &Store, file: hali::storage::File) -> String`,
 //!       with `File::{Vocabulary, Resources}` (extensions.ttl is read-only to hali).
 
-#[cfg(feature = "goal")]
 use std::path::{Path, PathBuf};
 
-#[cfg(feature = "goal")]
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name)
 }
 
-#[cfg(feature = "goal")]
 const GRAPH_BASE: &str = "https://w3id.org/hali/graph/";
 
 /// The N-Triples-ish `s p o` lines of one named graph, sorted.
-#[cfg(feature = "goal")]
 fn graph_lines(store: &hali::storage::Store, name: &str) -> Vec<String> {
     let graph = format!("<{GRAPH_BASE}{name}>");
     let mut lines: Vec<String> = store
@@ -33,7 +29,6 @@ fn graph_lines(store: &hali::storage::Store, name: &str) -> Vec<String> {
     lines
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn load_puts_each_file_in_its_named_graph() {
     let store = hali::storage::load(&fixture("store")).unwrap();
@@ -88,7 +83,6 @@ fn load_puts_each_file_in_its_named_graph() {
     assert!(core.iter().all(|l| !vocabulary.contains(l)));
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn load_of_an_empty_directory_has_only_the_core_graph() {
     let dir = tempfile::tempdir().unwrap();
@@ -104,7 +98,6 @@ fn load_of_an_empty_directory_has_only_the_core_graph() {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn to_turtle_matches_canonical_bytes() {
     // Same graph as fixtures/store/vocabulary.ttl, written by hand in a different
@@ -115,7 +108,6 @@ fn to_turtle_matches_canonical_bytes() {
     assert_eq!(got, want);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn round_trip_is_byte_identical() {
     let store = hali::storage::load(&fixture("store")).unwrap();

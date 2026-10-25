@@ -1,9 +1,7 @@
 //! Goal tests for injected `Clock` and `IdGen` (#3, spec §14.2).
 
-#[cfg(feature = "goal")]
 use hali::core::{Clock, FixedClock, IdGen, SeededIdGen};
 
-#[cfg(feature = "goal")]
 fn is_uuid_v7(s: &str) -> bool {
     let b = s.as_bytes();
     s.len() == 36
@@ -15,7 +13,6 @@ fn is_uuid_v7(s: &str) -> bool {
         && matches!(b[19], b'8' | b'9' | b'a' | b'b')
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn seeded_idgen_is_deterministic_uuidv7() {
     let a = SeededIdGen::new(42);
@@ -31,7 +28,6 @@ fn seeded_idgen_is_deterministic_uuidv7() {
     assert_ne!(other, first[0], "different seed, different ids");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn fixed_clock_returns_the_injected_instant() {
     let clock = FixedClock::new("2026-10-24T09:30:00Z");

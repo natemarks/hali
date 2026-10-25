@@ -1,12 +1,9 @@
 //! Goal tests for the `paths` seam (#3): data dir and config file resolution.
 //! The environment is passed in as a lookup closure, never read from the process.
 
-#[cfg(feature = "goal")]
 use std::collections::HashMap;
-#[cfg(feature = "goal")]
 use std::path::PathBuf;
 
-#[cfg(feature = "goal")]
 fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
     let map: HashMap<String, String> = pairs
         .iter()
@@ -15,7 +12,6 @@ fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
     move |key| map.get(key).cloned()
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn data_dir_precedence() {
     // HALI_DATA_DIR wins and is used as given.
@@ -58,7 +54,6 @@ fn data_dir_precedence() {
     assert!(hali::paths::data_dir(env_of(&[])).is_err());
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn config_file_precedence() {
     let env = env_of(&[("XDG_CONFIG_HOME", "/xdg/config"), ("HOME", "/home/u")]);

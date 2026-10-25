@@ -3,16 +3,11 @@
 //! Every run sets HALI_DATA_DIR / XDG_CONFIG_HOME / HOME to temp dirs and clears the rest
 //! of the environment, so the real store and config are never read.
 
-#[cfg(feature = "goal")]
 use assert_cmd::Command;
-#[cfg(feature = "goal")]
 use std::ffi::OsStr;
-#[cfg(feature = "goal")]
 use std::path::{Path, PathBuf};
-#[cfg(feature = "goal")]
 use tempfile::TempDir;
 
-#[cfg(feature = "goal")]
 struct Env {
     _root: TempDir,
     data: PathBuf,
@@ -20,14 +15,12 @@ struct Env {
     home: PathBuf,
 }
 
-#[cfg(feature = "goal")]
 struct Out {
     code: Option<i32>,
     stdout: String,
     stderr: String,
 }
 
-#[cfg(feature = "goal")]
 impl Env {
     fn new() -> Env {
         let root = tempfile::tempdir().unwrap();
@@ -101,19 +94,16 @@ impl Env {
     }
 }
 
-#[cfg(feature = "goal")]
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name)
 }
 
-#[cfg(feature = "goal")]
 fn fixture_text(name: &str) -> String {
     std::fs::read_to_string(fixture(name)).unwrap()
 }
 
-#[cfg(feature = "goal")]
 fn json(s: &str) -> serde_json::Value {
     assert_eq!(
         s.matches('\n').count(),
@@ -123,7 +113,6 @@ fn json(s: &str) -> serde_json::Value {
     serde_json::from_str(s).unwrap_or_else(|e| panic!("not JSON ({e}): {s:?}"))
 }
 
-#[cfg(feature = "goal")]
 fn dir_entries(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
@@ -135,7 +124,6 @@ fn dir_entries(dir: &Path) -> Vec<String> {
 
 // ---- criterion 1: data dir, store created on first write -------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn add_creates_store_under_hali_data_dir() {
     let env = Env::new();
@@ -153,7 +141,6 @@ fn add_creates_store_under_hali_data_dir() {
     assert_eq!(mode, 0o700, "data dir is private");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn add_creates_store_under_xdg_data_home() {
     let env = Env::new();
@@ -166,7 +153,6 @@ fn add_creates_store_under_xdg_data_home() {
     assert!(xdg.join("hali/vocabulary.ttl").is_file());
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn add_creates_store_under_home() {
     let env = Env::new();
@@ -177,7 +163,6 @@ fn add_creates_store_under_home() {
     assert!(env.home.join(".local/share/hali/vocabulary.ttl").is_file());
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn list_on_missing_store_is_empty_and_creates_nothing() {
     let env = Env::new();
@@ -190,7 +175,6 @@ fn list_on_missing_store_is_empty_and_creates_nothing() {
 
 // ---- criterion 3: deterministic Turtle -------------------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn first_add_writes_canonical_vocabulary() {
     let env = Env::new();
@@ -199,7 +183,6 @@ fn first_add_writes_canonical_vocabulary() {
     assert_eq!(env.vocabulary(), fixture_text("first-add/vocabulary.ttl"));
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn adds_in_any_order_serialize_sorted() {
     let forward = Env::new();
@@ -219,7 +202,6 @@ fn adds_in_any_order_serialize_sorted() {
 
 // ---- criterion 4: language -------------------------------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn config_language_tags_labels() {
     let env = Env::new();
@@ -237,7 +219,6 @@ fn config_language_tags_labels() {
     assert_eq!(list.stdout, "maschinelles-lernen\tMaschinelles Lernen\n");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn invalid_config_is_config_invalid() {
     for bad in [
@@ -261,7 +242,6 @@ fn invalid_config_is_config_invalid() {
 
 // ---- criterion 6: output ---------------------------------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn text_output_add_and_list() {
     let env = Env::new();
@@ -293,7 +273,6 @@ fn text_output_add_and_list() {
     assert_eq!(rest.stderr, "");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_add_json() {
     let env = Env::new();
@@ -303,7 +282,6 @@ fn concept_add_json() {
     insta::assert_snapshot!("concept_add_json", out.stdout);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_list_json() {
     let env = Env::with_store();
@@ -313,7 +291,6 @@ fn concept_list_json() {
     insta::assert_snapshot!("concept_list_json", out.stdout);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_list_json_empty() {
     let env = Env::new();
@@ -322,7 +299,6 @@ fn concept_list_json_empty() {
     insta::assert_snapshot!("concept_list_json_empty", out.stdout);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_list_json_paged() {
     let env = Env::with_store();
@@ -335,7 +311,6 @@ fn concept_list_json_paged() {
 
 // ---- criteria 7, 8: errors -------------------------------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn label_taken_json_envelope() {
     let env = Env::with_store();
@@ -345,7 +320,6 @@ fn label_taken_json_envelope() {
     insta::assert_snapshot!("label_taken_json_envelope", out.stderr);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn label_taken_text_two_lines() {
     let env = Env::with_store();
@@ -359,7 +333,6 @@ fn label_taken_text_two_lines() {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn label_taken_leaves_vocabulary_unchanged() {
     let env = Env::with_store();
@@ -375,7 +348,6 @@ fn label_taken_leaves_vocabulary_unchanged() {
     }
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn usage_errors_exit_2() {
     let env = Env::new();
@@ -412,12 +384,10 @@ fn usage_errors_exit_2() {
 // ---- criteria 2, 9: broken stores ------------------------------------------------------
 
 /// Line 3 is the syntax error. Line 2 carries a canary that must never be echoed.
-#[cfg(feature = "goal")]
 const BROKEN_TURTLE: &str = "@prefix hali: <https://w3id.org/hali#> .\n\
     hali:x hali:y \"SECRET-CANARY-7731\" .\n\
     hali:z hali:y .\n";
 
-#[cfg(feature = "goal")]
 fn assert_unparseable(file: &str) {
     let env = Env::new();
     std::fs::create_dir_all(&env.data).unwrap();
@@ -446,25 +416,21 @@ fn assert_unparseable(file: &str) {
     assert!(!env.data.join("vocabulary.ttl").exists() || file == "vocabulary.ttl");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn unparseable_vocabulary_exits_3() {
     assert_unparseable("vocabulary.ttl");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn unparseable_resources_exits_3() {
     assert_unparseable("resources.ttl");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn unparseable_extensions_exits_3() {
     assert_unparseable("extensions.ttl");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn invalid_utf8_is_unparseable() {
     let env = Env::new();
@@ -475,7 +441,6 @@ fn invalid_utf8_is_unparseable() {
     assert_eq!(json(&out.stderr)["error"]["rule"], "STORE_UNPARSEABLE");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn unusable_data_dir_is_store_io() {
     // The data dir is a regular file: it can be neither read nor created.
@@ -501,7 +466,6 @@ fn unusable_data_dir_is_store_io() {
 
 // ---- the scheme IRI is reserved ----------------------------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn add_topics_does_not_turn_the_scheme_into_a_concept() {
     let env = Env::new();
