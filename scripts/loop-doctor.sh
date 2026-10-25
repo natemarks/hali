@@ -58,7 +58,7 @@ if [ -x "$hook" ]; then pass "commit hook installed"; else fail "commit hook not
 for target in goal goal-tests goal-settled goal-settle goal-selftest unit "$GOAL_STATIC"; do
     if make -n "$target" >/dev/null 2>&1; then pass "make $target"; else fail "make $target is not defined" "re-run /scaffold-ai-loop"; fi
 done
-for script in goal goal-guard goal-settled goal-settle goal-selftest goal-worktree goal-pr-status loop-status; do
+for script in goal goal-guard goal-settled goal-settle goal-selftest goal-worktree goal-pr-body goal-pr-status loop-status; do
     if [ -x "scripts/$script.sh" ]; then pass "scripts/$script.sh"; else fail "scripts/$script.sh missing or not executable" "re-run /scaffold-ai-loop"; fi
 done
 missing=""

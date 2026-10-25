@@ -6,6 +6,8 @@ set -euo pipefail
 #
 # Usage: scripts/goal-pr-status.sh <pr> < status.md
 #
+# The write goes through goal-pr-body.sh (gh pr edit fails on older gh).
+#
 # The block sits between <!-- goal-status:start --> and <!-- goal-status:end -->
 # and is appended when the body has none. Its first line should be the
 # machine-readable state that `make loop-status` reads:
@@ -32,5 +34,5 @@ else
     new="$(printf '%s\n\n%s\n%s\n%s\n' "$body" "$start" "$block" "$end")"
 fi
 
-printf '%s\n' "$new" | gh pr edit "$pr" --body-file - >/dev/null
+printf '%s' "$new" | "$(dirname "${BASH_SOURCE[0]}")/goal-pr-body.sh" "$pr" >/dev/null
 echo "goal-pr-status: updated PR #$pr"
