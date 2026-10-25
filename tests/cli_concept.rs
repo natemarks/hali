@@ -513,7 +513,8 @@ fn add_topics_does_not_turn_the_scheme_into_a_concept() {
     assert_eq!(list.stdout, "topics-2\ttopics\n");
 
     let ttl = env.vocabulary();
-    assert!(!ttl.contains("hali:topics a skos:Concept"), "{ttl}");
+    assert!(!ttl.contains("hali:topics a skos:Concept "), "{ttl}");
+    assert!(!ttl.contains("hali:topics a skos:Concept,"), "{ttl}");
     assert_eq!(
         ttl.matches("hali:topics a skos:ConceptScheme").count(),
         1,
