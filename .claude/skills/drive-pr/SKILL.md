@@ -54,7 +54,7 @@ Run `make goal-settle`: it removes the goal tags, deletes `.goal/`, and commits 
 
 ## 4. Hand back
 
-Rewrite the PR body (`gh pr edit <pr> --body-file -`):
+Rewrite the PR body with `scripts/goal-pr-body.sh <pr>` (new body on stdin). PR bodies are only ever written through the loop's scripts, since `gh pr edit` fails on older gh. The body holds:
 
 - what changed and why, with `Closes #<issue>`;
 - the goal map, with each criterion mapped to the permanent test or scenario that now proves it;
