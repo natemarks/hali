@@ -498,3 +498,25 @@ fn unusable_data_dir_is_store_io() {
         "not a directory"
     );
 }
+
+// ---- the scheme IRI is reserved ----------------------------------------------------------
+
+#[cfg(feature = "goal")]
+#[test]
+fn add_topics_does_not_turn_the_scheme_into_a_concept() {
+    let env = Env::new();
+    let out = env.run(["concept", "add", "topics"]);
+    assert_eq!(out.code, Some(0), "{}", out.stderr);
+
+    let list = env.run(["concept", "list"]);
+    assert_eq!(list.code, Some(0), "{}", list.stderr);
+    assert_eq!(list.stdout, "topics-2\ttopics\n");
+
+    let ttl = env.vocabulary();
+    assert!(!ttl.contains("hali:topics a skos:Concept"), "{ttl}");
+    assert_eq!(
+        ttl.matches("hali:topics a skos:ConceptScheme").count(),
+        1,
+        "{ttl}"
+    );
+}

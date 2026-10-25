@@ -209,3 +209,49 @@ fn list_on_an_empty_store_is_empty() {
     assert!(!page.truncated);
     assert_eq!(page.next_offset, None);
 }
+
+// ---- the scheme IRI is reserved: a Concept never takes the id "topics" -----------------
+
+#[cfg(feature = "goal")]
+fn assert_scheme_untouched(store: &hali::storage::Store) {
+    let ttl = hali::storage::to_turtle(store, hali::storage::File::Vocabulary);
+    assert_eq!(
+        ttl.matches("hali:topics a skos:ConceptScheme").count(),
+        1,
+        "{ttl}"
+    );
+    assert!(!ttl.contains("hali:topics a skos:Concept "), "{ttl}");
+    assert!(!ttl.contains("hali:topics a skos:Concept,"), "{ttl}");
+    assert!(ttl.contains("hali:topics-2 a skos:Concept"), "{ttl}");
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn add_topics_on_an_empty_store_does_not_collide_with_the_scheme() {
+    let (mut store, _dir) = empty_store();
+    let c = concept::add(&ctx("en"), &mut store, "topics").unwrap();
+    assert_eq!(c.id, "topics-2");
+    assert_eq!(c.label, "topics");
+    assert_scheme_untouched(&store);
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn add_case_variant_topics_does_not_collide_with_the_scheme() {
+    let (mut store, _dir) = empty_store();
+    let c = concept::add(&ctx("en"), &mut store, "TOPICS").unwrap();
+    assert_eq!(c.id, "topics-2");
+    assert_eq!(c.label, "TOPICS");
+    assert_scheme_untouched(&store);
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn add_topics_after_another_concept_does_not_collide_with_the_scheme() {
+    let (mut store, _dir) = empty_store();
+    concept::add(&ctx("en"), &mut store, "machine learning").unwrap();
+    let c = concept::add(&ctx("en"), &mut store, "topics").unwrap();
+    assert_eq!(c.id, "topics-2");
+    assert_eq!(c.label, "topics");
+    assert_scheme_untouched(&store);
+}
