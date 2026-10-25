@@ -1,0 +1,5 @@
+---
+source: tests/cli_concept.rs
+expression: out.stdout
+---
+{"schema_version":1,"concept":{"id":"machine-learning","label":"machine learning","alt_labels":[],"broader":[]}}

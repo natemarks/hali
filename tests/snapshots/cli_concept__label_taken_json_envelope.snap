@@ -1,0 +1,5 @@
+---
+source: tests/cli_concept.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"LABEL_TAKEN","message":"label \"machine learning\"@en is already used by Concept ml","details":{"label":"machine learning","language":"en","concept":"ml"},"suggested_fix":"Use the existing Concept, or choose a different label.","suggested_command":"hali concept list"}}
