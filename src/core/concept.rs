@@ -53,7 +53,10 @@ pub fn add(ctx: &Context, store: &mut Store, label: &str) -> Result<Concept, Err
             1 => base.clone(),
             n => format!("{base}-{n}"),
         })
-        .find(|id| !is_used(store, &iri(id)))
+        .find(|id| {
+            let candidate = iri(id);
+            candidate.as_str() != TOPICS && !is_used(store, &candidate)
+        })
         .expect("some suffix is free");
 
     let concept = iri(&id);
