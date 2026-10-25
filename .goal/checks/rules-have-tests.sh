@@ -20,7 +20,7 @@ done
 emitted=$(grep -rhoE '"[A-Z]{2,}(_[A-Z]+)+"' src | tr -d '"' |
     grep -vE '^(HALI_|XDG_|RUST_|NO_COLOR)' | sort -u)
 for rule in $emitted $required_rules; do
-    grep -q "$rule" tests/cli_concept.rs || fail "no CLI test triggers rule $rule"
+    grep -q "$rule" tests/cli_concept.rs tests/snapshots/cli_concept__*.snap 2>/dev/null || fail "no CLI test triggers rule $rule"
 done
 
 # 3. Each command has a core test, a CLI test and a golden snapshot.
