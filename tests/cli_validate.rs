@@ -358,3 +358,69 @@ fn validate_text_escapes_control_characters() {
         out.stderr
     );
 }
+
+// ---- round 1 review: reachable SPARQL, core-shape overrides, rudof panics ---------------
+
+#[cfg(feature = "goal")]
+#[test]
+fn refused_extensions_exit_3_without_echoing_the_file() {
+    for name in [
+        "shacl/extension-reuses-core-sparql",
+        "shacl/extension-core-prefixes",
+        "shacl/extension-declare",
+        "shacl/extension-prefix",
+        "shacl/extension-namespace",
+        "shacl/extension-deactivates-core-shape",
+    ] {
+        let env = Env::with_fixture(name);
+        let before = env.files();
+
+        let out = env.run(["validate", "--json"]);
+        assert_eq!(out.code, Some(3), "{name}: {}", out.stderr);
+        assert_eq!(out.stdout, "", "{name}");
+        assert!(!out.stderr.contains("SECRET-CANARY-4242"), "{}", out.stderr);
+        assert_eq!(
+            json(&out.stderr)["error"]["rule"],
+            "SHAPES_INVALID",
+            "{name}"
+        );
+
+        let add = env.run(["concept", "add", "brand new"]);
+        assert_eq!(add.code, Some(3), "{name}: {}", add.stderr);
+        assert_eq!(add.stdout, "");
+        assert_eq!(env.files(), before, "{name}");
+
+        let list = env.run(["concept", "list"]);
+        assert_eq!(list.code, Some(0), "{name}: {}", list.stderr);
+    }
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn rudof_panic_is_shapes_invalid_with_no_leak() {
+    let env = Env::with_fixture("shacl/extension-panics");
+    for args in [vec!["validate", "--json"], vec!["validate"]] {
+        let out = env.run(args);
+        assert_eq!(out.code, Some(3), "{}", out.stderr);
+        assert_eq!(out.stdout, "");
+        for leak in ["TermAsSubject", "panicked", "\"a\"", "disjoint.rs"] {
+            assert!(!out.stderr.contains(leak), "{leak}: {}", out.stderr);
+        }
+    }
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn extension_alignment_validates_clean() {
+    let env = Env::with_fixture("shacl/extension-alignment");
+    let out = env.run(["validate", "--json"]);
+    assert_eq!(out.code, Some(0), "{}", out.stderr);
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn core_sh_extension_shape_still_validates() {
+    let env = Env::with_fixture("shacl/extension-shape");
+    let out = env.run(["validate", "--json"]);
+    assert_eq!(out.code, Some(0), "{}", out.stderr);
+}

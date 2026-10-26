@@ -235,7 +235,7 @@ fn extension_shapes_are_applied() {
 fn assert_shapes_invalid(name: &str) {
     let store = load(name);
     let before = snapshot(&store);
-    let err = validate(&store, 0, 50).err().expect("validate must fail");
+    let err = validate(&store, 0, 50).expect_err("validate must fail");
     assert_eq!(err.rule, "SHAPES_INVALID", "{name}");
     assert_eq!(err.exit_code(), 3);
     assert_eq!(
@@ -247,9 +247,7 @@ fn assert_shapes_invalid(name: &str) {
     assert!(!text.contains("SECRET-CANARY-4242"), "{text}");
 
     let mut store = store;
-    let add = concept::add(&ctx(), &mut store, "brand new")
-        .err()
-        .expect("add must fail");
+    let add = concept::add(&ctx(), &mut store, "brand new").expect_err("add must fail");
     assert_eq!(add.rule, "SHAPES_INVALID", "{name}");
     assert_eq!(add.exit_code(), 3);
     assert_eq!(
@@ -536,8 +534,7 @@ fn concept_add_refused_by_shacl_leaves_store_unchanged() {
     let mut store = load("shacl/extension-shape");
     let before = snapshot(&store);
     let err = concept::add(&ctx(), &mut store, "deep learning")
-        .err()
-        .expect("the extension shape requires an altLabel");
+        .expect_err("the extension shape requires an altLabel");
     assert_eq!(err.rule, "SHACL_VIOLATION");
     assert_eq!(err.exit_code(), 1);
     assert_eq!(
@@ -560,8 +557,7 @@ fn concept_add_refused_on_pre_existing_violation() {
     let mut store = load("shacl/duplicate-label");
     let before = snapshot(&store);
     let err = concept::add(&ctx(), &mut store, "quantum computing")
-        .err()
-        .expect("the store already violates the label shape");
+        .expect_err("the store already violates the label shape");
     assert_eq!(err.rule, "SHACL_VIOLATION");
     assert_eq!(err.exit_code(), 1);
     assert_eq!(err.details["total"], 4);
@@ -573,9 +569,65 @@ fn concept_add_refused_on_pre_existing_violation() {
 fn label_taken_is_checked_before_shacl() {
     // "ML" is the altLabel of hali:ml, and a new Concept would also lack the required alias.
     let mut store = load("shacl/extension-shape");
-    let err = concept::add(&ctx(), &mut store, "ML")
-        .err()
-        .expect("the label is taken");
+    let err = concept::add(&ctx(), &mut store, "ML").expect_err("the label is taken");
     assert_eq!(err.rule, "LABEL_TAKEN");
     assert_eq!(err.exit_code(), 1);
+}
+
+// ---- round 1 review: reachable SPARQL, core-shape overrides, rudof panics ---------------
+
+#[cfg(feature = "goal")]
+#[test]
+fn extension_reusing_core_sparql_constraint_is_shapes_invalid() {
+    assert_shapes_invalid("shacl/extension-reuses-core-sparql");
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn extension_attaching_prefixes_to_core_constraint_is_shapes_invalid() {
+    assert_shapes_invalid("shacl/extension-core-prefixes");
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn extension_sh_declare_alone_is_shapes_invalid() {
+    assert_shapes_invalid("shacl/extension-declare");
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn extension_sh_prefix_alone_is_shapes_invalid() {
+    assert_shapes_invalid("shacl/extension-prefix");
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn extension_sh_namespace_alone_is_shapes_invalid() {
+    assert_shapes_invalid("shacl/extension-namespace");
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn extension_deactivating_a_core_shape_is_shapes_invalid() {
+    assert_shapes_invalid("shacl/extension-deactivates-core-shape");
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn rudof_panic_on_valid_extension_shape_is_shapes_invalid() {
+    // A valid SHACL Core sh:disjoint shape over an inverse path makes shacl-0.3.35 panic.
+    assert_shapes_invalid("shacl/extension-panics");
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn extension_alignment_with_core_terms_still_conforms() {
+    let mut store = load("shacl/extension-alignment");
+    let r = validate(&store, 0, 50).unwrap_or_else(|e| panic!("{} {}", e.rule, e.message));
+    assert!(
+        r.conforms,
+        "{:?}",
+        r.results.iter().map(key).collect::<Vec<_>>()
+    );
+    concept::add(&ctx(), &mut store, "brand new").unwrap();
 }

@@ -98,3 +98,22 @@ Cross-cutting: implementer and reviewer start at opus. Order: (1) dependencies `
 
 ## Security
 Sensitive: Cargo.toml/lock (large new supply chain incl. an HTTP stack), `src/storage/`, new input handling (shapes in the hand-written `extensions.ttl`). The security-reviewer runs. The Turtle files are same-user trusted (maintainer is the only writer), but SHACL-SPARQL in extensions.ttl would turn a data file into network egress plus SPARQL-XML parsing via the quick-xml exception: hence `sh:select`/`sh:ask` are refused. Messages derived from stored labels are escaped in text mode; error details never echo rudof's parser text; `validate` writes nothing. The consequential call (accepting the dependency) stays with the human.
+
+## Round 1 review additions
+
+Maintainer decisions after review; each is a goal-owned check and a contract change.
+
+- **Extensions denylist.** An `extensions.ttl` with any triple whose predicate is `sh:select`, `sh:ask`, `sh:sparql`, `sh:prefixes`, `sh:declare`, `sh:prefix` or `sh:namespace` is `SHAPES_INVALID` (exit 3, fixed message, no file text), on `validate` and every mutation. Reason: rudof's SPARQL evaluator has an HTTP SERVICE handler hali cannot disable, so the only protection is controlling the query text.
+- **No overrides of core shapes.** Any extensions triple whose subject is a named node that is a subject in the embedded `SHAPES_TTL` (`hali:ConceptShape`, `hali:ConceptInSchemeShape`, `hali:ConceptPrefLabelShape`, `hali:LabelUniqueShape`, `hali:LabelUniqueConstraint`, ...) is `SHAPES_INVALID` (this closes `sh:deactivated true` and `sh:sparql hali:LabelUniqueConstraint`). `concept list` still works.
+- **Still allowed.** Extensions triples about subjects defined only in `core.ttl` or the vocabulary (alignments such as `hali:Resource rdfs:subClassOf <http://schema.org/CreativeWork>`) and user shapes using SHACL Core.
+- **Panics are caught.** A panic inside rudof's parse/compile/validate becomes `SHAPES_INVALID` (exit 3, fixed message). Nothing about the panic or store text reaches stdout or stderr, and there is no `panicked at` line (the default panic hook must not print).
+- **Lint.** `.err().expect(..)` in `tests/core_shacl.rs` became `.expect_err(..)`. `.goal/checks/clippy-goal.sh` runs `cargo clippy --all-targets --features test-hooks,goal -- -D warnings` so the goal's tests are lint-clean before settle.
+
+| # | Criterion | Check | Expected failure before the fix |
+|---|---|---|---|
+| 20 | Extension reusing a core SPARQL constraint refused | `core_shacl.rs::extension_reusing_core_sparql_constraint_is_shapes_invalid`; `cli_validate.rs::refused_extensions_exit_3_without_echoing_the_file` (`extension-reuses-core-sparql`) | `validate must fail` (validate returns Ok); `Some(0) == Some(3)` |
+| 21 | `sh:prefixes` / `sh:declare` / `sh:prefix` / `sh:namespace` in extensions refused | `core_shacl.rs::extension_attaching_prefixes_to_core_constraint_is_shapes_invalid`, `::extension_sh_declare_alone_is_shapes_invalid`, `::extension_sh_prefix_alone_is_shapes_invalid`, `::extension_sh_namespace_alone_is_shapes_invalid`; the same cli test (`extension-core-prefixes`, `-declare`, `-prefix`, `-namespace`) | same |
+| 22 | Extension cannot deactivate a core shape | `core_shacl.rs::extension_deactivating_a_core_shape_is_shapes_invalid`; cli test (`extension-deactivates-core-shape`, duplicate-label vocabulary) | same |
+| 23 | rudof panic -> SHAPES_INVALID, no leak, nothing written | `core_shacl.rs::rudof_panic_on_valid_extension_shape_is_shapes_invalid`; `cli_validate.rs::rudof_panic_is_shapes_invalid_with_no_leak`; `cli_shacl.rs::concept_add_with_rudof_panic_is_shapes_invalid_and_writes_nothing` (`extension-panics`) | test process panics at `disjoint.rs:38`; `Some(101) == Some(3)` |
+| 24 | Alignments and Core user shapes stay allowed (guards, pass before the fix) | `core_shacl.rs::extension_alignment_with_core_terms_still_conforms`; `cli_validate.rs::extension_alignment_validates_clean`, `::core_sh_extension_shape_still_validates` | passes before the fix |
+| 25 | Goal tests lint-clean | `.goal/checks/clippy-goal.sh` | passes once `.expect_err` is used |

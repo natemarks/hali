@@ -1,0 +1,4 @@
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix ex: <http://example.org/s#> .
+ex:S a sh:PropertyShape ; sh:targetObjectsOf skos:prefLabel ; sh:path [ sh:inversePath skos:prefLabel ] ; sh:disjoint skos:altLabel .

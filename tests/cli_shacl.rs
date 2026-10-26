@@ -177,3 +177,20 @@ fn shacl_violation_details_are_capped() {
     assert_eq!(details["truncated"], true);
     assert_eq!(env.files(), before);
 }
+
+#[cfg(feature = "goal")]
+#[test]
+fn concept_add_with_rudof_panic_is_shapes_invalid_and_writes_nothing() {
+    let env = Env::with_fixture("shacl/extension-panics");
+    let vocabulary = std::fs::read(env.data.join("vocabulary.ttl")).unwrap();
+    let out = env.run(["concept", "add", "brand new", "--json"]);
+    assert_eq!(out.code, Some(3), "{}", out.stderr);
+    assert_eq!(out.stdout, "");
+    for leak in ["TermAsSubject", "panicked", "\"a\""] {
+        assert!(!out.stderr.contains(leak), "{leak}: {}", out.stderr);
+    }
+    assert_eq!(
+        std::fs::read(env.data.join("vocabulary.ttl")).unwrap(),
+        vocabulary
+    );
+}
