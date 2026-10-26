@@ -12,19 +12,13 @@
 //!   adds to a tool-managed graph and the graph did not have yet.
 //!   core never touches the filesystem; it works on an in-memory `Store`.
 
-#[cfg(feature = "goal")]
 use hali::core::{Change, Context, FixedClock, Mutation, Op, SeededIdGen, concept};
-#[cfg(feature = "goal")]
 use oxigraph::model::{GraphNameRef, NamedNodeRef, Triple};
-#[cfg(feature = "goal")]
 use std::collections::BTreeSet;
-#[cfg(feature = "goal")]
 use std::path::{Path, PathBuf};
 
-#[cfg(feature = "goal")]
 const VOCABULARY_GRAPH: &str = "https://w3id.org/hali/graph/vocabulary";
 
-#[cfg(feature = "goal")]
 fn ctx() -> Context {
     Context::new(
         "en",
@@ -33,20 +27,17 @@ fn ctx() -> Context {
     )
 }
 
-#[cfg(feature = "goal")]
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name)
 }
 
-#[cfg(feature = "goal")]
 fn empty_store() -> (hali::storage::Store, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     (hali::storage::load(dir.path()).unwrap(), dir)
 }
 
-#[cfg(feature = "goal")]
 fn add(store: &mut hali::storage::Store, label: &str) -> Mutation<concept::Concept> {
     match concept::add(&ctx(), store, label) {
         Ok(m) => m,
@@ -55,7 +46,6 @@ fn add(store: &mut hali::storage::Store, label: &str) -> Mutation<concept::Conce
 }
 
 /// `(op, triple)` of every change, as strings.
-#[cfg(feature = "goal")]
 fn ops(changes: &[Change]) -> Vec<(String, String)> {
     changes
         .iter()
@@ -67,7 +57,6 @@ fn ops(changes: &[Change]) -> Vec<(String, String)> {
 }
 
 /// Every triple of the vocabulary graph, as canonical N-Triples lines.
-#[cfg(feature = "goal")]
 fn vocabulary(store: &hali::storage::Store) -> BTreeSet<String> {
     let graph = NamedNodeRef::new_unchecked(VOCABULARY_GRAPH);
     store
@@ -79,10 +68,8 @@ fn vocabulary(store: &hali::storage::Store) -> BTreeSet<String> {
         .collect()
 }
 
-#[cfg(feature = "goal")]
 const SCHEME: &str = "<https://w3id.org/hali#topics> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2004/02/skos/core#ConceptScheme> .";
 
-#[cfg(feature = "goal")]
 #[test]
 fn add_reports_changes_for_a_first_add() {
     let (mut store, _dir) = empty_store();
@@ -103,7 +90,6 @@ fn add_reports_changes_for_a_first_add() {
     assert!(m.changes.iter().all(|c| c.op == Op::Add));
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn add_omits_triples_already_in_the_file() {
     let mut store = hali::storage::load(&fixture("store")).unwrap();
@@ -121,7 +107,6 @@ fn add_omits_triples_already_in_the_file() {
     }
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn add_lists_the_scheme_when_only_another_graph_has_it() {
     // The scheme triple sits in extensions.ttl; the real run still writes it to vocabulary.ttl.
@@ -135,7 +120,6 @@ fn add_lists_the_scheme_when_only_another_graph_has_it() {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn changes_match_the_store_diff() {
     for name in ["store", "noncanonical", "dry-run/scheme-in-extensions"] {
@@ -151,7 +135,6 @@ fn changes_match_the_store_diff() {
     }
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn changes_escape_literals_as_n_triples() {
     let (mut store, _dir) = empty_store();
@@ -165,7 +148,6 @@ fn changes_escape_literals_as_n_triples() {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn change_serializes_as_op_and_triple() {
     let add = Change {
@@ -187,7 +169,6 @@ fn change_serializes_as_op_and_triple() {
     assert!(Op::Add < Op::Remove);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn changes_are_sorted_by_op_then_triple() {
     // "topics" takes the id `topics-2` (the scheme owns `topics`). In byte order

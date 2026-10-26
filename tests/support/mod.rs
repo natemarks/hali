@@ -2,22 +2,15 @@
 //! declare `mod support;`. It exposes exactly one `pub fn`, so every private helper below is
 //! reachable from it and the module is dead-code clean in any caller.
 
-#[cfg(feature = "goal")]
 use assert_cmd::Command;
-#[cfg(feature = "goal")]
 use oxrdf::{NamedOrBlankNode, Term, Triple};
-#[cfg(feature = "goal")]
 use std::collections::{BTreeMap, HashSet};
-#[cfg(feature = "goal")]
 use std::path::Path;
-#[cfg(feature = "goal")]
 use tempfile::TempDir;
 
 /// Names -> bytes of the entries in a data dir (a subdirectory is recorded as `name/`).
-#[cfg(feature = "goal")]
 type Listing = BTreeMap<String, Vec<u8>>;
 
-#[cfg(feature = "goal")]
 struct RunEnv {
     _root: TempDir,
     data: std::path::PathBuf,
@@ -27,7 +20,6 @@ struct RunEnv {
     before: Option<Listing>,
 }
 
-#[cfg(feature = "goal")]
 fn listing(dir: &Path) -> Option<Listing> {
     if !dir.exists() {
         return None;
@@ -45,7 +37,6 @@ fn listing(dir: &Path) -> Option<Listing> {
     Some(map)
 }
 
-#[cfg(feature = "goal")]
 fn run_in_fresh_env(store: Option<&Path>, args: &[&str]) -> RunEnv {
     let root = tempfile::tempdir().unwrap();
     let data = root.path().join("data");
@@ -83,7 +74,6 @@ fn run_in_fresh_env(store: Option<&Path>, args: &[&str]) -> RunEnv {
 }
 
 /// Asserts exit 0, empty stderr and one compact JSON line; returns the parsed JSON.
-#[cfg(feature = "goal")]
 fn json_line(run: &RunEnv, what: &str, args: &[&str]) -> serde_json::Value {
     assert_eq!(run.code, Some(0), "{what} {args:?}: {}", run.stderr);
     assert_eq!(run.stderr, "", "{what} {args:?}");
@@ -99,7 +89,6 @@ fn json_line(run: &RunEnv, what: &str, args: &[&str]) -> serde_json::Value {
 }
 
 /// All triples of a tool-managed Turtle file (empty when absent). Panics on a blank node.
-#[cfg(feature = "goal")]
 fn file_triples(listing: &Option<Listing>, name: &str) -> HashSet<Triple> {
     let Some(bytes) = listing.as_ref().and_then(|l| l.get(name)) else {
         return HashSet::new();
@@ -117,7 +106,6 @@ fn file_triples(listing: &Option<Listing>, name: &str) -> HashSet<Triple> {
     set
 }
 
-#[cfg(feature = "goal")]
 fn managed_triples(listing: &Option<Listing>) -> HashSet<Triple> {
     let mut all = file_triples(listing, "vocabulary.ttl");
     all.extend(file_triples(listing, "resources.ttl"));
@@ -125,7 +113,6 @@ fn managed_triples(listing: &Option<Listing>) -> HashSet<Triple> {
 }
 
 /// Parses an N-Triples line as exactly one triple whose `format!("{t} .")` is the string.
-#[cfg(feature = "goal")]
 fn parse_change(triple: &str) -> Triple {
     let parsed: Vec<Triple> = oxttl::NTriplesParser::new()
         .for_slice(triple.as_bytes())
@@ -155,7 +142,6 @@ fn parse_change(triple: &str) -> Triple {
 /// formatting-only rewrite counts as no change); every other file is byte-identical after the
 /// real run; no blank node occurs in either file set or in `changes` (panics if one does).
 /// Returns the dry run's JSON.
-#[cfg(feature = "goal")]
 pub fn assert_dry_run_matches_real_run(store: Option<&Path>, args: &[&str]) -> serde_json::Value {
     let mut dry_args = vec!["--json", "--dry-run"];
     dry_args.extend_from_slice(args);

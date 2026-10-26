@@ -7,19 +7,13 @@
 //! Every run sets HALI_DATA_DIR / XDG_CONFIG_HOME / HOME to temp dirs and clears the rest
 //! of the environment, so the real store and config are never read.
 
-#[cfg(feature = "goal")]
 mod support;
 
-#[cfg(feature = "goal")]
 use assert_cmd::Command;
-#[cfg(feature = "goal")]
 use std::ffi::OsStr;
-#[cfg(feature = "goal")]
 use std::path::{Path, PathBuf};
-#[cfg(feature = "goal")]
 use tempfile::TempDir;
 
-#[cfg(feature = "goal")]
 struct Env {
     _root: TempDir,
     data: PathBuf,
@@ -27,7 +21,6 @@ struct Env {
     home: PathBuf,
 }
 
-#[cfg(feature = "goal")]
 #[derive(Debug, PartialEq)]
 struct Out {
     code: Option<i32>,
@@ -36,7 +29,6 @@ struct Out {
 }
 
 /// What is in the data dir: nothing (absent), a file, or the entries with their bytes.
-#[cfg(feature = "goal")]
 #[derive(Debug, PartialEq)]
 enum State {
     Absent,
@@ -44,7 +36,6 @@ enum State {
     Dir(Vec<(String, Vec<u8>)>),
 }
 
-#[cfg(feature = "goal")]
 impl Env {
     /// The data dir does not exist yet.
     fn new() -> Env {
@@ -130,14 +121,12 @@ impl Env {
     }
 }
 
-#[cfg(feature = "goal")]
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name)
 }
 
-#[cfg(feature = "goal")]
 fn json(s: &str) -> serde_json::Value {
     assert_eq!(
         s.matches('\n').count(),
@@ -149,7 +138,6 @@ fn json(s: &str) -> serde_json::Value {
 
 // ---- criterion 1: the payload, byte for byte -----------------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_add_dry_run_json() {
     let env = Env::new();
@@ -159,7 +147,6 @@ fn concept_add_dry_run_json() {
     insta::assert_snapshot!("concept_add_dry_run_json", out.stdout);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_add_dry_run_json_existing_scheme() {
     let env = Env::with_fixture("store");
@@ -169,7 +156,6 @@ fn concept_add_dry_run_json_existing_scheme() {
     insta::assert_snapshot!("concept_add_dry_run_json_existing_scheme", out.stdout);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_add_dry_run_json_suffix_order() {
     // The scheme owns `topics`, so the Concept is `topics-2`; its triples sort before the
@@ -183,7 +169,6 @@ fn concept_add_dry_run_json_suffix_order() {
 
 // ---- criterion 2: nothing is written -------------------------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn dry_run_creates_no_data_dir() {
     for mode in [Some("--json"), None] {
@@ -198,7 +183,6 @@ fn dry_run_creates_no_data_dir() {
     }
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn dry_run_leaves_store_bytes_unchanged() {
     for name in ["store", "noncanonical"] {
@@ -219,7 +203,6 @@ fn dry_run_leaves_store_bytes_unchanged() {
 
 // ---- criterion 3: errors are the real run's ------------------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn shacl_violation_reported_in_dry_run() {
     let dry_env = Env::with_fixture("shacl/extension-shape");
@@ -239,14 +222,12 @@ fn shacl_violation_reported_in_dry_run() {
 }
 
 /// How to set up the data dir of an error case.
-#[cfg(feature = "goal")]
 enum Setup {
     Fixture(&'static str),
     BrokenVocabulary,
     DataDirIsAFile,
 }
 
-#[cfg(feature = "goal")]
 impl Setup {
     fn env(&self) -> Env {
         match self {
@@ -270,7 +251,6 @@ impl Setup {
     }
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn dry_run_errors_match_the_real_run() {
     let cases: Vec<(&str, Setup, &str, i32)> = vec![
@@ -333,7 +313,6 @@ fn dry_run_errors_match_the_real_run() {
 
 // ---- criterion 4: the changes equal what a real run writes ---------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn dry_run_changes_equal_real_run_writes() {
     let cases: Vec<(Option<PathBuf>, &str)> = vec![
@@ -357,7 +336,6 @@ fn dry_run_changes_equal_real_run_writes() {
 
 // ---- criterion 6: text mode ----------------------------------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_add_dry_run_text() {
     let env = Env::new();
@@ -375,7 +353,6 @@ fn concept_add_dry_run_text() {
     assert_eq!(env.state(), State::Absent);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn dry_run_text_escapes_labels() {
     let label = "abc\u{202E}def";
@@ -415,7 +392,6 @@ fn dry_run_text_escapes_labels() {
 
 // ---- criterion 7: the flag ----------------------------------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn dry_run_flag_position_is_free() {
     let variants: Vec<Vec<&str>> = vec![
@@ -438,7 +414,6 @@ fn dry_run_flag_position_is_free() {
     assert_eq!(json(&outs[0].stdout)["dry_run"], true);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn dry_run_on_read_only_commands_changes_nothing() {
     let commands: Vec<Vec<&str>> = vec![
@@ -479,7 +454,6 @@ fn dry_run_on_read_only_commands_changes_nothing() {
     }
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn dry_run_usage_errors_exit_2() {
     // A guard: these exit 2 with and without the flag.
@@ -500,7 +474,6 @@ fn dry_run_usage_errors_exit_2() {
     assert_eq!(env.state(), State::Absent);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn help_lists_dry_run() {
     let env = Env::new();
