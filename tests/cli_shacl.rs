@@ -3,16 +3,11 @@
 //! Every run sets HALI_DATA_DIR / XDG_CONFIG_HOME / HOME to temp dirs and clears the rest
 //! of the environment, so the real store and config are never read.
 
-#[cfg(feature = "goal")]
 use assert_cmd::Command;
-#[cfg(feature = "goal")]
 use std::ffi::OsStr;
-#[cfg(feature = "goal")]
 use std::path::{Path, PathBuf};
-#[cfg(feature = "goal")]
 use tempfile::TempDir;
 
-#[cfg(feature = "goal")]
 struct Env {
     _root: TempDir,
     data: PathBuf,
@@ -20,14 +15,12 @@ struct Env {
     home: PathBuf,
 }
 
-#[cfg(feature = "goal")]
 struct Out {
     code: Option<i32>,
     stdout: String,
     stderr: String,
 }
 
-#[cfg(feature = "goal")]
 impl Env {
     /// Copies every file of tests/fixtures/<name> into the data dir.
     fn with_fixture(name: &str) -> Env {
@@ -88,14 +81,12 @@ impl Env {
     }
 }
 
-#[cfg(feature = "goal")]
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name)
 }
 
-#[cfg(feature = "goal")]
 fn json(s: &str) -> serde_json::Value {
     assert_eq!(
         s.matches('\n').count(),
@@ -105,10 +96,8 @@ fn json(s: &str) -> serde_json::Value {
     serde_json::from_str(s).unwrap_or_else(|e| panic!("not JSON ({e}): {s:?}"))
 }
 
-#[cfg(feature = "goal")]
 const FIX: &str = "Fix the data or the extensions.ttl shapes the violations point at, then retry.";
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_add_refused_by_extension_shape() {
     let env = Env::with_fixture("shacl/extension-shape");
@@ -125,7 +114,6 @@ fn concept_add_refused_by_extension_shape() {
     assert_eq!(env.files(), before, "nothing is written");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn shacl_violation_json_envelope() {
     let env = Env::with_fixture("shacl/extension-shape");
@@ -140,7 +128,6 @@ fn shacl_violation_json_envelope() {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn shacl_violation_text_two_lines() {
     let env = Env::with_fixture("shacl/extension-shape");
@@ -156,7 +143,6 @@ fn shacl_violation_text_two_lines() {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn shacl_violation_details_are_capped() {
     let env = Env::with_fixture("shacl/many-violations");
@@ -178,7 +164,6 @@ fn shacl_violation_details_are_capped() {
     assert_eq!(env.files(), before);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_add_with_rudof_panic_is_shapes_invalid_and_writes_nothing() {
     for name in [
@@ -208,7 +193,6 @@ fn concept_add_with_rudof_panic_is_shapes_invalid_and_writes_nothing() {
     }
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_add_with_extension_referencing_core_shape_is_shapes_invalid_and_writes_nothing() {
     for name in [

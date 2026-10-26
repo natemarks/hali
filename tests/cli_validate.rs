@@ -3,16 +3,11 @@
 //! Every run sets HALI_DATA_DIR / XDG_CONFIG_HOME / HOME to temp dirs and clears the rest
 //! of the environment, so the real store and config are never read.
 
-#[cfg(feature = "goal")]
 use assert_cmd::Command;
-#[cfg(feature = "goal")]
 use std::ffi::OsStr;
-#[cfg(feature = "goal")]
 use std::path::{Path, PathBuf};
-#[cfg(feature = "goal")]
 use tempfile::TempDir;
 
-#[cfg(feature = "goal")]
 struct Env {
     _root: TempDir,
     data: PathBuf,
@@ -20,14 +15,12 @@ struct Env {
     home: PathBuf,
 }
 
-#[cfg(feature = "goal")]
 struct Out {
     code: Option<i32>,
     stdout: String,
     stderr: String,
 }
 
-#[cfg(feature = "goal")]
 impl Env {
     fn new() -> Env {
         let root = tempfile::tempdir().unwrap();
@@ -93,14 +86,12 @@ impl Env {
     }
 }
 
-#[cfg(feature = "goal")]
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name)
 }
 
-#[cfg(feature = "goal")]
 fn json(s: &str) -> serde_json::Value {
     assert_eq!(
         s.matches('\n').count(),
@@ -110,19 +101,16 @@ fn json(s: &str) -> serde_json::Value {
     serde_json::from_str(s).unwrap_or_else(|e| panic!("not JSON ({e}): {s:?}"))
 }
 
-#[cfg(feature = "goal")]
 const MIXED_ROWS: &str = "hali:nolabel\thali:ConceptPrefLabelShape\t-\tA Concept needs exactly one skos:prefLabel per language\n\
     hali:orphan\thali:ConceptInSchemeShape\t-\tA Concept must be in the hali:topics scheme\n\
     hali:topics\thali:LabelUniqueShape\thali:ml2\tlabel \"Machine  Learning\" is used by more than one Concept\n\
     hali:topics\thali:LabelUniqueShape\thali:ml\tlabel \"machine learning\" is used by more than one Concept\n\
     hali:twolabels\thali:ConceptPrefLabelShape\t-\tA Concept needs exactly one skos:prefLabel per language\n";
 
-#[cfg(feature = "goal")]
 const FIX: &str = "Fix the data or the extensions.ttl shapes the violations point at, then retry.";
 
 // ---- criteria 9, 10: conformance and violations ----------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn validate_json_conforming() {
     let env = Env::with_fixture("store");
@@ -132,7 +120,6 @@ fn validate_json_conforming() {
     insta::assert_snapshot!("validate_json_conforming", out.stdout);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn validate_text_conforming() {
     let env = Env::with_fixture("store");
@@ -142,7 +129,6 @@ fn validate_text_conforming() {
     assert_eq!(out.stderr, "");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn validate_json_violations() {
     let env = Env::with_fixture("shacl/mixed");
@@ -152,7 +138,6 @@ fn validate_json_violations() {
     insta::assert_snapshot!("validate_json_violations_error", out.stderr);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn validate_text_violations() {
     let env = Env::with_fixture("shacl/mixed");
@@ -165,7 +150,6 @@ fn validate_text_violations() {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn validate_json_paged() {
     let env = Env::with_fixture("shacl/mixed");
@@ -189,7 +173,6 @@ fn validate_json_paged() {
     assert_eq!(err["error"]["details"]["total"], 5);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn validate_text_paged_prints_a_note() {
     let env = Env::with_fixture("shacl/mixed");
@@ -205,7 +188,6 @@ fn validate_text_paged_prints_a_note() {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn validate_limit_zero_is_a_usage_error() {
     let env = Env::with_fixture("store");
@@ -225,7 +207,6 @@ fn validate_limit_zero_is_a_usage_error() {
 
 // ---- criterion 11: read-only, store problems -------------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn validate_on_missing_store_conforms_and_creates_nothing() {
     let env = Env::new();
@@ -237,7 +218,6 @@ fn validate_on_missing_store_conforms_and_creates_nothing() {
     assert!(!env.data.exists(), "reads never create anything");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn validate_writes_nothing() {
     for name in ["shacl/mixed", "store"] {
@@ -252,7 +232,6 @@ fn validate_writes_nothing() {
     }
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn validate_unparseable_store_exits_3() {
     let broken = "@prefix hali: <https://w3id.org/hali#> .\n\
@@ -274,7 +253,6 @@ fn validate_unparseable_store_exits_3() {
 
 // ---- criterion 3: SHAPES_INVALID ---------------------------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn invalid_extension_shapes_exit_3() {
     for name in ["shacl/extension-invalid", "shacl/extension-sparql"] {
@@ -321,7 +299,6 @@ fn invalid_extension_shapes_exit_3() {
 
 // ---- criterion 12: stored control characters are escaped ---------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn validate_text_escapes_control_characters() {
     let env = Env::with_fixture("shacl/hostile-duplicate");
@@ -361,7 +338,6 @@ fn validate_text_escapes_control_characters() {
 
 // ---- round 1 review: reachable SPARQL, core-shape overrides, rudof panics ---------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn refused_extensions_exit_3_without_echoing_the_file() {
     for name in [
@@ -395,7 +371,6 @@ fn refused_extensions_exit_3_without_echoing_the_file() {
     }
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn rudof_panic_is_shapes_invalid_with_no_leak() {
     for name in [
@@ -423,7 +398,6 @@ fn rudof_panic_is_shapes_invalid_with_no_leak() {
     }
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn triple_term_extensions_are_shapes_invalid_with_empty_stdout() {
     for name in [
@@ -442,7 +416,6 @@ fn triple_term_extensions_are_shapes_invalid_with_empty_stdout() {
     }
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn extension_alignment_validates_clean() {
     let env = Env::with_fixture("shacl/extension-alignment");
@@ -450,7 +423,6 @@ fn extension_alignment_validates_clean() {
     assert_eq!(out.code, Some(0), "{}", out.stderr);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn core_sh_extension_shape_still_validates() {
     let env = Env::with_fixture("shacl/extension-shape");
@@ -460,7 +432,6 @@ fn core_sh_extension_shape_still_validates() {
 
 // ---- round 2 security: extensions may not reference core shapes as objects ----------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn extension_referencing_a_core_shape_as_object_exits_3_without_echo() {
     for name in [
@@ -483,7 +454,6 @@ fn extension_referencing_a_core_shape_as_object_exits_3_without_echo() {
     }
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn extension_objects_naming_core_ttl_and_vocabulary_terms_validate_clean() {
     let env = Env::with_fixture("shacl/extension-core-term-objects");

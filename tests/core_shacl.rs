@@ -14,31 +14,19 @@
 //!   `"SHAPES_INVALID"`; `Error::exit_code()` is 1 and 3.
 //!   Fixtures sit in tests/fixtures/shacl/<name>/.
 
-#[cfg(feature = "goal")]
 use hali::core::validate::{Report, Violation, validate};
-#[cfg(feature = "goal")]
 use hali::core::{Context, FixedClock, SeededIdGen, concept};
-#[cfg(feature = "goal")]
 use hali::storage::Store;
-#[cfg(feature = "goal")]
 use oxigraph::model::{GraphNameRef, Literal, NamedNode, NamedNodeRef, QuadRef};
-#[cfg(feature = "goal")]
 use std::collections::BTreeSet;
-#[cfg(feature = "goal")]
 use std::path::{Path, PathBuf};
 
-#[cfg(feature = "goal")]
 const HALI: &str = "https://w3id.org/hali#";
-#[cfg(feature = "goal")]
 const SH: &str = "http://www.w3.org/ns/shacl#";
-#[cfg(feature = "goal")]
 const SKOS: &str = "http://www.w3.org/2004/02/skos/core#";
-#[cfg(feature = "goal")]
 const CORE_GRAPH: &str = "https://w3id.org/hali/graph/core";
-#[cfg(feature = "goal")]
 const VOCABULARY_GRAPH: &str = "https://w3id.org/hali/graph/vocabulary";
 
-#[cfg(feature = "goal")]
 fn ctx() -> Context {
     Context::new(
         "en",
@@ -47,19 +35,16 @@ fn ctx() -> Context {
     )
 }
 
-#[cfg(feature = "goal")]
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name)
 }
 
-#[cfg(feature = "goal")]
 fn load(name: &str) -> Store {
     hali::storage::load(&fixture(name)).unwrap()
 }
 
-#[cfg(feature = "goal")]
 fn report(name: &str) -> Report {
     match validate(&load(name), 0, 1000) {
         Ok(report) => report,
@@ -68,7 +53,6 @@ fn report(name: &str) -> Report {
 }
 
 /// Every field of a violation, in output order, null as "".
-#[cfg(feature = "goal")]
 fn key(v: &Violation) -> Vec<String> {
     vec![
         v.focus_node.clone(),
@@ -82,7 +66,6 @@ fn key(v: &Violation) -> Vec<String> {
 }
 
 /// The sort key the contract names: (focus_node, shape, path, constraint, value, message).
-#[cfg(feature = "goal")]
 fn sort_key(v: &Violation) -> Vec<String> {
     let k = key(v);
     vec![
@@ -95,13 +78,11 @@ fn sort_key(v: &Violation) -> Vec<String> {
     ]
 }
 
-#[cfg(feature = "goal")]
 fn nt(local: &str) -> String {
     format!("<{HALI}{local}>")
 }
 
 /// Asserts the report holds exactly one violation of `shape` / `constraint` and returns it.
-#[cfg(feature = "goal")]
 fn only(report: &Report, shape: &str, constraint: &str) -> Violation {
     assert!(!report.conforms);
     assert_eq!(
@@ -119,7 +100,6 @@ fn only(report: &Report, shape: &str, constraint: &str) -> Violation {
 }
 
 /// Inserts a conforming-looking Concept straight into the store, bypassing `concept::add`.
-#[cfg(feature = "goal")]
 fn insert_concept(store: &Store, id: &str, label: &str) {
     let graph = NamedNode::new_unchecked(VOCABULARY_GRAPH);
     let subject = NamedNode::new_unchecked(format!("{HALI}{id}"));
@@ -141,14 +121,12 @@ fn insert_concept(store: &Store, id: &str, label: &str) {
 }
 
 /// Every quad of the store, as a sorted set of strings.
-#[cfg(feature = "goal")]
 fn snapshot(store: &Store) -> BTreeSet<String> {
     store.iter().map(|q| q.unwrap().to_string()).collect()
 }
 
 // ---- criterion 1: core shapes embedded, named, in the core graph -----------------------
 
-#[cfg(feature = "goal")]
 fn shape_triples() -> Vec<oxigraph::model::Triple> {
     oxttl::TurtleParser::new()
         .for_slice(hali::ontology::SHAPES_TTL.as_bytes())
@@ -156,7 +134,6 @@ fn shape_triples() -> Vec<oxigraph::model::Triple> {
         .collect()
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn shapes_are_embedded_and_loaded_into_the_core_graph() {
     let triples = shape_triples();
@@ -184,7 +161,6 @@ fn shapes_are_embedded_and_loaded_into_the_core_graph() {
     }
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn core_shapes_have_no_blank_nodes() {
     for t in shape_triples() {
@@ -201,7 +177,6 @@ fn core_shapes_have_no_blank_nodes() {
 
 // ---- criterion 2: extension shapes ----------------------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn extension_shape_conforming_store_conforms() {
     let r = report("shacl/extension-shape");
@@ -216,7 +191,6 @@ fn extension_shape_conforming_store_conforms() {
     assert_eq!(r.next_offset, None);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn extension_shapes_are_applied() {
     let store = load("shacl/extension-shape");
@@ -231,7 +205,6 @@ fn extension_shapes_are_applied() {
 
 // ---- criterion 3: SHAPES_INVALID ------------------------------------------------------
 
-#[cfg(feature = "goal")]
 fn assert_shapes_invalid(name: &str) {
     let store = load(name);
     let before = snapshot(&store);
@@ -257,13 +230,11 @@ fn assert_shapes_invalid(name: &str) {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn uncompilable_extension_shapes_are_shapes_invalid() {
     assert_shapes_invalid("shacl/extension-invalid");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn sparql_in_extension_shapes_is_shapes_invalid() {
     assert_shapes_invalid("shacl/extension-sparql");
@@ -271,7 +242,6 @@ fn sparql_in_extension_shapes_is_shapes_invalid() {
 
 // ---- criterion 4: every Concept in hali:topics -----------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_not_in_topics_violates_in_scheme_shape() {
     let r = report("shacl/not-in-scheme");
@@ -282,7 +252,6 @@ fn concept_not_in_topics_violates_in_scheme_shape() {
     assert_eq!(v.message, "A Concept must be in the hali:topics scheme");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_in_other_scheme_violates_in_scheme_shape() {
     let r = report("shacl/other-scheme");
@@ -293,7 +262,6 @@ fn concept_in_other_scheme_violates_in_scheme_shape() {
 
 // ---- criterion 5: exactly one prefLabel per language ------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_without_pref_label_violates_pref_label_shape() {
     let r = report("shacl/no-pref-label");
@@ -306,7 +274,6 @@ fn concept_without_pref_label_violates_pref_label_shape() {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn two_pref_labels_in_one_language_violate_pref_label_shape() {
     let r = report("shacl/two-pref-labels");
@@ -319,7 +286,6 @@ fn two_pref_labels_in_one_language_violate_pref_label_shape() {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn pref_labels_in_two_languages_conform() {
     let r = report("shacl/pref-labels-two-languages");
@@ -333,7 +299,6 @@ fn pref_labels_in_two_languages_conform() {
 
 // ---- criterion 6: labels unique across Concepts ----------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn duplicate_labels_violate_label_unique_shape() {
     let r = report("shacl/duplicate-label");
@@ -374,7 +339,6 @@ fn duplicate_labels_violate_label_unique_shape() {
     assert_eq!(got, want);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn same_label_in_other_language_conforms() {
     let r = report("shacl/same-label-other-language");
@@ -388,7 +352,6 @@ fn same_label_in_other_language_conforms() {
 
 // ---- criterion 7: every shape has a conforming and a violating fixture -----------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn conforming_fixtures_have_no_violations() {
     for name in [
@@ -411,14 +374,12 @@ fn conforming_fixtures_have_no_violations() {
 }
 
 /// The shapes that can appear in a result, with a fixture that violates each.
-#[cfg(feature = "goal")]
 const SHAPE_FIXTURES: [(&str, &str); 3] = [
     ("ConceptInSchemeShape", "shacl/not-in-scheme"),
     ("ConceptPrefLabelShape", "shacl/no-pref-label"),
     ("LabelUniqueShape", "shacl/duplicate-label"),
 ];
 
-#[cfg(feature = "goal")]
 #[test]
 fn every_core_shape_has_a_violating_fixture() {
     use oxigraph::model::{NamedOrBlankNode, Term};
@@ -464,7 +425,6 @@ fn every_core_shape_has_a_violating_fixture() {
 
 // ---- criterion 8: deterministic order and paging ---------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn report_order_is_deterministic() {
     let store = load("shacl/mixed");
@@ -494,7 +454,6 @@ fn report_order_is_deterministic() {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn report_pages() {
     let store = load("shacl/mixed");
@@ -528,7 +487,6 @@ fn report_pages() {
 
 // ---- criteria 13-15: mutations ----------------------------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_add_refused_by_shacl_leaves_store_unchanged() {
     let mut store = load("shacl/extension-shape");
@@ -551,7 +509,6 @@ fn concept_add_refused_by_shacl_leaves_store_unchanged() {
     assert_eq!(snapshot(&store), before, "the in-memory store is unchanged");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_add_refused_on_pre_existing_violation() {
     let mut store = load("shacl/duplicate-label");
@@ -564,7 +521,6 @@ fn concept_add_refused_on_pre_existing_violation() {
     assert_eq!(snapshot(&store), before);
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn label_taken_is_checked_before_shacl() {
     // "ML" is the altLabel of hali:ml, and a new Concept would also lack the required alias.
@@ -576,57 +532,48 @@ fn label_taken_is_checked_before_shacl() {
 
 // ---- round 1 review: reachable SPARQL, core-shape overrides, rudof panics ---------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn extension_reusing_core_sparql_constraint_is_shapes_invalid() {
     assert_shapes_invalid("shacl/extension-reuses-core-sparql");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn extension_attaching_prefixes_to_core_constraint_is_shapes_invalid() {
     assert_shapes_invalid("shacl/extension-core-prefixes");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn extension_sh_declare_alone_is_shapes_invalid() {
     assert_shapes_invalid("shacl/extension-declare");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn extension_sh_prefix_alone_is_shapes_invalid() {
     assert_shapes_invalid("shacl/extension-prefix");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn extension_sh_namespace_alone_is_shapes_invalid() {
     assert_shapes_invalid("shacl/extension-namespace");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn extension_deactivating_a_core_shape_is_shapes_invalid() {
     assert_shapes_invalid("shacl/extension-deactivates-core-shape");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn rudof_panic_on_valid_extension_shape_is_shapes_invalid() {
     // A valid SHACL Core sh:disjoint shape over an inverse path makes shacl-0.3.35 panic.
     assert_shapes_invalid("shacl/extension-panics");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn triple_term_in_extension_is_shapes_invalid() {
     assert_shapes_invalid("shacl/extension-triple-term");
     assert_shapes_invalid("shacl/extension-triple-term-hasvalue");
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn extension_alignment_with_core_terms_still_conforms() {
     let mut store = load("shacl/extension-alignment");
@@ -641,7 +588,6 @@ fn extension_alignment_with_core_terms_still_conforms() {
 
 // ---- round 2 security: extensions may not reference core shapes as objects ----------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn extension_referencing_a_core_shape_as_object_is_shapes_invalid() {
     for name in [
@@ -654,7 +600,6 @@ fn extension_referencing_a_core_shape_as_object_is_shapes_invalid() {
     }
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn extension_objects_naming_core_ttl_and_vocabulary_terms_still_conform() {
     let store = load("shacl/extension-core-term-objects");
