@@ -113,8 +113,8 @@ fn json(s: &str) -> serde_json::Value {
 #[cfg(feature = "goal")]
 const MIXED_ROWS: &str = "hali:nolabel\thali:ConceptPrefLabelShape\t-\tA Concept needs exactly one skos:prefLabel per language\n\
     hali:orphan\thali:ConceptInSchemeShape\t-\tA Concept must be in the hali:topics scheme\n\
-    hali:topics\thali:LabelUniqueShape\thali:ml\tlabel \"machine learning\" is used by more than one Concept\n\
     hali:topics\thali:LabelUniqueShape\thali:ml2\tlabel \"Machine  Learning\" is used by more than one Concept\n\
+    hali:topics\thali:LabelUniqueShape\thali:ml\tlabel \"machine learning\" is used by more than one Concept\n\
     hali:twolabels\thali:ConceptPrefLabelShape\t-\tA Concept needs exactly one skos:prefLabel per language\n";
 
 #[cfg(feature = "goal")]
@@ -181,7 +181,7 @@ fn validate_json_paged() {
     assert_eq!(results.len(), 2);
     assert_eq!(results[0]["focus_node"], "<https://w3id.org/hali#orphan>");
     assert_eq!(results[1]["focus_node"], "<https://w3id.org/hali#topics>");
-    assert_eq!(results[1]["value"], "<https://w3id.org/hali#ml>");
+    assert_eq!(results[1]["value"], "<https://w3id.org/hali#ml2>");
 
     let err = json(&out.stderr);
     assert_eq!(err["error"]["rule"], "SHACL_VIOLATION");
