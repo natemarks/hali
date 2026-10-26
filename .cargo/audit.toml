@@ -1,0 +1,21 @@
+# cargo-audit exceptions. Each entry needs a justification and a condition for removal.
+# Approved by the maintainer when issue #3 was driven (PR #35).
+
+[advisories]
+ignore = [
+    # quick-xml 0.37.5: RUSTSEC-2026-0194 (quadratic run time on duplicate
+    # attribute names) and RUSTSEC-2026-0195 (unbounded namespace allocation in
+    # NsReader). Both are fixed in quick-xml >= 0.41.
+    #
+    # Why they are accepted: quick-xml reaches hali only through oxigraph 0.5.13
+    # -> oxrdfio -> oxrdfxml (RDF/XML parsing) and -> sparesults (SPARQL XML
+    # results). hali parses Turtle with oxttl and never calls either: `hali query`
+    # reads SPARQL and emits W3C JSON results or Turtle, never XML (spec §9.9).
+    # oxrdfxml and sparesults require quick-xml 0.37, and no oxigraph feature
+    # setting removes them, so the version cannot be bumped from here.
+    #
+    # Remove when oxigraph releases a version that depends on quick-xml >= 0.41.
+    # Until then, nothing in hali may parse RDF/XML or SPARQL XML input.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]

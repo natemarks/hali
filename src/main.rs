@@ -1,3 +1,3 @@
-fn main() {
-    hali::cli::run();
+fn main() -> std::process::ExitCode {
+    hali::cli::run()
 }

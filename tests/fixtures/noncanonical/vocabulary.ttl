@@ -1,0 +1,19 @@
+@prefix h: <https://w3id.org/hali#> .
+PREFIX sk: <http://www.w3.org/2004/02/skos/core#>
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+# hand-edited, out of order, different prefix names
+h:topics <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> sk:ConceptScheme .
+
+h:semantic-web sk:prefLabel "semantic web"@en ;
+    sk:inScheme h:topics ;
+    a sk:Concept .
+h:ml
+    sk:prefLabel "machine learning"@en ;
+    sk:inScheme h:topics ; a sk:Concept .
+h:linked-data sk:prefLabel "linked data"@en ; sk:broader h:semantic-web ;
+    sk:altLabel "linkeddata"@en , "LD"@en ;
+    sk:inScheme h:topics ; a sk:Concept .
+<https://w3id.org/hali#a-first> sk:prefLabel "Zulu"@en ; sk:inScheme h:topics ; a sk:Concept .
+h:Paper rdfs:subClassOf h:Resource ;
+    rdfs:label "Paper"@en ;
+    a <http://www.w3.org/2002/07/owl#Class> .

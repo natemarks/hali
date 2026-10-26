@@ -1,0 +1,5 @@
+---
+source: tests/cli_concept.rs
+expression: out.stdout
+---
+{"schema_version":1,"results":[{"id":"a-first","label":"Zulu","alt_labels":[],"broader":[]},{"id":"linked-data","label":"linked data","alt_labels":["LD","linkeddata"],"broader":["semantic-web"]},{"id":"ml","label":"machine learning","alt_labels":[],"broader":[]},{"id":"semantic-web","label":"semantic web","alt_labels":[],"broader":[]}],"total":4,"truncated":false,"next_offset":null}
