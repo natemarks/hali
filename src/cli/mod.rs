@@ -2,7 +2,7 @@
 
 use crate::core::{self, Change, Clock, Context, Error, IdGen, Op, concept, validate};
 use crate::{ontology, paths, storage};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use serde::Serialize;
 use std::process::ExitCode;
 
@@ -111,6 +111,11 @@ fn compact(term: &str) -> String {
 
 fn env(key: &str) -> Option<String> {
     std::env::var(key).ok()
+}
+
+/// The clap command tree, for tests that enumerate every subcommand.
+pub fn command() -> clap::Command {
+    Cli::command()
 }
 
 pub fn run() -> ExitCode {
