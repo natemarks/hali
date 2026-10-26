@@ -59,6 +59,23 @@ fn parse_limit(limit: &str) -> Result<usize, String> {
     }
 }
 
+/// Makes stored text safe to print: control and bidi/format characters become a visible
+/// `\u{..}` escape, so a hand-edited store cannot drive the terminal or forge rows.
+fn printable(text: &str) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        let unsafe_char = c.is_control()
+            || matches!(c, '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}');
+        if unsafe_char {
+            write!(out, "\\u{{{:x}}}", u32::from(c)).expect("writing to a String");
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn env(key: &str) -> Option<String> {
     std::env::var(key).ok()
 }
@@ -104,7 +121,11 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                     concept: &added,
                 });
             } else {
-                println!("added concept {} \"{}\"", added.id, added.label);
+                println!(
+                    "added concept {} \"{}\"",
+                    printable(&added.id),
+                    printable(&added.label)
+                );
             }
         }
         Command::Concept(ConceptCommand::List { limit, offset }) => {
@@ -116,7 +137,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 });
             } else {
                 for c in &page.results {
-                    println!("{}\t{}", c.id, c.label);
+                    println!("{}\t{}", printable(&c.id), printable(&c.label));
                 }
                 if let Some(next) = page.next_offset {
                     eprintln!(
@@ -237,4 +258,18 @@ fn is_rfc3339_utc(s: &str) -> bool {
         .all(|&(i, c)| b[i] == c)
         && matches!(fields, Some((_, mo, d, h, mi, sec))
             if (1..=12).contains(&mo) && (1..=31).contains(&d) && h < 24 && mi < 60 && sec < 60)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::printable;
+
+    #[test]
+    fn printable_escapes_controls_and_keeps_letters() {
+        assert_eq!(
+            printable("a\u{1b}b\u{7f}\u{85}\u{202e}\n"),
+            "a\\u{1b}b\\u{7f}\\u{85}\\u{202e}\\u{a}"
+        );
+        assert_eq!(printable("café 日本"), "café 日本");
+    }
 }

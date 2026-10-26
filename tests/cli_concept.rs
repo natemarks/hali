@@ -507,3 +507,54 @@ fn list_limit_one_and_offset_zero_still_work() {
     assert_eq!(out.code, Some(0), "{}", out.stderr);
     assert_eq!(out.stdout.lines().count(), 1, "{}", out.stdout);
 }
+
+const HOSTILE: &str = "x\u{1b}]0;pwned\u{7}\nfake-id\tfake label";
+
+/// A store whose extensions.ttl holds a Concept with a hostile prefLabel.
+fn hostile_store() -> Env {
+    let env = Env::with_store();
+    let path = env.data.join("extensions.ttl");
+    let mut ttl = std::fs::read_to_string(&path).unwrap();
+    ttl.push_str(
+        "\nhali:evil a skos:Concept ;\n\tskos:inScheme hali:topics ;\n\
+         \tskos:prefLabel \"x\\u001b]0;pwned\\u0007\\nfake-id\\tfake label\"@en .\n",
+    );
+    std::fs::write(&path, ttl).unwrap();
+    env
+}
+
+#[test]
+fn list_text_escapes_control_characters_in_labels() {
+    let env = hostile_store();
+    let json = env.run(["concept", "list", "--json"]);
+    assert_eq!(json.code, Some(0), "{}", json.stderr);
+    let v: serde_json::Value = serde_json::from_str(&json.stdout).unwrap();
+    let results = v["results"].as_array().unwrap();
+    assert!(
+        results.iter().any(|c| c["label"] == HOSTILE),
+        "JSON keeps the raw label: {}",
+        json.stdout
+    );
+    assert!(json.stdout.contains("\\u001b"), "{}", json.stdout);
+
+    let out = env.run(["concept", "list"]);
+    assert_eq!(out.code, Some(0), "{}", out.stderr);
+    assert_eq!(
+        out.stdout.lines().count(),
+        results.len(),
+        "{:?}",
+        out.stdout
+    );
+    for line in out.stdout.lines() {
+        assert_eq!(line.matches('\t').count(), 1, "{line:?}");
+    }
+    assert!(
+        out.stdout
+            .bytes()
+            .all(|b| b >= 0x20 || b == b'\t' || b == b'\n'),
+        "{:?}",
+        out.stdout
+    );
+    assert!(out.stdout.contains("\\u{1b}"), "{:?}", out.stdout);
+    assert!(out.stdout.contains("\\u{a}"), "{:?}", out.stdout);
+}
