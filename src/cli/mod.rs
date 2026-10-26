@@ -37,7 +37,7 @@ enum ConceptCommand {
     /// List Concepts, sorted by label
     List {
         /// Maximum number of results
-        #[arg(long, default_value_t = 50, allow_hyphen_values = true)]
+        #[arg(long, default_value_t = 50, allow_hyphen_values = true, value_parser = parse_limit)]
         limit: usize,
         /// Results to skip
         #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
@@ -48,6 +48,15 @@ enum ConceptCommand {
 /// Rejects bad labels at parse time, so they are usage errors in clap's format.
 fn parse_label(label: &str) -> Result<String, String> {
     core::normalise_label(label).map_err(|e| e.message)
+}
+
+/// A limit below 1 would page forever (`next_offset` would never advance).
+fn parse_limit(limit: &str) -> Result<usize, String> {
+    match limit.parse::<usize>() {
+        Ok(0) => Err("the limit must be at least 1".to_string()),
+        Ok(n) => Ok(n),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 fn env(key: &str) -> Option<String> {

@@ -485,3 +485,25 @@ fn add_topics_does_not_turn_the_scheme_into_a_concept() {
         "{ttl}"
     );
 }
+
+#[test]
+fn list_limit_zero_is_a_usage_error() {
+    let env = Env::new();
+    for args in [
+        vec!["concept", "list", "--limit", "0"],
+        vec!["concept", "list", "--limit", "0", "--json"],
+    ] {
+        let out = env.run(&args);
+        assert_eq!(out.code, Some(2), "{args:?}: {}", out.stderr);
+        assert_eq!(out.stdout, "", "{args:?}");
+        assert!(out.stderr.contains("limit"), "{args:?}: {}", out.stderr);
+    }
+}
+
+#[test]
+fn list_limit_one_and_offset_zero_still_work() {
+    let env = Env::with_store();
+    let out = env.run(["concept", "list", "--limit", "1", "--offset", "0"]);
+    assert_eq!(out.code, Some(0), "{}", out.stderr);
+    assert_eq!(out.stdout.lines().count(), 1, "{}", out.stdout);
+}
