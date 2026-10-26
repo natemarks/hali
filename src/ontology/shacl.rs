@@ -100,11 +100,14 @@ fn run(store: &Store, extra: &[Quad]) -> Result<Vec<Violation>, ShapesInvalid> {
         .collect())
 }
 
-/// Refuses an extensions graph that holds a `REFUSED` predicate, or says anything about a named
-/// subject of the embedded core shapes (it could switch them off or reuse their SPARQL), so that
-/// only hali's own query text reaches rudof's SPARQL evaluator.
+/// Refuses an extensions graph that holds a `REFUSED` predicate, says anything about a named
+/// subject of the embedded core shapes (it could switch them off or reuse their SPARQL), or names
+/// one as an object (it could run their SPARQL on its own focus nodes), so that only hali's own
+/// query text, with hali's own focus nodes, reaches rudof's SPARQL evaluator. It also refuses a
+/// triple term as an object: rudof prints such a term on stdout before panicking.
 fn refuse(store: &Store) -> Result<(), ShapesInvalid> {
     let extensions = NamedNodeRef::new_unchecked(EXTENSIONS_GRAPH);
+    let mut core_shapes = Vec::new();
     for triple in TurtleParser::new().for_slice(SHAPES_TTL) {
         let subject = triple
             .expect("the embedded shapes are valid Turtle")
@@ -122,6 +125,16 @@ fn refuse(store: &Store) -> Result<(), ShapesInvalid> {
             if found {
                 return Err(ShapesInvalid);
             }
+            core_shapes.push(subject);
+        }
+    }
+    for quad in store.quads_for_pattern(None, None, None, Some(extensions.into())) {
+        match quad.expect("reading the in-memory store").object {
+            Term::Triple(_) => return Err(ShapesInvalid),
+            Term::NamedNode(object) if core_shapes.contains(&object) => {
+                return Err(ShapesInvalid);
+            }
+            _ => {}
         }
     }
     for predicate in REFUSED {
