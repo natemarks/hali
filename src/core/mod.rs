@@ -3,6 +3,7 @@
 
 pub mod concept;
 pub mod config;
+pub mod validate;
 
 use crate::storage;
 use serde::Serialize;
@@ -185,6 +186,52 @@ impl Error {
     /// A bad argument. Usage errors are not rules, so the rule is plain `USAGE`.
     pub fn usage(message: &str) -> Error {
         Error::new("USAGE", 2, message.to_string(), json!({}))
+    }
+
+    /// At most this many violation records go into a `SHACL_VIOLATION` error.
+    const MAX_VIOLATIONS: usize = 10;
+
+    /// The store (with a mutation's change, if `mutation`) does not conform to the shapes.
+    /// `violations` are sorted; the first few are listed.
+    pub fn shacl_violation(
+        violations: &[validate::Violation],
+        total: usize,
+        mutation: bool,
+    ) -> Error {
+        let count = match total {
+            1 => "1 SHACL violation".to_string(),
+            n => format!("{n} SHACL violations"),
+        };
+        let message = if mutation {
+            format!("the change would leave {count} in the store; nothing was written")
+        } else {
+            format!("the store has {count}")
+        };
+        let listed: Vec<&validate::Violation> =
+            violations.iter().take(Error::MAX_VIOLATIONS).collect();
+        let truncated = listed.len() < total;
+        let mut err = Error::new(
+            "SHACL_VIOLATION",
+            1,
+            message,
+            json!({"violations": listed, "total": total, "truncated": truncated}),
+        )
+        .fix("Fix the data or the extensions.ttl shapes the violations point at, then retry.");
+        if mutation {
+            err.suggested_command = Some("hali validate".to_string());
+        }
+        err
+    }
+
+    /// The shapes cannot be used. The message gives no reason: rudof's text is never echoed.
+    pub fn shapes_invalid() -> Error {
+        Error::new(
+            "SHAPES_INVALID",
+            3,
+            "extensions.ttl has SHACL shapes that hali cannot use".to_string(),
+            json!({"file": "extensions.ttl"}),
+        )
+        .fix("Fix or remove the shapes in extensions.ttl; hali applies SHACL Core shapes from it.")
     }
 
     pub fn label_taken(label: &str, language: &str, concept: &str) -> Error {
