@@ -1,0 +1,5 @@
+---
+source: tests/cli_dry_run.rs
+expression: out.stdout
+---
+{"schema_version":1,"concept":{"id":"machine-learning","label":"machine learning","alt_labels":[],"broader":[]},"dry_run":true,"changes":[{"op":"add","triple":"<https://w3id.org/hali#machine-learning> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2004/02/skos/core#Concept> ."},{"op":"add","triple":"<https://w3id.org/hali#machine-learning> <http://www.w3.org/2004/02/skos/core#inScheme> <https://w3id.org/hali#topics> ."},{"op":"add","triple":"<https://w3id.org/hali#machine-learning> <http://www.w3.org/2004/02/skos/core#prefLabel> \"machine learning\"@en ."},{"op":"add","triple":"<https://w3id.org/hali#topics> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2004/02/skos/core#ConceptScheme> ."}]}

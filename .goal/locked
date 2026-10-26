@@ -1,0 +1,5 @@
+tests/core_dry_run.rs
+tests/cli_dry_run.rs
+tests/support/mod.rs
+tests/fixtures/
+tests/snapshots/
