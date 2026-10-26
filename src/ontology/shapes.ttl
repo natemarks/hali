@@ -1,0 +1,36 @@
+@prefix hali: <https://w3id.org/hali#> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# hali core SHACL shapes (embedded in the binary, spec §3.1). Named shapes only: no blank nodes.
+
+hali:ConceptShape a sh:NodeShape ;
+    sh:targetClass skos:Concept ;
+    sh:property hali:ConceptInSchemeShape , hali:ConceptPrefLabelShape .
+
+hali:ConceptInSchemeShape a sh:PropertyShape ;
+    sh:path skos:inScheme ;
+    sh:hasValue hali:topics ;
+    sh:message "A Concept must be in the hali:topics scheme"@en .
+
+hali:ConceptPrefLabelShape a sh:PropertyShape ;
+    sh:path skos:prefLabel ;
+    sh:minCount 1 ;
+    sh:uniqueLang true ;
+    sh:message "A Concept needs exactly one skos:prefLabel per language"@en .
+
+# Labels are unique across Concepts per language, folded for case and whitespace. The results
+# point at the scheme, with the clashing Concept as the value: one per (Concept, label) pair.
+hali:LabelUniqueShape a sh:NodeShape ;
+    sh:targetNode hali:topics ;
+    sh:sparql hali:LabelUniqueConstraint .
+
+hali:LabelUniqueConstraint a sh:SPARQLConstraint ;
+    sh:message "label \"{?label}\" is used by more than one Concept"@en ;
+    sh:select """PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+SELECT $this ?value ?label WHERE {
+  { SELECT ?key ?lg WHERE { ?c a skos:Concept ; skos:inScheme $this ; skos:prefLabel|skos:altLabel ?l .
+      BIND(LCASE(REPLACE(REPLACE(STR(?l), "\\\\s+", " "), "^ | $", "")) AS ?key) BIND(LCASE(LANG(?l)) AS ?lg) }
+    GROUP BY ?key ?lg HAVING (COUNT(DISTINCT ?c) > 1) }
+  ?value a skos:Concept ; skos:inScheme $this ; skos:prefLabel|skos:altLabel ?label .
+  FILTER (LCASE(REPLACE(REPLACE(STR(?label), "\\\\s+", " "), "^ | $", "")) = ?key && LCASE(LANG(?label)) = ?lg) }""" .

@@ -1,7 +1,7 @@
 //! The CLI adapter: clap definitions, wiring of the seams, text/JSON rendering, exit codes.
 
-use crate::core::{self, Clock, Context, Error, IdGen, concept};
-use crate::{paths, storage};
+use crate::core::{self, Clock, Context, Error, IdGen, concept, validate};
+use crate::{ontology, paths, storage};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 use std::process::ExitCode;
@@ -24,6 +24,15 @@ enum Command {
     /// Manage the Concepts of the topics scheme
     #[command(subcommand)]
     Concept(ConceptCommand),
+    /// Check the store against the SHACL shapes; writes nothing
+    Validate {
+        /// Maximum number of results
+        #[arg(long, default_value_t = 50, allow_hyphen_values = true, value_parser = parse_limit)]
+        limit: usize,
+        /// Results to skip
+        #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
+        offset: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -74,6 +83,27 @@ fn printable(text: &str) -> String {
         }
     }
     out
+}
+
+/// An IRI (bare or in N-Triples form) as a prefixed name from the fixed prefix table, when its
+/// local part is a plain name; anything else is returned as given.
+fn compact(term: &str) -> String {
+    let iri = term
+        .strip_prefix('<')
+        .and_then(|t| t.strip_suffix('>'))
+        .unwrap_or(term);
+    for (name, ns) in ontology::PREFIXES {
+        if let Some(local) = iri.strip_prefix(ns) {
+            let plain = !local.is_empty()
+                && local
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_'));
+            if plain {
+                return format!("{name}:{local}");
+            }
+        }
+    }
+    term.to_string()
 }
 
 fn env(key: &str) -> Option<String> {
@@ -148,6 +178,38 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 }
             }
         }
+        Command::Validate { limit, offset } => {
+            let report = validate::validate(&store, *offset, *limit)?;
+            if cli.json {
+                print_json(&ValidateOutput {
+                    schema_version: SCHEMA_VERSION,
+                    report: &report,
+                });
+            } else if report.conforms {
+                println!("the store conforms to the SHACL shapes");
+            } else {
+                let dash = || "-".to_string();
+                for v in &report.results {
+                    println!(
+                        "{}\t{}\t{}\t{}",
+                        printable(&compact(&v.focus_node)),
+                        printable(&v.shape.as_deref().map_or_else(dash, compact)),
+                        printable(&v.value.as_deref().map_or_else(dash, compact)),
+                        printable(&v.message)
+                    );
+                }
+                if let Some(next) = report.next_offset {
+                    eprintln!(
+                        "note: showing {} of {}; next: --offset {next}",
+                        report.results.len(),
+                        report.total
+                    );
+                }
+            }
+            if let Some(err) = report.error() {
+                return Err(err);
+            }
+        }
     }
     Ok(())
 }
@@ -163,6 +225,13 @@ struct ListOutput<'a> {
     schema_version: u32,
     #[serde(flatten)]
     page: &'a concept::Page,
+}
+
+#[derive(Serialize)]
+struct ValidateOutput<'a> {
+    schema_version: u32,
+    #[serde(flatten)]
+    report: &'a validate::Report,
 }
 
 #[derive(Serialize)]
@@ -262,7 +331,22 @@ fn is_rfc3339_utc(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::printable;
+    use super::{compact, printable};
+
+    #[test]
+    fn compact_uses_the_prefix_table_for_plain_local_names() {
+        assert_eq!(compact("<https://w3id.org/hali#ml>"), "hali:ml");
+        assert_eq!(
+            compact("https://w3id.org/hali#LabelUniqueShape"),
+            "hali:LabelUniqueShape"
+        );
+        assert_eq!(
+            compact("<https://w3id.org/hali#a/b>"),
+            "<https://w3id.org/hali#a/b>"
+        );
+        assert_eq!(compact("<http://example.org/x>"), "<http://example.org/x>");
+        assert_eq!(compact("\"x\"@en"), "\"x\"@en");
+    }
 
     #[test]
     fn printable_escapes_controls_and_keeps_letters() {

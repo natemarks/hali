@@ -1,7 +1,12 @@
 //! The embedded core ontology and the vocabulary terms the code relies on.
 
+pub mod shacl;
+
 /// The core ontology, built into the binary (spec §3.1, ADR-0003).
 pub const CORE_TTL: &str = include_str!("core.ttl");
+
+/// The core SHACL shapes, built into the binary and loaded into the core graph (spec §2.7).
+pub const SHAPES_TTL: &str = include_str!("shapes.ttl");
 
 /// The `hali:` namespace.
 pub const HALI: &str = "https://w3id.org/hali#";

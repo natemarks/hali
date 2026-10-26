@@ -1,0 +1,27 @@
+@prefix hali: <https://w3id.org/hali#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+hali:c01 a skos:Concept ;
+	skos:prefLabel "concept 01"@en .
+hali:c02 a skos:Concept ;
+	skos:prefLabel "concept 02"@en .
+hali:c03 a skos:Concept ;
+	skos:prefLabel "concept 03"@en .
+hali:c04 a skos:Concept ;
+	skos:prefLabel "concept 04"@en .
+hali:c05 a skos:Concept ;
+	skos:prefLabel "concept 05"@en .
+hali:c06 a skos:Concept ;
+	skos:prefLabel "concept 06"@en .
+hali:c07 a skos:Concept ;
+	skos:prefLabel "concept 07"@en .
+hali:c08 a skos:Concept ;
+	skos:prefLabel "concept 08"@en .
+hali:c09 a skos:Concept ;
+	skos:prefLabel "concept 09"@en .
+hali:c10 a skos:Concept ;
+	skos:prefLabel "concept 10"@en .
+hali:c11 a skos:Concept ;
+	skos:prefLabel "concept 11"@en .
+hali:c12 a skos:Concept ;
+	skos:prefLabel "concept 12"@en .

@@ -1,0 +1,6 @@
+@prefix hali: <https://w3id.org/hali#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+hali:topics a skos:ConceptScheme .
+hali:orphan a skos:Concept ;
+	skos:prefLabel "orphan"@en .

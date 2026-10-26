@@ -9,10 +9,22 @@ ignore = [
     #
     # Why they are accepted: quick-xml reaches hali only through oxigraph 0.5.13
     # -> oxrdfio -> oxrdfxml (RDF/XML parsing) and -> sparesults (SPARQL XML
-    # results). hali parses Turtle with oxttl and never calls either: `hali query`
-    # reads SPARQL and emits W3C JSON results or Turtle, never XML (spec §9.9).
-    # oxrdfxml and sparesults require quick-xml 0.37, and no oxigraph feature
-    # setting removes them, so the version cannot be bumped from here.
+    # results), and, since #7, through two crates under rudof's `shacl` 0.3.35:
+    # rudof_rdf, which depends on oxrdfio, oxrdfxml and sparesults directly and
+    # forces oxigraph's `http-client` feature on, and sparql_service (pulled in by
+    # shacl's `sparql` feature), which also depends on oxrdfio and sparesults.
+    # hali parses Turtle with oxttl and never calls either: `hali query` reads
+    # SPARQL and emits W3C JSON results or Turtle, never XML (spec §9.9). rudof's
+    # SPARQL evaluator keeps an HTTP SERVICE handler hali cannot disable, so hali
+    # keeps user text away from it: only the embedded shapes' query runs, with
+    # hali's own focus nodes. extensions.ttl is refused if it has a triple with
+    # sh:select, sh:ask, sh:sparql, sh:prefixes, sh:declare, sh:prefix or
+    # sh:namespace, a triple about a named subject of the core shapes (no
+    # modifying them), a triple whose object names a core shape (no reusing
+    # them on other focus nodes), or an RDF 1.2 triple term as an object.
+    # So rudof never runs a query that could fetch SPARQL XML. oxrdfxml and
+    # sparesults require quick-xml 0.37, and no oxigraph feature setting removes
+    # them, so the version cannot be bumped from here.
     #
     # Remove when oxigraph releases a version that depends on quick-xml >= 0.41.
     # Until then, nothing in hali may parse RDF/XML or SPARQL XML input.

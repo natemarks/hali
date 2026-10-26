@@ -3,7 +3,7 @@
 //! Each source sits in its own named graph, `https://w3id.org/hali/graph/{name}`; nothing is
 //! put in the default graph.
 
-use crate::ontology::{CORE_TTL, PREFIXES};
+use crate::ontology::{CORE_TTL, PREFIXES, SHAPES_TTL};
 use oxigraph::model::vocab::rdf;
 use oxigraph::model::{GraphNameRef, NamedNode, Triple};
 use oxttl::{TurtleParser, TurtleSerializer};
@@ -41,6 +41,12 @@ impl File {
     }
 }
 
+/// The named graph of the embedded core ontology and shapes.
+pub const CORE_GRAPH: &str = "https://w3id.org/hali/graph/core";
+
+/// The named graph of the hand-written `extensions.ttl`.
+pub const EXTENSIONS_GRAPH: &str = "https://w3id.org/hali/graph/extensions";
+
 fn graph(name: &str) -> NamedNode {
     NamedNode::new_unchecked(format!("https://w3id.org/hali/graph/{name}"))
 }
@@ -57,15 +63,17 @@ pub enum Error {
     },
 }
 
-/// Loads the embedded core ontology and the files in `dir`. A missing dir or file is an
-/// empty graph; nothing is created.
+/// Loads the embedded core ontology and shapes, and the files in `dir`. A missing dir or file
+/// is an empty graph; nothing is created.
 pub fn load(dir: &Path) -> Result<Store, Error> {
     let io = |path: &Path| Error::Io {
         path: path.to_path_buf(),
     };
     let store = Store::new().map_err(|_| io(dir))?;
-    parse_into(&store, CORE_TTL.as_bytes(), graph("core").as_ref().into())
-        .expect("the embedded core ontology is valid Turtle");
+    for core in [CORE_TTL, SHAPES_TTL] {
+        parse_into(&store, core.as_bytes(), graph("core").as_ref().into())
+            .expect("the embedded core ontology and shapes are valid Turtle");
+    }
 
     match fs::metadata(dir) {
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(store),

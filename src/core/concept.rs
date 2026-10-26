@@ -1,12 +1,10 @@
 //! Concepts in the `hali:topics` scheme (spec §2.3): `concept add` and `concept list`.
 
-use super::{Context, Error, normalise_label, slug};
+use super::{Context, Error, normalise_label, slug, validate};
 use crate::ontology::{HALI, TOPICS, skos};
 use crate::storage::{File, Store};
 use oxigraph::model::vocab::rdf;
-use oxigraph::model::{
-    Literal, NamedNode, NamedNodeRef, NamedOrBlankNodeRef, QuadRef, Term, TermRef,
-};
+use oxigraph::model::{Literal, NamedNode, NamedNodeRef, NamedOrBlankNodeRef, Quad, Term, TermRef};
 use serde::Serialize;
 use std::collections::BTreeSet;
 
@@ -29,7 +27,8 @@ pub struct Page {
 }
 
 /// Adds a Concept with `label` as its prefLabel, minting its IRI from the label's slug.
-/// Writes the `hali:topics` scheme too, the first time.
+/// Writes the `hali:topics` scheme too, the first time. Refused, with the store unchanged, if
+/// the store would not conform to the SHACL shapes.
 pub fn add(ctx: &Context, store: &mut Store, label: &str) -> Result<Concept, Error> {
     let label = normalise_label(label)?;
     let key = fold(&label);
@@ -64,14 +63,19 @@ pub fn add(ctx: &Context, store: &mut Store, label: &str) -> Result<Concept, Err
     let literal = Literal::new_language_tagged_literal(&label, ctx.language())
         .map_err(|_| Error::usage("the configured language is not a valid language tag"))?;
     let graph = File::Vocabulary.graph();
-    for (s, p, o) in [
+    let quads: Vec<Quad> = [
         (&topics, rdf::TYPE, term(skos::CONCEPT_SCHEME)),
         (&concept, rdf::TYPE, term(skos::CONCEPT)),
         (&concept, named(skos::IN_SCHEME), Term::from(topics.clone())),
         (&concept, named(skos::PREF_LABEL), Term::from(literal)),
-    ] {
+    ]
+    .into_iter()
+    .map(|(s, p, o)| Quad::new(s.clone(), p, o, graph.clone()))
+    .collect();
+    validate::guard(store, &quads)?;
+    for quad in &quads {
         store
-            .insert(QuadRef::new(s, p, &o, &graph))
+            .insert(quad)
             .expect("inserting into the in-memory store");
     }
 
