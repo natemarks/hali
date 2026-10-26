@@ -13,9 +13,12 @@ ignore = [
     # crate), which depends on oxrdfxml and sparesults directly and forces
     # oxigraph's `http-client` feature on. hali parses Turtle with oxttl and never
     # calls either: `hali query` reads SPARQL and emits W3C JSON results or
-    # Turtle, never XML (spec §9.9), and SHACL-SPARQL (`sh:select`/`sh:ask`) in
-    # extensions.ttl is refused, so rudof never runs a user query that could
-    # fetch SPARQL XML. hali's own shapes query only the in-memory data. oxrdfxml and
+    # Turtle, never XML (spec §9.9). rudof's SPARQL evaluator keeps an HTTP
+    # SERVICE handler hali cannot disable, so hali keeps user text away from it:
+    # only the embedded shapes' query runs, extensions.ttl triples with
+    # sh:select, sh:ask, sh:sparql, sh:prefixes, sh:declare, sh:prefix or
+    # sh:namespace are refused, and extensions.ttl cannot modify the core shapes.
+    # So rudof never runs a query that could fetch SPARQL XML. oxrdfxml and
     # sparesults require quick-xml 0.37, and no oxigraph feature setting removes
     # them, so the version cannot be bumped from here.
     #

@@ -4,8 +4,10 @@
 //! hali never hands Turtle text to rudof's parsers: the triples are copied from the store. The
 //! shapes graph is the core graph plus the extensions graph; the data graph is every graph.
 
+use super::SHAPES_TTL;
 use crate::storage::{CORE_GRAPH, EXTENSIONS_GRAPH, Store};
-use oxigraph::model::{NamedNodeRef, NamedOrBlankNodeRef, Quad, QuadRef, Term};
+use oxigraph::model::{NamedNodeRef, NamedOrBlankNode, NamedOrBlankNodeRef, Quad, QuadRef, Term};
+use oxttl::TurtleParser;
 use rudof_rdf::rdf_core::term::Object;
 use rudof_rdf::rdf_impl::OxigraphInMemory;
 use serde::Serialize;
@@ -18,6 +20,18 @@ use shacl::validator::store::Graph;
 use shacl::validator::{ShaclConfig, ShaclValidationMode};
 
 const SH: &str = "http://www.w3.org/ns/shacl#";
+
+/// `sh:` predicates refused in `extensions.ttl`: they carry or shape SPARQL text, and rudof's
+/// SPARQL evaluator has an HTTP `SERVICE` handler hali cannot switch off.
+const REFUSED: [&str; 7] = [
+    "select",
+    "ask",
+    "sparql",
+    "prefixes",
+    "declare",
+    "prefix",
+    "namespace",
+];
 
 /// One SHACL validation result, as `--json` prints it.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -44,6 +58,21 @@ pub struct ShapesInvalid;
 /// Validates the store, plus `extra` quads not (yet) in it, against the shapes in the store.
 /// The results are unordered.
 pub fn validate(store: &Store, extra: &[Quad]) -> Result<Vec<Violation>, ShapesInvalid> {
+    refuse(store)?;
+    quietly(|| run(store, extra))
+}
+
+/// Runs the rudof calls with the panic hook silenced, turning a panic into `ShapesInvalid`. The
+/// default hook would print the panic message, which can echo stored text, to stderr.
+fn quietly<T>(f: impl FnOnce() -> Result<T, ShapesInvalid>) -> Result<T, ShapesInvalid> {
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    std::panic::set_hook(hook);
+    result.unwrap_or(Err(ShapesInvalid))
+}
+
+fn run(store: &Store, extra: &[Quad]) -> Result<Vec<Violation>, ShapesInvalid> {
     let schema = shapes(store)?;
 
     let mut data = OxigraphInMemory::new();
@@ -71,11 +100,31 @@ pub fn validate(store: &Store, extra: &[Quad]) -> Result<Vec<Violation>, ShapesI
         .collect())
 }
 
-/// Parses and compiles the shapes graph. SHACL-SPARQL from `extensions.ttl` is refused: it could
-/// reach the network (SERVICE) and parse SPARQL XML results.
-fn shapes(store: &Store) -> Result<IRSchema, ShapesInvalid> {
+/// Refuses an extensions graph that holds a `REFUSED` predicate, or says anything about a named
+/// subject of the embedded core shapes (it could switch them off or reuse their SPARQL), so that
+/// only hali's own query text reaches rudof's SPARQL evaluator.
+fn refuse(store: &Store) -> Result<(), ShapesInvalid> {
     let extensions = NamedNodeRef::new_unchecked(EXTENSIONS_GRAPH);
-    for predicate in ["select", "ask"] {
+    for triple in TurtleParser::new().for_slice(SHAPES_TTL) {
+        let subject = triple
+            .expect("the embedded shapes are valid Turtle")
+            .subject;
+        if let NamedOrBlankNode::NamedNode(subject) = subject {
+            let found = store
+                .quads_for_pattern(
+                    Some(subject.as_ref().into()),
+                    None,
+                    None,
+                    Some(extensions.into()),
+                )
+                .next()
+                .is_some();
+            if found {
+                return Err(ShapesInvalid);
+            }
+        }
+    }
+    for predicate in REFUSED {
         let predicate = format!("{SH}{predicate}");
         let found = store
             .quads_for_pattern(
@@ -90,7 +139,11 @@ fn shapes(store: &Store) -> Result<IRSchema, ShapesInvalid> {
             return Err(ShapesInvalid);
         }
     }
+    Ok(())
+}
 
+/// Parses and compiles the shapes graph.
+fn shapes(store: &Store) -> Result<IRSchema, ShapesInvalid> {
     let mut rdf = OxigraphInMemory::new();
     for graph in [CORE_GRAPH, EXTENSIONS_GRAPH] {
         let graph = NamedNodeRef::new_unchecked(graph);
