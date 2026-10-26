@@ -1,0 +1,10 @@
+@prefix hali: <https://w3id.org/hali#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+hali:topics a skos:ConceptScheme .
+hali:evil-a a skos:Concept ;
+	skos:inScheme hali:topics ;
+	skos:prefLabel "x\u001b]0;pwned\u0007\nfake-id\tfake label"@en .
+hali:evil-b a skos:Concept ;
+	skos:inScheme hali:topics ;
+	skos:prefLabel "x\u001b]0;pwned\u0007\nfake-id\tfake label"@en .

@@ -1,0 +1,11 @@
+@prefix hali: <https://w3id.org/hali#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix ex: <http://example.org/shapes#> .
+
+ex:Query a sh:NodeShape ;
+	sh:targetClass skos:Concept ;
+	sh:sparql ex:QueryConstraint .
+ex:QueryConstraint sh:message "never fires"@en ;
+	sh:select """SELECT $this WHERE { $this ?p ?o . FILTER(false) }""" .

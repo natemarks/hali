@@ -1,0 +1,5 @@
+---
+source: tests/cli_shacl.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"SHACL_VIOLATION","message":"the change would leave 1 SHACL violation in the store; nothing was written","details":{"violations":[{"focus_node":"<https://w3id.org/hali#deep-learning>","shape":"http://example.org/shapes#AltLabelRequired","path":"http://www.w3.org/2004/02/skos/core#altLabel","constraint":"http://www.w3.org/ns/shacl#MinCountConstraintComponent","severity":"Violation","value":null,"message":"Every Concept needs an alias"}],"total":1,"truncated":false},"suggested_fix":"Fix the data or the extensions.ttl shapes the violations point at, then retry.","suggested_command":"hali validate"}}

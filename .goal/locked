@@ -1,0 +1,5 @@
+tests/core_shacl.rs
+tests/cli_validate.rs
+tests/cli_shacl.rs
+tests/fixtures/
+tests/snapshots/
