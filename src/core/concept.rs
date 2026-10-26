@@ -1,6 +1,6 @@
 //! Concepts in the `hali:topics` scheme (spec §2.3): `concept add` and `concept list`.
 
-use super::{Context, Error, normalise_label, slug, validate};
+use super::{Context, Error, Mutation, insert_all, normalise_label, slug, validate};
 use crate::ontology::{HALI, TOPICS, skos};
 use crate::storage::{File, Store};
 use oxigraph::model::vocab::rdf;
@@ -29,7 +29,7 @@ pub struct Page {
 /// Adds a Concept with `label` as its prefLabel, minting its IRI from the label's slug.
 /// Writes the `hali:topics` scheme too, the first time. Refused, with the store unchanged, if
 /// the store would not conform to the SHACL shapes.
-pub fn add(ctx: &Context, store: &mut Store, label: &str) -> Result<Concept, Error> {
+pub fn add(ctx: &Context, store: &mut Store, label: &str) -> Result<Mutation<Concept>, Error> {
     let label = normalise_label(label)?;
     let key = fold(&label);
     for concept in concepts(store) {
@@ -73,17 +73,16 @@ pub fn add(ctx: &Context, store: &mut Store, label: &str) -> Result<Concept, Err
     .map(|(s, p, o)| Quad::new(s.clone(), p, o, graph.clone()))
     .collect();
     validate::guard(store, &quads)?;
-    for quad in &quads {
-        store
-            .insert(quad)
-            .expect("inserting into the in-memory store");
-    }
+    let changes = insert_all(store, &quads);
 
-    Ok(Concept {
-        id,
-        label,
-        alt_labels: Vec::new(),
-        broader: Vec::new(),
+    Ok(Mutation {
+        value: Concept {
+            id,
+            label,
+            alt_labels: Vec::new(),
+            broader: Vec::new(),
+        },
+        changes,
     })
 }
 

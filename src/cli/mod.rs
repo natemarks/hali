@@ -1,6 +1,6 @@
 //! The CLI adapter: clap definitions, wiring of the seams, text/JSON rendering, exit codes.
 
-use crate::core::{self, Clock, Context, Error, IdGen, concept, validate};
+use crate::core::{self, Change, Clock, Context, Error, IdGen, Op, concept, validate};
 use crate::{ontology, paths, storage};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
@@ -15,6 +15,9 @@ struct Cli {
     /// Print JSON instead of text
     #[arg(long, global = true)]
     json: bool,
+    /// Show the triple changes a mutating command would make, and write nothing
+    #[arg(long, global = true)]
+    dry_run: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -144,18 +147,37 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
     match &cli.command {
         Command::Concept(ConceptCommand::Add { label }) => {
             let added = concept::add(&ctx, &mut store, label)?;
-            storage::save(&dir, &store, storage::File::Vocabulary)?;
-            if cli.json {
-                print_json(&AddOutput {
-                    schema_version: SCHEMA_VERSION,
-                    concept: &added,
-                });
+            let concept = &added.value;
+            let output = AddOutput {
+                schema_version: SCHEMA_VERSION,
+                concept,
+            };
+            if cli.dry_run {
+                if cli.json {
+                    print_json(&DryRunOutput {
+                        payload: output,
+                        dry_run: true,
+                        changes: &added.changes,
+                    });
+                } else {
+                    println!(
+                        "would add concept {} \"{}\"",
+                        printable(&concept.id),
+                        printable(&concept.label)
+                    );
+                    print_changes(&added.changes);
+                }
             } else {
-                println!(
-                    "added concept {} \"{}\"",
-                    printable(&added.id),
-                    printable(&added.label)
-                );
+                storage::save(&dir, &store, storage::File::Vocabulary)?;
+                if cli.json {
+                    print_json(&output);
+                } else {
+                    println!(
+                        "added concept {} \"{}\"",
+                        printable(&concept.id),
+                        printable(&concept.label)
+                    );
+                }
             }
         }
         Command::Concept(ConceptCommand::List { limit, offset }) => {
@@ -218,6 +240,27 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
 struct AddOutput<'a> {
     schema_version: u32,
     concept: &'a concept::Concept,
+}
+
+/// A mutating command's payload under `--dry-run`: the real payload, then the changes.
+#[derive(Serialize)]
+struct DryRunOutput<'a, P: Serialize> {
+    #[serde(flatten)]
+    payload: P,
+    dry_run: bool,
+    changes: &'a [Change],
+}
+
+/// The `+ `/`- ` lines of a dry run, then the note on stderr.
+fn print_changes(changes: &[Change]) {
+    for change in changes {
+        let sign = match change.op {
+            Op::Add => '+',
+            Op::Remove => '-',
+        };
+        println!("{sign} {}", printable(&change.triple));
+    }
+    eprintln!("note: dry run; nothing was written");
 }
 
 #[derive(Serialize)]

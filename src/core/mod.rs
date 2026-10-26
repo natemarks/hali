@@ -6,6 +6,7 @@ pub mod config;
 pub mod validate;
 
 use crate::storage;
+use oxigraph::model::{Quad, TripleRef};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::cell::Cell;
@@ -147,6 +148,57 @@ impl Context {
     pub fn next_id(&self) -> String {
         self.ids.next_id()
     }
+}
+
+/// Whether a change adds a triple to a tool-managed file or removes one from it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Op {
+    Add,
+    Remove,
+}
+
+/// One triple a mutation adds or removes, as canonical N-Triples (spec §9.5). The field order
+/// is the sort order.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct Change {
+    pub op: Op,
+    pub triple: String,
+}
+
+/// The result of a mutating operation: what it produced, and the triples it changed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Mutation<T> {
+    pub value: T,
+    pub changes: Vec<Change>,
+}
+
+/// Inserts the quads the store does not hold yet (in their own graph) and returns them as
+/// `Op::Add` changes, sorted and without duplicates.
+pub(crate) fn insert_all(store: &storage::Store, quads: &[Quad]) -> Vec<Change> {
+    let mut changes = Vec::new();
+    for quad in quads {
+        if store.contains(quad).expect("reading the in-memory store") {
+            continue;
+        }
+        store
+            .insert(quad)
+            .expect("inserting into the in-memory store");
+        changes.push(Change {
+            op: Op::Add,
+            triple: format!(
+                "{} .",
+                TripleRef::new(
+                    quad.subject.as_ref(),
+                    quad.predicate.as_ref(),
+                    quad.object.as_ref()
+                )
+            ),
+        });
+    }
+    changes.sort();
+    changes.dedup();
+    changes
 }
 
 /// A structured error (spec §9.4). It serializes as the `error` member of the envelope.
