@@ -398,14 +398,47 @@ fn refused_extensions_exit_3_without_echoing_the_file() {
 #[cfg(feature = "goal")]
 #[test]
 fn rudof_panic_is_shapes_invalid_with_no_leak() {
-    let env = Env::with_fixture("shacl/extension-panics");
-    for args in [vec!["validate", "--json"], vec!["validate"]] {
-        let out = env.run(args);
-        assert_eq!(out.code, Some(3), "{}", out.stderr);
-        assert_eq!(out.stdout, "");
-        for leak in ["TermAsSubject", "panicked", "\"a\"", "disjoint.rs"] {
-            assert!(!out.stderr.contains(leak), "{leak}: {}", out.stderr);
+    for name in [
+        "shacl/extension-panics",
+        "shacl/extension-triple-term",
+        "shacl/extension-triple-term-hasvalue",
+    ] {
+        let env = Env::with_fixture(name);
+        for args in [vec!["validate", "--json"], vec!["validate"]] {
+            let out = env.run(args);
+            assert_eq!(out.code, Some(3), "{name}: {}", out.stderr);
+            assert_eq!(out.stdout, "", "{name}");
+            for leak in [
+                "TermAsSubject",
+                "panicked",
+                "\"a\"",
+                "disjoint.rs",
+                "Unexpected code",
+                "term_to_value",
+                "example.org",
+            ] {
+                assert!(!out.stderr.contains(leak), "{name} {leak}: {}", out.stderr);
+            }
         }
+    }
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn triple_term_extensions_are_shapes_invalid_with_empty_stdout() {
+    for name in [
+        "shacl/extension-triple-term",
+        "shacl/extension-triple-term-hasvalue",
+    ] {
+        let env = Env::with_fixture(name);
+        let out = env.run(["validate", "--json"]);
+        assert_eq!(out.code, Some(3), "{name}: {}", out.stderr);
+        assert_eq!(out.stdout, "", "{name}");
+        assert_eq!(
+            json(&out.stderr)["error"]["rule"],
+            "SHAPES_INVALID",
+            "{name}"
+        );
     }
 }
 

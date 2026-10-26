@@ -117,3 +117,12 @@ Maintainer decisions after review; each is a goal-owned check and a contract cha
 | 23 | rudof panic -> SHAPES_INVALID, no leak, nothing written | `core_shacl.rs::rudof_panic_on_valid_extension_shape_is_shapes_invalid`; `cli_validate.rs::rudof_panic_is_shapes_invalid_with_no_leak`; `cli_shacl.rs::concept_add_with_rudof_panic_is_shapes_invalid_and_writes_nothing` (`extension-panics`) | test process panics at `disjoint.rs:38`; `Some(101) == Some(3)` |
 | 24 | Alignments and Core user shapes stay allowed (guards, pass before the fix) | `core_shacl.rs::extension_alignment_with_core_terms_still_conforms`; `cli_validate.rs::extension_alignment_validates_clean`, `::core_sh_extension_shape_still_validates` | passes before the fix |
 | 25 | Goal tests lint-clean | `.goal/checks/clippy-goal.sh` | passes once `.expect_err` is used |
+
+## Round 2 review additions
+
+Maintainer-approved contract: an `extensions.ttl` graph containing any quad whose OBJECT is an RDF 1.2 triple term (at any depth: list member, `sh:hasValue`, reified) is `SHAPES_INVALID` (exit 3) before any rudof call. Reason: rudof (shacl-0.3.35 `term_to_value`) `println!`s the term text on stdout before a `todo!()` panic, which the panic hook does not silence; this echoed extension text and broke "stdout is empty on error". stdout stays empty and stderr holds only the fixed SHAPES_INVALID output, on `validate` and every mutation.
+
+| # | Criterion | Check | Expected failure before the fix |
+|---|---|---|---|
+| 26 | Triple-term extensions refused, stdout empty, no leak | `cli_validate.rs::rudof_panic_is_shapes_invalid_with_no_leak` (now also `extension-triple-term`, `-hasvalue`; stdout empty for `extension-panics` too), `::triple_term_extensions_are_shapes_invalid_with_empty_stdout`; `core_shacl.rs::triple_term_in_extension_is_shapes_invalid` (guard: validate already returns Err because the panic is caught; stdout of the in-process test cannot be asserted) | stdout non-empty (`Unexpected code in term_to_value ...`) |
+| 27 | Mutation with triple-term extension writes nothing, stdout empty | `cli_shacl.rs::concept_add_with_rudof_panic_is_shapes_invalid_and_writes_nothing` (extended) | same |

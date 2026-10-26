@@ -621,6 +621,13 @@ fn rudof_panic_on_valid_extension_shape_is_shapes_invalid() {
 
 #[cfg(feature = "goal")]
 #[test]
+fn triple_term_in_extension_is_shapes_invalid() {
+    assert_shapes_invalid("shacl/extension-triple-term");
+    assert_shapes_invalid("shacl/extension-triple-term-hasvalue");
+}
+
+#[cfg(feature = "goal")]
+#[test]
 fn extension_alignment_with_core_terms_still_conforms() {
     let mut store = load("shacl/extension-alignment");
     let r = validate(&store, 0, 50).unwrap_or_else(|e| panic!("{} {}", e.rule, e.message));
