@@ -688,7 +688,7 @@ Every dependency is pinned **exactly**. Versions are those current at spec time 
 These are known uncertainties, not open decisions.
 - **User-dirs:** `etcetera` resolves the XDG *base* dirs. Resolving `XDG_DOCUMENTS_DIR` needs user-dirs support (e.g. `directories::UserDirs::document_dir`, or a small `user-dirs.dirs` parser) behind the `paths` seam.
 - **`xdg-mime`** was last released in 2024-04. If it misbehaves, use the direct-database fallback in §5.1.
-- **rudof `shacl` features:** choose them with `cargo tree`, since feature unification with `oxigraph` matters.
+- **rudof `shacl` features (settled in #7):** `shacl` and `rudof_rdf` `=0.3.35` with their default `sparql` feature; without it, `sh:sparql` constraints (the label-uniqueness shape) are silently ignored. `rudof_rdf` forces oxigraph's `http-client` (`http-client-rustls-native`) and `rdf-12` features on, which `default-features = false` cannot avoid: Cargo.lock grows from 132 to 340 packages (tokio, reqwest, hyper, rustls), hand-edited files may hold RDF 1.2 triple terms, and `hali query` must use `SparqlEvaluator::without_default_http_service_handler()` so SERVICE cannot reach the network. They share the one oxigraph/oxrdf hali already pins. hali copies triples from the store into rudof and never hands it Turtle text, and refuses `sh:select`/`sh:ask` in `extensions.ttl` (`SHAPES_INVALID`).
 - **Latency figures** in ADR-0001 are proxies until `make bench` runs natively.
 - **License:** not chosen yet; a `LICENSE` file must exist before the first release (the tarball includes it).
 
