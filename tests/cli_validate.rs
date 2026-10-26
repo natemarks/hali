@@ -457,3 +457,36 @@ fn core_sh_extension_shape_still_validates() {
     let out = env.run(["validate", "--json"]);
     assert_eq!(out.code, Some(0), "{}", out.stderr);
 }
+
+// ---- round 2 security: extensions may not reference core shapes as objects ----------------
+
+#[cfg(feature = "goal")]
+#[test]
+fn extension_referencing_a_core_shape_as_object_exits_3_without_echo() {
+    for name in [
+        "shacl/extension-node-core-shape",
+        "shacl/extension-and-core-shape",
+        "shacl/extension-property-core-shape",
+        "shacl/extension-qualified-core-shape",
+    ] {
+        let env = Env::with_fixture(name);
+        for args in [vec!["validate", "--json"], vec!["validate"]] {
+            let out = env.run(args);
+            assert_eq!(out.code, Some(3), "{name}: {}", out.stderr);
+            assert_eq!(out.stdout, "", "{name}");
+            for leak in ["example.org", "LabelUniqueShape", "ConceptPrefLabelShape"] {
+                assert!(!out.stderr.contains(leak), "{name} {leak}: {}", out.stderr);
+            }
+        }
+        let list = env.run(["concept", "list"]);
+        assert_eq!(list.code, Some(0), "{name}: {}", list.stderr);
+    }
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn extension_objects_naming_core_ttl_and_vocabulary_terms_validate_clean() {
+    let env = Env::with_fixture("shacl/extension-core-term-objects");
+    let out = env.run(["validate", "--json"]);
+    assert_eq!(out.code, Some(0), "{}", out.stderr);
+}

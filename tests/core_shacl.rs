@@ -638,3 +638,30 @@ fn extension_alignment_with_core_terms_still_conforms() {
     );
     concept::add(&ctx(), &mut store, "brand new").unwrap();
 }
+
+// ---- round 2 security: extensions may not reference core shapes as objects ----------------
+
+#[cfg(feature = "goal")]
+#[test]
+fn extension_referencing_a_core_shape_as_object_is_shapes_invalid() {
+    for name in [
+        "shacl/extension-node-core-shape",
+        "shacl/extension-and-core-shape",
+        "shacl/extension-property-core-shape",
+        "shacl/extension-qualified-core-shape",
+    ] {
+        assert_shapes_invalid(name);
+    }
+}
+
+#[cfg(feature = "goal")]
+#[test]
+fn extension_objects_naming_core_ttl_and_vocabulary_terms_still_conform() {
+    let store = load("shacl/extension-core-term-objects");
+    let r = validate(&store, 0, 50).unwrap_or_else(|e| panic!("{} {}", e.rule, e.message));
+    assert!(
+        r.conforms,
+        "{:?}",
+        r.results.iter().map(key).collect::<Vec<_>>()
+    );
+}

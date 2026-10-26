@@ -1,0 +1,10 @@
+@prefix hali: <https://w3id.org/hali#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix ex: <http://example.org/s#> .
+
+ex:S a sh:NodeShape ; sh:targetClass hali:Resource ; sh:property ex:P .
+ex:P a sh:PropertyShape ; sh:path skos:inScheme ; sh:class skos:ConceptScheme .
+ex:Sub rdfs:subClassOf hali:Resource .
+ex:Sub2 rdfs:subClassOf skos:Concept .

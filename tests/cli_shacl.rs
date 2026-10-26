@@ -207,3 +207,25 @@ fn concept_add_with_rudof_panic_is_shapes_invalid_and_writes_nothing() {
         );
     }
 }
+
+#[cfg(feature = "goal")]
+#[test]
+fn concept_add_with_extension_referencing_core_shape_is_shapes_invalid_and_writes_nothing() {
+    for name in [
+        "shacl/extension-node-core-shape",
+        "shacl/extension-and-core-shape",
+        "shacl/extension-property-core-shape",
+        "shacl/extension-qualified-core-shape",
+    ] {
+        let env = Env::with_fixture(name);
+        let vocabulary = std::fs::read(env.data.join("vocabulary.ttl")).unwrap();
+        let out = env.run(["concept", "add", "brand new", "--json"]);
+        assert_eq!(out.code, Some(3), "{name}: {}", out.stderr);
+        assert_eq!(out.stdout, "", "{name}");
+        assert_eq!(
+            std::fs::read(env.data.join("vocabulary.ttl")).unwrap(),
+            vocabulary,
+            "{name}"
+        );
+    }
+}
