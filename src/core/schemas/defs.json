@@ -1,4 +1,28 @@
 {
+  "catalog_record": {
+    "type": "object",
+    "properties": {
+      "id": {"type": "string"},
+      "issued": {"type": ["string", "null"]},
+      "modified": {"type": ["string", "null"]},
+      "attributed_to": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {"type": "string"},
+              "name": {"type": ["string", "null"]}
+            },
+            "required": ["id", "name"],
+            "additionalProperties": false
+          },
+          {"type": "null"}
+        ]
+      }
+    },
+    "required": ["id", "issued", "modified", "attributed_to"],
+    "additionalProperties": false
+  },
   "change": {
     "type": "object",
     "properties": {
@@ -17,6 +41,34 @@
       "broader": {"type": "array", "items": {"type": "string"}}
     },
     "required": ["id", "label", "alt_labels", "broader"],
+    "additionalProperties": false
+  },
+  "resource": {
+    "type": "object",
+    "properties": {
+      "id": {"type": "string"},
+      "path": {"type": "string"},
+      "title": {"type": "string"},
+      "media_type": {"type": "string"},
+      "editable": {"type": "boolean"},
+      "missing": {"type": "boolean"},
+      "stale": {"type": "boolean"},
+      "types": {"type": "array", "items": {"type": "string"}},
+      "tags": {"type": "array", "items": {"$ref": "#/$defs/tag"}},
+      "byte_size": {"type": "integer", "minimum": 0},
+      "modified": {"type": "string"}
+    },
+    "required": ["id", "path", "title", "media_type", "editable", "missing", "stale", "types",
+      "tags", "byte_size", "modified"],
+    "additionalProperties": false
+  },
+  "tag": {
+    "type": "object",
+    "properties": {
+      "id": {"type": "string"},
+      "label": {"type": "string"}
+    },
+    "required": ["id", "label"],
     "additionalProperties": false
   },
   "violation": {

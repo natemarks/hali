@@ -5,11 +5,14 @@
 use serde_json::{Map, Value};
 
 /// (name, document), sorted by name.
-const SCHEMAS: [(&str, &str); 5] = [
+const SCHEMAS: [(&str, &str); 8] = [
+    ("add", include_str!("schemas/add.json")),
     ("concept add", include_str!("schemas/concept_add.json")),
     ("concept list", include_str!("schemas/concept_list.json")),
+    ("edit", include_str!("schemas/edit.json")),
     ("error", include_str!("schemas/error.json")),
     ("schema", include_str!("schemas/schema.json")),
+    ("show", include_str!("schemas/show.json")),
     ("validate", include_str!("schemas/validate.json")),
 ];
 
@@ -20,15 +23,24 @@ pub fn names() -> Vec<&'static str> {
     SCHEMAS.iter().map(|(name, _)| *name).collect()
 }
 
-/// The bare schema document for `name`, with the `$defs` it references spliced in.
+/// The bare schema document for `name`, with the `$defs` it references, directly or through
+/// another def, spliced in.
 pub fn get(name: &str) -> Option<Value> {
     let (_, text) = SCHEMAS.iter().find(|(n, _)| *n == name)?;
     let mut doc: Value = serde_json::from_str(text).expect("embedded schema is JSON");
     let shared: Map<String, Value> = serde_json::from_str(DEFS).expect("embedded defs are JSON");
-    let used: Map<String, Value> = shared
-        .into_iter()
-        .filter(|(def, _)| text.contains(&format!("\"#/$defs/{def}\"")))
-        .collect();
+    let refers = |text: &str, def: &str| text.contains(&format!("\"#/$defs/{def}\""));
+    let mut used: Map<String, Value> = Map::new();
+    let mut texts = vec![text.to_string()];
+    while let Some(text) = texts.pop() {
+        for (def, body) in &shared {
+            if !used.contains_key(def) && refers(&text, def) {
+                texts.push(body.to_string());
+                used.insert(def.clone(), body.clone());
+            }
+        }
+    }
+    used.sort_keys();
     if !used.is_empty() {
         doc.as_object_mut()
             .expect("embedded schema is an object")
@@ -59,5 +71,12 @@ mod tests {
         assert!(add["$defs"]["change"].is_object());
         assert!(add["$defs"].get("violation").is_none());
         assert!(get("schema").unwrap().get("$defs").is_none());
+    }
+
+    #[test]
+    fn defs_referenced_by_defs_are_spliced_too() {
+        let add = get("add").unwrap();
+        let defs: Vec<&String> = add["$defs"].as_object().unwrap().keys().collect();
+        assert_eq!(defs, ["change", "resource", "tag"]);
     }
 }

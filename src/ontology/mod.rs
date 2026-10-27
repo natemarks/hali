@@ -30,6 +30,53 @@ pub const PREFIXES: [(&str, &str); 12] = [
 /// The one Concept scheme, `hali:topics`.
 pub const TOPICS: &str = "https://w3id.org/hali#topics";
 
+/// `hali:Resource`.
+pub const RESOURCE: &str = "https://w3id.org/hali#Resource";
+
+/// Where IANA media types live (`dcat:mediaType`).
+pub const IANA_MEDIA_TYPES: &str = "http://www.iana.org/assignments/media-types/";
+
+/// Where hali names non-IANA (`x-`) media types (`dcterms:format`).
+pub const HALI_MEDIA_TYPES: &str = "https://w3id.org/hali/media-types/";
+
+/// Dublin Core terms.
+pub mod dcterms {
+    pub const TITLE: &str = "http://purl.org/dc/terms/title";
+    pub const MODIFIED: &str = "http://purl.org/dc/terms/modified";
+    pub const ISSUED: &str = "http://purl.org/dc/terms/issued";
+    pub const FORMAT: &str = "http://purl.org/dc/terms/format";
+    pub const MEDIA_TYPE: &str = "http://purl.org/dc/terms/MediaType";
+    pub const SUBJECT: &str = "http://purl.org/dc/terms/subject";
+}
+
+/// DCAT terms.
+pub mod dcat {
+    pub const DOWNLOAD_URL: &str = "http://www.w3.org/ns/dcat#downloadURL";
+    pub const MEDIA_TYPE: &str = "http://www.w3.org/ns/dcat#mediaType";
+    pub const BYTE_SIZE: &str = "http://www.w3.org/ns/dcat#byteSize";
+    pub const CATALOG_RECORD: &str = "http://www.w3.org/ns/dcat#CatalogRecord";
+}
+
+/// SPDX checksum terms.
+pub mod spdx {
+    pub const CHECKSUM: &str = "http://spdx.org/rdf/terms#checksum";
+    pub const ALGORITHM: &str = "http://spdx.org/rdf/terms#algorithm";
+    pub const SHA256: &str = "http://spdx.org/rdf/terms#checksumAlgorithm_sha256";
+    pub const CHECKSUM_VALUE: &str = "http://spdx.org/rdf/terms#checksumValue";
+}
+
+/// PROV-O terms.
+pub mod prov {
+    pub const PERSON: &str = "http://www.w3.org/ns/prov#Person";
+    pub const WAS_ATTRIBUTED_TO: &str = "http://www.w3.org/ns/prov#wasAttributedTo";
+}
+
+/// FOAF terms.
+pub mod foaf {
+    pub const NAME: &str = "http://xmlns.com/foaf/0.1/name";
+    pub const PRIMARY_TOPIC: &str = "http://xmlns.com/foaf/0.1/primaryTopic";
+}
+
 /// SKOS terms.
 pub mod skos {
     pub const CONCEPT: &str = "http://www.w3.org/2004/02/skos/core#Concept";

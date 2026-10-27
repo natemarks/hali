@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hali add --json",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "added": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+        "existing": {"type": "array", "items": {"$ref": "#/$defs/resource"}}
+      },
+      "required": ["schema_version", "added", "existing"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "added": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+        "existing": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+        "dry_run": {"const": true},
+        "changes": {"type": "array", "items": {"$ref": "#/$defs/change"}}
+      },
+      "required": ["schema_version", "added", "existing", "dry_run", "changes"],
+      "additionalProperties": false
+    }
+  ]
+}

@@ -380,7 +380,10 @@ const SHAPE_FIXTURES: [(&str, &str); 8] = [
     ("LabelUniqueShape", "shacl/duplicate-label"),
     ("ResourceByteSizeShape", "shacl/resource-negative-byte-size"),
     ("ResourceChecksumShape", "shacl/resource-two-checksums"),
-    ("ResourceDownloadURLShape", "shacl/resource-two-download-urls"),
+    (
+        "ResourceDownloadURLShape",
+        "shacl/resource-two-download-urls",
+    ),
     ("ResourceMediaTypeShape", "shacl/resource-no-media-type"),
     ("ResourceTitleShape", "shacl/resource-no-title"),
 ];
