@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hali concept list --json",
+  "type": "object",
+  "properties": {
+    "schema_version": {"const": 1},
+    "results": {"type": "array", "items": {"$ref": "#/$defs/concept"}},
+    "total": {"type": "integer", "minimum": 0},
+    "truncated": {"type": "boolean"},
+    "next_offset": {"type": ["integer", "null"], "minimum": 0}
+  },
+  "required": ["schema_version", "results", "total", "truncated", "next_offset"],
+  "additionalProperties": false
+}

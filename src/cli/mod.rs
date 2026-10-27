@@ -1,6 +1,6 @@
 //! The CLI adapter: clap definitions, wiring of the seams, text/JSON rendering, exit codes.
 
-use crate::core::{self, Change, Clock, Context, Error, IdGen, Op, concept, validate};
+use crate::core::{self, Change, Clock, Context, Error, IdGen, Op, concept, schema, validate};
 use crate::{ontology, paths, storage};
 use clap::{CommandFactory, Parser, Subcommand};
 use serde::Serialize;
@@ -27,6 +27,11 @@ enum Command {
     /// Manage the Concepts of the topics scheme
     #[command(subcommand)]
     Concept(ConceptCommand),
+    /// Print the JSON Schema of a command's --json output, or of the error envelope
+    Schema {
+        /// A command path as separate words (`concept add`) or `error`; omit to list the names
+        name: Vec<String>,
+    },
     /// Check the store against the SHACL shapes; writes nothing
     Validate {
         /// Maximum number of results
@@ -120,6 +125,9 @@ pub fn command() -> clap::Command {
 
 pub fn run() -> ExitCode {
     let cli = Cli::parse();
+    if let Command::Schema { name } = &cli.command {
+        return show_schema(&cli, name);
+    }
     let (clock, ids) = match injected() {
         Ok(injected) => injected,
         Err(message) => {
@@ -133,6 +141,39 @@ pub fn run() -> ExitCode {
             report(&err, cli.json);
             ExitCode::from(err.exit_code())
         }
+    }
+}
+
+/// `hali schema`: reads no config or store. An unknown name is a clap usage error.
+fn show_schema(cli: &Cli, words: &[String]) -> ExitCode {
+    if words.is_empty() {
+        if cli.json {
+            print_json(&SchemaList {
+                schema_version: SCHEMA_VERSION,
+                schemas: schema::names(),
+            });
+        } else {
+            for name in schema::names() {
+                println!("{name}");
+            }
+        }
+        return ExitCode::SUCCESS;
+    }
+    match schema::get(&words.join(" ")) {
+        Some(doc) => {
+            print_json(&doc);
+            ExitCode::SUCCESS
+        }
+        None => Cli::command()
+            .error(
+                clap::error::ErrorKind::InvalidValue,
+                format!(
+                    "unknown schema `{}`; valid names: {}",
+                    words.join(" "),
+                    schema::names().join(", ")
+                ),
+            )
+            .exit(),
     }
 }
 
@@ -205,6 +246,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 }
             }
         }
+        Command::Schema { .. } => unreachable!("handled before the store is loaded"),
         Command::Validate { limit, offset } => {
             let report = validate::validate(&store, *offset, *limit)?;
             if cli.json {
@@ -280,6 +322,12 @@ struct ValidateOutput<'a> {
     schema_version: u32,
     #[serde(flatten)]
     report: &'a validate::Report,
+}
+
+#[derive(Serialize)]
+struct SchemaList {
+    schema_version: u32,
+    schemas: Vec<&'static str>,
 }
 
 #[derive(Serialize)]

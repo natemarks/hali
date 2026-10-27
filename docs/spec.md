@@ -348,6 +348,8 @@ hali generate completions <bash|zsh|fish>
 ```
 **Not in v1:** `export`/`import` (the files are the export), `infer`, `open`.
 
+**`hali schema`:** a name is the subcommand path as separate words (`hali schema concept add`), or `error` for the error envelope. With no name it lists the names, sorted: one per line in text mode, `{"schema_version":1,"schemas":[…]}` with `--json`. With a name it prints the bare JSON Schema document (draft 2020-12, no `$id`, no external `$ref`) on one line, in text and `--json` mode alike, not wrapped in the envelope (as with `hali query`, §9.9). An unknown name, or extra words, is a usage error (exit 2) that lists the valid names. It reads no config or store and writes nothing. Every command with a `--json` output has a schema, and the test suite checks every golden JSON snapshot against its schema (§14.6).
+
 ### 9.2 References
 - **Resource `<ref>`:** a path (absolute, or relative to the current directory, resolved to the real path) or the **full** UUID. Prefixes are not accepted.
 - **Concept:** its slug or any of its labels.
@@ -398,7 +400,7 @@ hali generate completions <bash|zsh|fish>
 - A dry run writes nothing: it creates no data dir, file, temp file or lock file, and changes no file. It does not check that the data dir is writable, so it can succeed where the real run would fail with `STORE_IO`.
 - A real run rewrites the whole tool-managed file in canonical form (§3.4), while `changes` lists only the triples that differ, so comments and formatting in a hand-edited file are lost on a real run.
 - **Errors:** a dry run reports the same errors as a real run, with identical stderr and exit code, and no `dry_run` or `changes` in the envelope. A successful dry run exits 0.
-- **Read-only commands** (`concept list`, `validate`, `find`, `show`, `query`) accept `--dry-run` and ignore it: their output is identical to a run without it.
+- **Read-only commands** (`concept list`, `validate`, `schema`, `find`, `show`, `query`) accept `--dry-run` and ignore it: their output is identical to a run without it.
 - **Text mode:** `concept add` prints `would add concept <id> "<label>"`. Each mutating command prints its own conditional summary line, followed by the shared `+ <triple>` or `- <triple>` line per change, and `note: dry run; nothing was written` on stderr.
 
 ### 9.6 Agent identity

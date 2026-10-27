@@ -1,0 +1,36 @@
+{
+  "change": {
+    "type": "object",
+    "properties": {
+      "op": {"enum": ["add", "remove"]},
+      "triple": {"type": "string"}
+    },
+    "required": ["op", "triple"],
+    "additionalProperties": false
+  },
+  "concept": {
+    "type": "object",
+    "properties": {
+      "id": {"type": "string"},
+      "label": {"type": "string"},
+      "alt_labels": {"type": "array", "items": {"type": "string"}},
+      "broader": {"type": "array", "items": {"type": "string"}}
+    },
+    "required": ["id", "label", "alt_labels", "broader"],
+    "additionalProperties": false
+  },
+  "violation": {
+    "type": "object",
+    "properties": {
+      "focus_node": {"type": "string"},
+      "shape": {"type": ["string", "null"]},
+      "path": {"type": ["string", "null"]},
+      "constraint": {"type": "string"},
+      "severity": {"type": "string"},
+      "value": {"type": ["string", "null"]},
+      "message": {"type": "string"}
+    },
+    "required": ["focus_node", "shape", "path", "constraint", "severity", "value", "message"],
+    "additionalProperties": false
+  }
+}
