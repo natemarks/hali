@@ -297,6 +297,29 @@ fn invalid_extension_shapes_exit_3() {
     }
 }
 
+// ---- #6: the SHAPES_INVALID envelope is a golden and satisfies `hali schema error` ---------
+
+#[cfg(feature = "goal")]
+#[test]
+fn shapes_invalid_json_envelope() {
+    let env = Env::with_fixture("shacl/extension-invalid");
+    let out = env.run(["validate", "--json"]);
+    assert_eq!(out.code, Some(3), "{}", out.stderr);
+    assert_eq!(out.stdout, "");
+    insta::assert_snapshot!("shapes_invalid_json_envelope", out.stderr);
+
+    let schema_out = env.run(["schema", "error"]);
+    assert_eq!(schema_out.code, Some(0), "{}", schema_out.stderr);
+    let schema: serde_json::Value = serde_json::from_str(&schema_out.stdout).unwrap();
+    let validator = jsonschema::draft202012::new(&schema).unwrap();
+    let envelope = json(&out.stderr);
+    let errs: Vec<String> = validator
+        .iter_errors(&envelope)
+        .map(|e| e.to_string())
+        .collect();
+    assert!(errs.is_empty(), "{errs:?}");
+}
+
 // ---- criterion 12: stored control characters are escaped ---------------------------------
 
 #[test]
