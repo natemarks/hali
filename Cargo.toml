@@ -14,6 +14,7 @@ goal = []
 
 [dependencies]
 clap = { version = "=4.6.7", features = ["derive"] }
+libc = "=0.2.191"
 oxigraph = { version = "=0.5.13", default-features = false }
 oxrdf = "=0.3.5"
 oxttl = "=0.2.5"

@@ -2,6 +2,8 @@
 //!
 //! Each source sits in its own named graph, `https://w3id.org/hali/graph/{name}`; nothing is
 //! put in the default graph.
+//!
+//! It also reads cataloged files (`inspect`, `stat`), only ever read-only.
 
 use crate::ontology::{CORE_TTL, PREFIXES, SHAPES_TTL};
 use oxigraph::model::vocab::rdf;
@@ -195,4 +197,99 @@ pub fn read_text(path: &Path) -> Result<Option<String>, Error> {
             path: path.to_path_buf(),
         }),
     }
+}
+
+/// What `inspect` learns about a file to catalog, all from one open file descriptor.
+#[derive(Debug)]
+pub struct Inspected {
+    pub byte_size: u64,
+    /// The mtime, in whole seconds since the Unix epoch.
+    pub mtime: i64,
+    /// The SHA-256 of the content, lowercase hex.
+    pub sha256: String,
+    /// The first bytes of the content (at most `media_type::HEAD_LEN`).
+    pub head: Vec<u8>,
+}
+
+/// Why a file cannot be cataloged.
+#[derive(Debug, PartialEq)]
+pub enum InspectError {
+    Missing,
+    Directory,
+    /// Neither a regular file nor a directory: a FIFO, socket, device or symlink.
+    Other,
+    /// It exists but cannot be opened or read.
+    Unreadable,
+}
+
+/// Opens the regular file at the real path `path` once, read-only and non-blocking, checks on
+/// that descriptor that it is still a regular file, then hashes it by streaming. Nothing is
+/// ever written to it.
+pub fn inspect(path: &Path) -> Result<Inspected, InspectError> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+    // A first look without opening, so a device or FIFO is never opened.
+    kind(fs::symlink_metadata(path))?;
+    // O_NONBLOCK: a FIFO swapped in after that look cannot block the open. O_NOFOLLOW: nor can a
+    // symlink be followed. O_NOCTTY: a terminal never becomes the controlling one.
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW | libc::O_NOCTTY)
+        .open(path)
+        .map_err(|e| match e.kind() {
+            ErrorKind::NotFound => InspectError::Missing,
+            _ => InspectError::Unreadable,
+        })?;
+    let meta = kind(file.metadata())?;
+
+    let mut hasher = Sha256::new();
+    let mut head = Vec::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut byte_size = 0u64;
+    loop {
+        let n = match file.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(_) => return Err(InspectError::Unreadable),
+        };
+        hasher.update(&buf[..n]);
+        let room = crate::media_type::HEAD_LEN.saturating_sub(head.len());
+        head.extend_from_slice(&buf[..n.min(room)]);
+        byte_size += n as u64;
+    }
+    let sha256 = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    Ok(Inspected {
+        byte_size,
+        mtime: meta.mtime(),
+        sha256,
+        head,
+    })
+}
+
+/// A regular file's metadata, or the kind of thing that is there instead.
+fn kind(meta: std::io::Result<fs::Metadata>) -> Result<fs::Metadata, InspectError> {
+    match meta {
+        Ok(m) if m.is_file() => Ok(m),
+        Ok(m) if m.is_dir() => Err(InspectError::Directory),
+        Ok(_) => Err(InspectError::Other),
+        Err(e) if e.kind() == ErrorKind::NotFound => Err(InspectError::Missing),
+        Err(_) => Err(InspectError::Unreadable),
+    }
+}
+
+/// The size and mtime (whole seconds since the Unix epoch) of the regular file at `path`, from
+/// `stat` only; `None` if there is no regular file there.
+pub fn stat(path: &Path) -> Option<(u64, i64)> {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(path)
+        .ok()
+        .filter(fs::Metadata::is_file)
+        .map(|m| (m.len(), m.mtime()))
 }
