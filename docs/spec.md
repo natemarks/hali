@@ -51,7 +51,7 @@ Source: [Ontology domain model for v1](https://github.com/natemarks/mcp-local-no
 | `dcat:downloadURL` | exactly 1 | `<file:///…>` per RFC 8089 (the canonicalised real path, UTF-8 percent-encoded). |
 | `dcat:mediaType` | exactly 1 of the two | IANA types: `<http://www.iana.org/assignments/media-types/{type}/{subtype}>`. |
 | `dcterms:format` | (the other) | Non-IANA (freedesktop `x-`) types: `<https://w3id.org/hali/media-types/{type}/{subtype}>`, declared `a dcterms:MediaType`. |
-| `dcat:byteSize` | exactly 1 | `xsd:nonNegativeInteger`. |
+| `dcat:byteSize` | exactly 1 | `xsd:integer`, at least 0 (the store normalises `xsd:nonNegativeInteger` to `xsd:integer`, so the shape enforces the lower bound with `sh:minInclusive 0`). |
 | `dcterms:modified` | exactly 1 | The file's mtime as of the last add/refresh/scan. |
 | `spdx:checksum` | exactly 1 | `<urn:uuid:…#sha256>`, a node with an IRI derived from the Resource IRI (not a blank node), with `spdx:algorithm spdx:checksumAlgorithm_sha256` and `spdx:checksumValue "…"^^xsd:hexBinary`. |
 | `rdf:type` | 1 or more | `hali:Resource` and/or Types. |
@@ -118,7 +118,7 @@ hali:linked-data a skos:Concept ; skos:inScheme hali:topics ;
     dcterms:title "Linked Data Patterns" ;
     dcat:downloadURL <file:///home/nmarks/papers/linked-data-patterns.pdf> ;
     dcat:mediaType <http://www.iana.org/assignments/media-types/application/pdf> ;
-    dcat:byteSize "482113"^^xsd:nonNegativeInteger ;
+    dcat:byteSize 482113 ;
     dcterms:modified "2026-10-20T14:02:11Z"^^xsd:dateTime ;
     spdx:checksum <urn:uuid:0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10#sha256> ;
     dcterms:subject hali:linked-data .
