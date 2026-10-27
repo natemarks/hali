@@ -50,7 +50,9 @@ fn slug_rules() {
 #[test]
 fn add_writes_concept_triples_and_scheme() {
     let (mut store, _dir) = empty_store();
-    let c = concept::add(&ctx("en"), &mut store, "machine learning").unwrap();
+    let c = concept::add(&ctx("en"), &mut store, "machine learning")
+        .unwrap()
+        .value;
     assert_eq!(c.id, "machine-learning");
     assert_eq!(c.label, "machine learning");
     assert!(c.alt_labels.is_empty());
@@ -64,7 +66,9 @@ fn add_writes_concept_triples_and_scheme() {
 #[test]
 fn add_normalises_whitespace_in_the_label() {
     let (mut store, _dir) = empty_store();
-    let c = concept::add(&ctx("en"), &mut store, "  machine \t  learning ").unwrap();
+    let c = concept::add(&ctx("en"), &mut store, "  machine \t  learning ")
+        .unwrap()
+        .value;
     assert_eq!(c.label, "machine learning");
     assert_eq!(c.id, "machine-learning");
 }
@@ -83,9 +87,9 @@ fn add_uses_the_configured_language_tag() {
 #[test]
 fn colliding_slugs_get_numeric_suffixes() {
     let (mut store, _dir) = empty_store();
-    let a = concept::add(&ctx("en"), &mut store, "Rust").unwrap();
-    let b = concept::add(&ctx("en"), &mut store, "rust!").unwrap();
-    let c = concept::add(&ctx("en"), &mut store, "Rust?").unwrap();
+    let a = concept::add(&ctx("en"), &mut store, "Rust").unwrap().value;
+    let b = concept::add(&ctx("en"), &mut store, "rust!").unwrap().value;
+    let c = concept::add(&ctx("en"), &mut store, "Rust?").unwrap().value;
     assert_eq!(
         (a.id.as_str(), b.id.as_str(), c.id.as_str()),
         ("rust", "rust-2", "rust-3")
@@ -132,7 +136,9 @@ fn label_taken_also_matches_alt_labels() {
 #[test]
 fn same_label_in_another_language_is_not_taken() {
     let mut store = hali::storage::load(&fixture("store")).unwrap();
-    let c = concept::add(&ctx("de"), &mut store, "machine learning").unwrap();
+    let c = concept::add(&ctx("de"), &mut store, "machine learning")
+        .unwrap()
+        .value;
     assert_eq!(c.label, "machine learning");
 }
 
@@ -211,7 +217,9 @@ fn assert_scheme_untouched(store: &hali::storage::Store) {
 #[test]
 fn add_topics_on_an_empty_store_does_not_collide_with_the_scheme() {
     let (mut store, _dir) = empty_store();
-    let c = concept::add(&ctx("en"), &mut store, "topics").unwrap();
+    let c = concept::add(&ctx("en"), &mut store, "topics")
+        .unwrap()
+        .value;
     assert_eq!(c.id, "topics-2");
     assert_eq!(c.label, "topics");
     assert_scheme_untouched(&store);
@@ -220,7 +228,9 @@ fn add_topics_on_an_empty_store_does_not_collide_with_the_scheme() {
 #[test]
 fn add_case_variant_topics_does_not_collide_with_the_scheme() {
     let (mut store, _dir) = empty_store();
-    let c = concept::add(&ctx("en"), &mut store, "TOPICS").unwrap();
+    let c = concept::add(&ctx("en"), &mut store, "TOPICS")
+        .unwrap()
+        .value;
     assert_eq!(c.id, "topics-2");
     assert_eq!(c.label, "TOPICS");
     assert_scheme_untouched(&store);
@@ -230,7 +240,9 @@ fn add_case_variant_topics_does_not_collide_with_the_scheme() {
 fn add_topics_after_another_concept_does_not_collide_with_the_scheme() {
     let (mut store, _dir) = empty_store();
     concept::add(&ctx("en"), &mut store, "machine learning").unwrap();
-    let c = concept::add(&ctx("en"), &mut store, "topics").unwrap();
+    let c = concept::add(&ctx("en"), &mut store, "topics")
+        .unwrap()
+        .value;
     assert_eq!(c.id, "topics-2");
     assert_eq!(c.label, "topics");
     assert_scheme_untouched(&store);

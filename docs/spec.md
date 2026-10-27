@@ -380,18 +380,26 @@ hali generate completions <bash|zsh|fish>
 - **Under `--json`**, the error goes to stderr:
   ```json
   {"schema_version":1,"error":{"rule":"UNKNOWN_CONCEPT","message":"…","details":{},
-   "suggested_fix":"…","suggested_command":"hali concept add ml --dry-run"}}
+   "suggested_fix":"…","suggested_command":"hali --dry-run concept add ml"}}
   ```
 - **In text mode**, the output is one `error:` line plus a `hint:` line.
 - **Size:** errors stay well under 10k characters.
 - **Rules** (SCREAMING_SNAKE, minimum set): `UNKNOWN_CONCEPT`, `UNKNOWN_TYPE`, `UNKNOWN_RELATION`, `LABEL_TAKEN`, `POSSIBLE_MOVE`, `FORGET_BLOCKED_BY_RELATIONS`, `IN_USE`, `HASH_MISMATCH`, `NOT_A_REGULAR_FILE`, `NON_UTF8_PATH`, `SHACL_VIOLATION`, `CONFIRMATION_REQUIRED`, `READ_ONLY_QUERY`, `STORE_LOCKED`.
 
 ### 9.5 Dry run
-`--dry-run` returns the same payload as a real run, plus `"dry_run": true` and a `changes` list of the triples that would be added or removed, in N-Triples form:
+`--dry-run` is a global flag, like `--json`, accepted before or after the subcommand. A mutating command run with it returns the same payload as a real run, with the same keys in the same order, plus `"dry_run": true` and a `changes` list of the triples it would add to or remove from a tool-managed file (`vocabulary.ttl`, `resources.ttl`), in N-Triples form. A real run never prints `dry_run` or `changes`.
 ```json
 {"op":"add","triple":"<urn:uuid:…> <http://purl.org/dc/terms/subject> <https://w3id.org/hali#ml> ."}
 ```
-SHACL runs against the would-be graph, so violations are reported. Nothing is written.
+- `changes` is always present, and `[]` when nothing would change. A triple the file (graph) it goes to already holds is not listed; a scheme triple that only `extensions.ttl` holds is listed, because the real run writes it into `vocabulary.ttl`.
+- **Order:** every `add` before every `remove`, then the whole triple string in plain byte order. No triple is listed twice, and `rdf:type` is not forced first.
+- **Triple form:** canonical N-Triples as the RDF library prints it, plus ` .`: full IRIs in `<>`, no prefixes; simple literals have no datatype; other datatypes are `^^<iri>`; language tags are lowercase.
+- SHACL runs against the would-be graph, so violations are reported.
+- A dry run writes nothing: it creates no data dir, file, temp file or lock file, and changes no file. It does not check that the data dir is writable, so it can succeed where the real run would fail with `STORE_IO`.
+- A real run rewrites the whole tool-managed file in canonical form (§3.4), while `changes` lists only the triples that differ, so comments and formatting in a hand-edited file are lost on a real run.
+- **Errors:** a dry run reports the same errors as a real run, with identical stderr and exit code, and no `dry_run` or `changes` in the envelope. A successful dry run exits 0.
+- **Read-only commands** (`concept list`, `validate`, `find`, `show`, `query`) accept `--dry-run` and ignore it: their output is identical to a run without it.
+- **Text mode:** `concept add` prints `would add concept <id> "<label>"`. Each mutating command prints its own conditional summary line, followed by the shared `+ <triple>` or `- <triple>` line per change, and `note: dry run; nothing was written` on stderr.
 
 ### 9.6 Agent identity
 - `--agent NAME` overrides the `HALI_AGENT` environment variable.
@@ -499,7 +507,7 @@ Sources:
 
 ### 11.2 The skill (`skill/SKILL.md`, embedded in the binary)
 - **Frontmatter:** portable, with `name: hali`, a short third-person description that leads with trigger words ("find, open, tag or catalog local files and documents; ontology, concepts, types, related files; hali"), and `metadata: {hali-version: X.Y.Z}`.
-- **`allowed-tools`** pre-approves **read-only commands only**: `Bash(hali describe *)`, `find`, `show`, `query`, `schema`, `validate`, `help`, and `--dry-run` invocations. Mutations still go through Claude Code's permission prompt.
+- **`allowed-tools`** pre-approves **read-only commands only**: `Bash(hali describe *)`, `find`, `show`, `query`, `schema`, `validate`, `help`, and dry runs through the prefix rule `Bash(hali --dry-run *)`. Match `--dry-run` only as a prefix: the flag then sits before the subcommand and any `--`, so it is always parsed as the flag (`--dry-run=false` and `--no-dry-run` are usage errors, so nothing can unset it). A rule matching it at the end or anywhere in the command would pre-approve real writes, because `hali concept add -- --dry-run` adds a Concept labelled `--dry-run` and a quoted label such as `"x --dry-run"` can slip past a matcher that strips quotes. Mutations still go through Claude Code's permission prompt.
 - **Body** (under 200 lines):
   1. Set `HALI_AGENT=<agent name>`.
   2. Run `hali describe --json` first.
