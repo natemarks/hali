@@ -17,7 +17,6 @@
 //! Expected triples are written out here from spec §2.1 and §2.5. Oxigraph stores
 //! `xsd:nonNegativeInteger` as `xsd:integer`, so `dcat:byteSize` is an `xsd:integer`.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::resource::{self, FileFacts};
     use hali::core::{Context, FixedClock, Op, SeededIdGen};

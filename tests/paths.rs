@@ -76,7 +76,6 @@ fn config_file_precedence() {
 /// Assumed API: `hali::paths::file_url(path: &str) -> String` and
 /// `hali::paths::path_from_file_url(url: &str) -> Option<String>` (the inverse; `None` for a
 /// URL that is not `file:///...` or has a malformed `%` escape).
-#[cfg(feature = "goal")]
 #[test]
 fn file_url_percent_encodes() {
     let cases = [

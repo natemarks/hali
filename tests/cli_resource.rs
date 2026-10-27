@@ -14,7 +14,6 @@
 //! text-looking content is `text/plain` even without a database), so these tests need no
 //! outside software. The two that do are `#[ignore]`d.
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::Value;

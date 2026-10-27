@@ -25,7 +25,6 @@ mod goal {
         }
     }
 
-    #[cfg(feature = "goal")]
     #[test]
     fn names_and_get() {
         assert_eq!(

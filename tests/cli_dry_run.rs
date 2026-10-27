@@ -483,7 +483,6 @@ fn help_lists_dry_run() {
 }
 
 /// #10: `add` and `edit` under the dry-run equality helper (spec §9.5, §14.3).
-#[cfg(feature = "goal")]
 mod resource {
     use super::{fixture, support};
     use std::path::{Path, PathBuf};

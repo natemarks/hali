@@ -11,7 +11,6 @@
 //! Every test needs the MIME database, so every one is `#[ignore]`d with a reason and runs
 //! under `make test-external`.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::media_type::detect;
 

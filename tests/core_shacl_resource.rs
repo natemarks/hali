@@ -7,7 +7,6 @@
 //! fault); the shape names are the implementer's, who also adds them to `SHAPE_FIXTURES` in
 //! tests/core_shacl.rs, pointing at these fixtures.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::validate::validate;
     use std::path::Path;

@@ -40,7 +40,6 @@ mod goal {
         "cli_resource__show_json",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS: &[(&str, &str)] = &[
         ("cli_dry_run__add_dry_run_json", "add"),
         ("cli_dry_run__edit_dry_run_json", "edit"),
@@ -54,7 +53,6 @@ mod goal {
     #[allow(unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
         let mut rows = STDOUT_GOLDENS.to_vec();
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS);
         rows
     }
@@ -72,7 +70,6 @@ mod goal {
     #[allow(unused_assignments, unused_mut)]
     fn goldens() -> Vec<Golden> {
         let mut hidden: &[&str] = GOAL_SNAPS;
-        #[cfg(feature = "goal")]
         {
             hidden = &[];
         }
@@ -447,7 +444,6 @@ mod goal {
         }
     }
 
-    #[cfg(feature = "goal")]
     fn record() -> Value {
         json!({"id": "018bcfe5-6801-710a-adec-89025cc1beeb", "path": "/a/notes.txt",
             "title": "notes", "media_type": "text/plain", "editable": true, "missing": false,
@@ -455,7 +451,6 @@ mod goal {
             "byte_size": 6, "modified": "2026-10-20T14:02:11Z"})
     }
 
-    #[cfg(feature = "goal")]
     fn shown() -> Value {
         let mut r = record();
         r["relations"] = json!([]);
@@ -466,7 +461,6 @@ mod goal {
     }
 
     /// #10: what the `add`, `show` and `edit` schemas accept and refuse.
-    #[cfg(feature = "goal")]
     #[test]
     fn resource_schemas_accept_and_reject() {
         let change = json!({"op": "add", "triple": "<a:b> <a:c> <a:d> ."});
@@ -544,7 +538,6 @@ mod goal {
     }
 
     /// #10: the new error rules have conditional branches in `error.json`.
-    #[cfg(feature = "goal")]
     #[test]
     fn new_error_rules_have_branches() {
         let mut cases: Vec<(Value, bool)> = Vec::new();

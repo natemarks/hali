@@ -106,7 +106,6 @@ mod goal {
 
     // ---- criterion 1: list ----------------------------------------------------------------
 
-    #[cfg(feature = "goal")]
     #[test]
     fn schema_lists_names_json() {
         let env = Env::new();
@@ -119,7 +118,6 @@ mod goal {
         });
     }
 
-    #[cfg(feature = "goal")]
     #[test]
     fn schema_lists_names_text() {
         let env = Env::new();
@@ -134,7 +132,6 @@ mod goal {
 
     /// #10: the three new commands each have a bare draft 2020-12 schema, the same in text
     /// and `--json` mode, with no `$id` and no external `$ref`.
-    #[cfg(feature = "goal")]
     #[test]
     fn new_command_schemas_are_documents() {
         let env = Env::new();
