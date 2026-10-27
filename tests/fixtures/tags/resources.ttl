@@ -1,0 +1,95 @@
+@prefix dcat: <http://www.w3.org/ns/dcat#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix hali: <https://w3id.org/hali#> .
+@prefix spdx: <http://spdx.org/rdf/terms#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:uuid:0192f0c4-0000-7000-8000-000000000101> a hali:Resource ;
+    dcterms:title "animal doc" ;
+    dcat:downloadURL <file:///fixtures/tags/animal.txt> ;
+    dcat:mediaType <http://www.iana.org/assignments/media-types/text/plain> ;
+    dcat:byteSize 6 ;
+    dcterms:modified "2026-10-20T14:02:11Z"^^xsd:dateTime ;
+    dcterms:subject hali:animal ;
+    spdx:checksum <urn:uuid:0192f0c4-0000-7000-8000-000000000101#sha256> .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000101#sha256> spdx:algorithm spdx:checksumAlgorithm_sha256 ;
+    spdx:checksumValue "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"^^xsd:hexBinary .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000102> a hali:Resource ;
+    dcterms:title "mammal doc" ;
+    dcat:downloadURL <file:///fixtures/tags/mammal.txt> ;
+    dcat:mediaType <http://www.iana.org/assignments/media-types/text/plain> ;
+    dcat:byteSize 6 ;
+    dcterms:modified "2026-10-20T14:02:11Z"^^xsd:dateTime ;
+    dcterms:subject hali:mammal ;
+    spdx:checksum <urn:uuid:0192f0c4-0000-7000-8000-000000000102#sha256> .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000102#sha256> spdx:algorithm spdx:checksumAlgorithm_sha256 ;
+    spdx:checksumValue "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"^^xsd:hexBinary .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000103> a hali:Resource ;
+    dcterms:title "dog doc" ;
+    dcat:downloadURL <file:///fixtures/tags/dog.txt> ;
+    dcat:mediaType <http://www.iana.org/assignments/media-types/text/plain> ;
+    dcat:byteSize 6 ;
+    dcterms:modified "2026-10-20T14:02:11Z"^^xsd:dateTime ;
+    dcterms:subject hali:dog ;
+    spdx:checksum <urn:uuid:0192f0c4-0000-7000-8000-000000000103#sha256> .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000103#sha256> spdx:algorithm spdx:checksumAlgorithm_sha256 ;
+    spdx:checksumValue "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"^^xsd:hexBinary .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000104> a hali:Resource ;
+    dcterms:title "pet doc" ;
+    dcat:downloadURL <file:///fixtures/tags/pet.txt> ;
+    dcat:mediaType <http://www.iana.org/assignments/media-types/text/plain> ;
+    dcat:byteSize 6 ;
+    dcterms:modified "2026-10-20T14:02:11Z"^^xsd:dateTime ;
+    dcterms:subject hali:pet ;
+    spdx:checksum <urn:uuid:0192f0c4-0000-7000-8000-000000000104#sha256> .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000104#sha256> spdx:algorithm spdx:checksumAlgorithm_sha256 ;
+    spdx:checksumValue "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"^^xsd:hexBinary .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000105> a hali:Resource ;
+    dcterms:title "plant doc" ;
+    dcat:downloadURL <file:///fixtures/tags/plant.txt> ;
+    dcat:mediaType <http://www.iana.org/assignments/media-types/text/plain> ;
+    dcat:byteSize 6 ;
+    dcterms:modified "2026-10-20T14:02:11Z"^^xsd:dateTime ;
+    dcterms:subject hali:plant ;
+    spdx:checksum <urn:uuid:0192f0c4-0000-7000-8000-000000000105#sha256> .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000105#sha256> spdx:algorithm spdx:checksumAlgorithm_sha256 ;
+    spdx:checksumValue "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"^^xsd:hexBinary .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000106> a hali:Resource ;
+    dcterms:title "bird doc" ;
+    dcat:downloadURL <file:///fixtures/tags/bird.txt> ;
+    dcat:mediaType <http://www.iana.org/assignments/media-types/text/plain> ;
+    dcat:byteSize 6 ;
+    dcterms:modified "2026-10-20T14:02:11Z"^^xsd:dateTime ;
+    dcterms:subject hali:bird ;
+    spdx:checksum <urn:uuid:0192f0c4-0000-7000-8000-000000000106#sha256> .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000106#sha256> spdx:algorithm spdx:checksumAlgorithm_sha256 ;
+    spdx:checksumValue "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"^^xsd:hexBinary .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000107> a hali:Resource ;
+    dcterms:title "loop doc" ;
+    dcat:downloadURL <file:///fixtures/tags/loop.txt> ;
+    dcat:mediaType <http://www.iana.org/assignments/media-types/text/plain> ;
+    dcat:byteSize 6 ;
+    dcterms:modified "2026-10-20T14:02:11Z"^^xsd:dateTime ;
+    dcterms:subject hali:loop-a ;
+    spdx:checksum <urn:uuid:0192f0c4-0000-7000-8000-000000000107#sha256> .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000107#sha256> spdx:algorithm spdx:checksumAlgorithm_sha256 ;
+    spdx:checksumValue "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"^^xsd:hexBinary .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000108> a hali:Resource ;
+    dcterms:title "untagged doc" ;
+    dcat:downloadURL <file:///fixtures/tags/untagged.txt> ;
+    dcat:mediaType <http://www.iana.org/assignments/media-types/text/plain> ;
+    dcat:byteSize 6 ;
+    dcterms:modified "2026-10-20T14:02:11Z"^^xsd:dateTime ;
+    spdx:checksum <urn:uuid:0192f0c4-0000-7000-8000-000000000108#sha256> .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000108#sha256> spdx:algorithm spdx:checksumAlgorithm_sha256 ;
+    spdx:checksumValue "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"^^xsd:hexBinary .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000109> a hali:Resource ;
+    dcterms:title "dog plant doc" ;
+    dcat:downloadURL <file:///fixtures/tags/dog-plant.txt> ;
+    dcat:mediaType <http://www.iana.org/assignments/media-types/text/plain> ;
+    dcat:byteSize 6 ;
+    dcterms:modified "2026-10-20T14:02:11Z"^^xsd:dateTime ;
+    dcterms:subject hali:dog , hali:plant ;
+    spdx:checksum <urn:uuid:0192f0c4-0000-7000-8000-000000000109#sha256> .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000109#sha256> spdx:algorithm spdx:checksumAlgorithm_sha256 ;
+    spdx:checksumValue "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"^^xsd:hexBinary .

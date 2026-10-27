@@ -1,0 +1,21 @@
+@prefix hali: <https://w3id.org/hali#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# A small hierarchy for the broader-path tests (#16):
+#   animal <- mammal <- dog -> pet     (dog has two parents)
+#   animal <- bird                     (that triple lives only in extensions.ttl)
+#   loop-a <-> loop-b                  (a broader cycle)
+#   plant                              (a separate branch)
+hali:topics a skos:ConceptScheme .
+hali:animal a skos:Concept ; skos:inScheme hali:topics ; skos:prefLabel "animal"@en .
+hali:mammal a skos:Concept ; skos:inScheme hali:topics ; skos:prefLabel "mammal"@en ;
+    skos:broader hali:animal .
+hali:dog a skos:Concept ; skos:inScheme hali:topics ; skos:prefLabel "dog"@en ;
+    skos:broader hali:mammal , hali:pet .
+hali:pet a skos:Concept ; skos:inScheme hali:topics ; skos:prefLabel "pet"@en .
+hali:plant a skos:Concept ; skos:inScheme hali:topics ; skos:prefLabel "plant"@en .
+hali:bird a skos:Concept ; skos:inScheme hali:topics ; skos:prefLabel "bird"@en .
+hali:loop-a a skos:Concept ; skos:inScheme hali:topics ; skos:prefLabel "loop a"@en ;
+    skos:broader hali:loop-b .
+hali:loop-b a skos:Concept ; skos:inScheme hali:topics ; skos:prefLabel "loop b"@en ;
+    skos:broader hali:loop-a .

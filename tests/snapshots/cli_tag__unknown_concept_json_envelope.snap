@@ -1,0 +1,5 @@
+---
+source: tests/cli_tag.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"UNKNOWN_CONCEPT","message":"no Concept matches machin learning","details":{"concept":"machin learning","suggestions":[{"id":"machine-learning","label":"machine learning"}]},"suggested_fix":"Use the slug or a label of an existing Concept, or add the Concept first.","suggested_command":"hali --dry-run concept add 'machin learning'"}}

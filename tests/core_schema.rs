@@ -111,4 +111,71 @@ mod goal {
         assert!(violation.contains(&"validate"), "{violation:?}");
         assert!(violation.contains(&"error"), "{violation:?}");
     }
+
+    /// #16: the `error` schema has an `UNKNOWN_CONCEPT` branch: `details` carries the reference
+    /// and at most three `{id, label}` suggestions.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn unknown_concept_details_required() {
+        use serde_json::json;
+        let doc = schema::get("error").unwrap();
+        let validator = jsonschema::draft202012::new(&doc).unwrap();
+        let envelope = |details: Value| {
+            json!({"schema_version": 1, "error": {
+                "rule": "UNKNOWN_CONCEPT", "message": "m", "details": details,
+                "suggested_fix": "f", "suggested_command": "hali --dry-run concept add x"}})
+        };
+        let one = json!({"id": "ml", "label": "machine learning"});
+        let cases: Vec<(Value, bool)> = vec![
+            (
+                envelope(json!({"concept": "x", "suggestions": [one.clone()]})),
+                true,
+            ),
+            (envelope(json!({"concept": "x", "suggestions": []})), true),
+            (
+                envelope(
+                    json!({"concept": "x", "suggestions": [one.clone(), one.clone(), one.clone()]}),
+                ),
+                true,
+            ),
+            (
+                envelope(
+                    json!({"concept": "x", "suggestions": [one.clone(), one.clone(), one.clone(), one.clone()]}),
+                ),
+                false,
+            ),
+            (envelope(json!({})), false),
+            (envelope(json!({"concept": "x"})), false),
+            (envelope(json!({"suggestions": []})), false),
+            (envelope(json!({"concept": 1, "suggestions": []})), false),
+            (
+                envelope(json!({"concept": "x", "suggestions": "ml"})),
+                false,
+            ),
+            (
+                envelope(json!({"concept": "x", "suggestions": [{"id": "ml"}]})),
+                false,
+            ),
+            (
+                envelope(json!({"concept": "x", "suggestions": [{"label": "ml"}]})),
+                false,
+            ),
+            (
+                envelope(json!({"concept": "x", "suggestions": [{"id": 1, "label": "ml"}]})),
+                false,
+            ),
+        ];
+        for (instance, valid) in cases {
+            let errs: Vec<String> = validator
+                .iter_errors(&instance)
+                .map(|e| e.to_string())
+                .collect();
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema error` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
 }

@@ -63,12 +63,35 @@ mod goal {
         ("cli_find__find_json_fields", "find"),
     ];
 
+    /// Snapshots written by the active goal (#16): hidden from a build without the goal
+    /// feature (the `UNKNOWN_CONCEPT` envelope only validates once the `error` schema has its
+    /// branch, and the others only once the commands take the new flags).
+    const GOAL_SNAPS_16: &[&str] = &[
+        "cli_concept__concept_add_broader_json",
+        "cli_find__find_tag_exact_json",
+        "cli_find__find_tag_json",
+        "cli_tag__add_tag_json",
+        "cli_tag__edit_add_remove_tag_json",
+        "cli_tag__unknown_concept_json_envelope",
+    ];
+
+    #[cfg(feature = "goal")]
+    const GOAL_STDOUT_GOLDENS_16: &[(&str, &str)] = &[
+        ("cli_concept__concept_add_broader_json", "concept add"),
+        ("cli_find__find_tag_exact_json", "find"),
+        ("cli_find__find_tag_json", "find"),
+        ("cli_tag__add_tag_json", "add"),
+        ("cli_tag__edit_add_remove_tag_json", "edit"),
+    ];
+
     /// Every stdout snapshot's row.
     #[allow(unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
         let mut rows = STDOUT_GOLDENS.to_vec();
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_12);
+        #[cfg(feature = "goal")]
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_16);
         rows
     }
 
@@ -92,6 +115,11 @@ mod goal {
         {
             pending = &[];
         }
+        let mut pending_16: &[&str] = GOAL_SNAPS_16;
+        #[cfg(feature = "goal")]
+        {
+            pending_16 = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -99,7 +127,10 @@ mod goal {
                 continue;
             }
             let stem = path.file_stem().unwrap().to_str().unwrap().to_string();
-            if hidden.contains(&stem.as_str()) || pending.contains(&stem.as_str()) {
+            if hidden.contains(&stem.as_str())
+                || pending.contains(&stem.as_str())
+                || pending_16.contains(&stem.as_str())
+            {
                 continue;
             }
             let text = std::fs::read_to_string(&path).unwrap();
@@ -201,6 +232,8 @@ mod goal {
         let goldens = goldens();
         assert!(goldens.len() >= 14, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 23, "found only {} goldens", goldens.len());
+        #[cfg(feature = "goal")]
+        assert!(goldens.len() >= 29, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
                 .unwrap_or_else(|| panic!("golden `{}` is not mapped to a schema", g.stem));
@@ -406,13 +439,13 @@ mod goal {
         case("schema", json!({"schema_version": 1}), false);
 
         // error: the envelope, the rule pattern, and per-rule details.
-        case("error", error("UNKNOWN_CONCEPT", json!({})), true);
+        case("error", error("SOME_RULE", json!({})), true);
         case("error", error("unknown_concept", json!({})), false);
         case("error", error("", json!({})), false);
-        let mut v = error("UNKNOWN_CONCEPT", json!({}));
+        let mut v = error("SOME_RULE", json!({}));
         v.as_object_mut().unwrap().remove("schema_version");
         case("error", v, false);
-        let mut v = error("UNKNOWN_CONCEPT", json!({}));
+        let mut v = error("SOME_RULE", json!({}));
         v["error"].as_object_mut().unwrap().remove("message");
         case("error", v, false);
         case(

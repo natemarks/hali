@@ -1,0 +1,5 @@
+@prefix hali: <https://w3id.org/hali#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# A skos:broader triple that only extensions.ttl holds: it still counts for `find --tag`.
+hali:bird skos:broader hali:animal .
