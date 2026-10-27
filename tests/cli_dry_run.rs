@@ -481,3 +481,124 @@ fn help_lists_dry_run() {
     assert_eq!(out.code, Some(0), "{}", out.stderr);
     assert!(out.stdout.contains("--dry-run"), "{}", out.stdout);
 }
+
+/// #10: `add` and `edit` under the dry-run equality helper (spec §9.5, §14.3).
+#[cfg(feature = "goal")]
+mod resource {
+    use super::{fixture, support};
+    use std::path::{Path, PathBuf};
+
+    const EXISTING: &str = "urn:uuid:0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10";
+
+    fn sample(dir: &tempfile::TempDir, name: &str, contents: &[u8]) -> PathBuf {
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let path = root.join(name);
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    /// A store whose resources.ttl already catalogs `path` (a complete Resource).
+    fn store_cataloging(path: &Path) -> tempfile::TempDir {
+        let store = tempfile::tempdir().unwrap();
+        let ttl = format!(
+            "@prefix hali: <https://w3id.org/hali#> .\n\
+             @prefix dcat: <http://www.w3.org/ns/dcat#> .\n\
+             @prefix dcterms: <http://purl.org/dc/terms/> .\n\
+             @prefix foaf: <http://xmlns.com/foaf/0.1/> .\n\
+             @prefix prov: <http://www.w3.org/ns/prov#> .\n\
+             @prefix spdx: <http://spdx.org/rdf/terms#> .\n\
+             @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n\
+             <urn:uuid:0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10> a hali:Resource ;\n\
+             \tdcterms:title \"Cataloged\" ;\n\
+             \tdcat:downloadURL <file://{}> ;\n\
+             \tdcat:mediaType <http://www.iana.org/assignments/media-types/text/plain> ;\n\
+             \tdcat:byteSize 6 ;\n\
+             \tdcterms:modified \"2026-10-20T14:02:11Z\"^^xsd:dateTime ;\n\
+             \tspdx:checksum <urn:uuid:0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10#sha256> .\n\
+             <urn:uuid:0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10#sha256> \
+             spdx:algorithm spdx:checksumAlgorithm_sha256 ;\n\
+             \tspdx:checksumValue \"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\"^^xsd:hexBinary .\n\
+             <urn:uuid:0192f0c4-7b20-7a01-8d2e-1f0b9c3a5e77> a dcat:CatalogRecord ;\n\
+             \tfoaf:primaryTopic <urn:uuid:0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10> ;\n\
+             \tdcterms:issued \"2026-10-21T08:00:00Z\"^^xsd:dateTime ;\n\
+             \tdcterms:modified \"2026-10-21T08:00:00Z\"^^xsd:dateTime ;\n\
+             \tprov:wasAttributedTo <urn:uuid:0192f0c4-0000-7000-8000-000000000001> .\n\
+             <urn:uuid:0192f0c4-0000-7000-8000-000000000001> a prov:Person ;\n\
+             \tfoaf:name \"nate\" .\n",
+            path.display()
+        );
+        std::fs::write(store.path().join("resources.ttl"), ttl).unwrap();
+        store
+    }
+
+    #[test]
+    fn add_dry_run_matches_real_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = sample(&dir, "a.txt", b"hello\n");
+        let b = sample(&dir, "b.txt", b"second file\n");
+        let (a, b) = (a.to_str().unwrap(), b.to_str().unwrap());
+        let fixture_store = fixture("store");
+        // A fresh store (the Person is minted) and one that already has a Person.
+        for store in [None, Some(fixture_store.as_path())] {
+            let dry = support::assert_dry_run_matches_real_run(store, &["add", a]);
+            assert_eq!(dry["added"].as_array().unwrap().len(), 1);
+            assert_eq!(dry["existing"], serde_json::json!([]));
+            assert!(!dry["changes"].as_array().unwrap().is_empty());
+
+            let dry = support::assert_dry_run_matches_real_run(store, &["add", a, b, a]);
+            assert_eq!(dry["added"].as_array().unwrap().len(), 2);
+
+            let dry = support::assert_dry_run_matches_real_run(store, &["add", "--title", "T", a]);
+            assert_eq!(dry["added"][0]["title"], "T");
+        }
+    }
+
+    #[test]
+    fn edit_dry_run_matches_real_run() {
+        let store = fixture("store");
+        for args in [
+            vec![
+                "edit",
+                EXISTING,
+                "--title",
+                "Linked Data Patterns, 2nd edition",
+            ],
+            vec![
+                "edit",
+                "0192F0C4-7B1E-7CC3-9A43-6C1D2E8F4B10",
+                "--title",
+                "  Padded  ",
+            ],
+        ] {
+            let dry = support::assert_dry_run_matches_real_run(Some(&store), &args);
+            assert_eq!(
+                dry["resource"]["id"],
+                "0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10"
+            );
+            let changes = dry["changes"].as_array().unwrap();
+            // Title out, title in, catalog record modified out, modified in.
+            assert_eq!(changes.len(), 4, "{dry}");
+        }
+    }
+
+    #[test]
+    fn re_add_dry_run_no_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = sample(&dir, "a.txt", b"hello\n");
+        let store = store_cataloging(&path);
+        let dry = support::assert_dry_run_matches_real_run(
+            Some(store.path()),
+            &["add", path.to_str().unwrap()],
+        );
+        assert_eq!(dry["added"], serde_json::json!([]));
+        assert_eq!(dry["existing"].as_array().unwrap().len(), 1);
+        assert_eq!(dry["changes"], serde_json::json!([]));
+
+        // The same Resource under `edit` with its own title: no changes either.
+        let dry = support::assert_dry_run_matches_real_run(
+            Some(store.path()),
+            &["edit", EXISTING, "--title", "Cataloged"],
+        );
+        assert_eq!(dry["changes"], serde_json::json!([]));
+    }
+}

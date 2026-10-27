@@ -106,6 +106,7 @@ mod goal {
 
     // ---- criterion 1: list ----------------------------------------------------------------
 
+    #[cfg(feature = "goal")]
     #[test]
     fn schema_lists_names_json() {
         let env = Env::new();
@@ -118,6 +119,7 @@ mod goal {
         });
     }
 
+    #[cfg(feature = "goal")]
     #[test]
     fn schema_lists_names_text() {
         let env = Env::new();
@@ -126,8 +128,34 @@ mod goal {
         assert_eq!(out.stderr, "");
         assert_eq!(
             out.stdout,
-            "concept add\nconcept list\nerror\nschema\nvalidate\n"
+            "add\nconcept add\nconcept list\nedit\nerror\nschema\nshow\nvalidate\n"
         );
+    }
+
+    /// #10: the three new commands each have a bare draft 2020-12 schema, the same in text
+    /// and `--json` mode, with no `$id` and no external `$ref`.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn new_command_schemas_are_documents() {
+        let env = Env::new();
+        for name in ["add", "show", "edit"] {
+            let text = env.run(["schema", name]);
+            let json = env.run(["schema", "--json", name]);
+            for (mode, out) in [("text", &text), ("--json", &json)] {
+                assert_eq!(out.code, Some(0), "{name} {mode}: {}", out.stderr);
+                assert_eq!(out.stderr, "", "{name} {mode}");
+            }
+            assert_eq!(text.stdout, json.stdout, "{name}");
+            let doc = one_line_json(&text.stdout);
+            assert_eq!(
+                doc["$schema"], "https://json-schema.org/draft/2020-12/schema",
+                "{name}"
+            );
+            assert!(doc.get("$id").is_none(), "{name}");
+            let mut refs = Vec::new();
+            external_refs(&doc, &mut refs);
+            assert!(refs.is_empty(), "{name}: external $ref {refs:?}");
+        }
     }
 
     // ---- criterion 2: one schema is a bare draft 2020-12 document ---------------------------

@@ -70,3 +70,40 @@ fn config_file_precedence() {
 
     assert!(hali::paths::config_file(env_of(&[])).is_err());
 }
+
+/// #10: `downloadURL` is `file://` + the real path; every UTF-8 byte outside
+/// `A-Za-z0-9-._~/!$&'()*+,;=:@` becomes uppercase `%XX`.
+/// Assumed API: `hali::paths::file_url(path: &str) -> String` and
+/// `hali::paths::path_from_file_url(url: &str) -> Option<String>` (the inverse; `None` for a
+/// URL that is not `file:///...` or has a malformed `%` escape).
+#[cfg(feature = "goal")]
+#[test]
+fn file_url_percent_encodes() {
+    let cases = [
+        ("/a/b.txt", "file:///a/b.txt"),
+        ("/my notes/a b.txt", "file:///my%20notes/a%20b.txt"),
+        (
+            "/keep/-._~!$&'()*+,;=:@/x",
+            "file:///keep/-._~!$&'()*+,;=:@/x",
+        ),
+        ("/100%/#x?y", "file:///100%25/%23x%3Fy"),
+        ("/caf\u{e9}.txt", "file:///caf%C3%A9.txt"),
+        ("/\u{65e5}\u{672c}", "file:///%E6%97%A5%E6%9C%AC"),
+        (
+            "/a[b]{c}|^`\"<>\\x",
+            "file:///a%5Bb%5D%7Bc%7D%7C%5E%60%22%3C%3E%5Cx",
+        ),
+        ("/tab\there\nnl", "file:///tab%09here%0Anl"),
+    ];
+    for (path, url) in cases {
+        assert_eq!(hali::paths::file_url(path), url, "{path:?}");
+        assert_eq!(
+            hali::paths::path_from_file_url(url).as_deref(),
+            Some(path),
+            "{url}"
+        );
+    }
+    for bad in ["http://a/b", "file:/a/b", "file:///a%zz", "file:///a%2", ""] {
+        assert_eq!(hali::paths::path_from_file_url(bad), None, "{bad:?}");
+    }
+}
