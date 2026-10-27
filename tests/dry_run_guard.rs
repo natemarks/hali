@@ -13,6 +13,7 @@ use std::time::SystemTime;
 const CASES: &[(&str, &[&str])] = &[
     ("concept add", &["concept", "add", "guard probe"]),
     ("concept list", &["concept", "list"]),
+    ("schema", &["schema"]),
     ("validate", &["validate"]),
 ];
 

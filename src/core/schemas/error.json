@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hali error envelope (stderr under --json)",
+  "type": "object",
+  "properties": {
+    "schema_version": {"const": 1},
+    "error": {
+      "type": "object",
+      "properties": {
+        "rule": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$"},
+        "message": {"type": "string"},
+        "details": {},
+        "suggested_fix": {"type": ["string", "null"]},
+        "suggested_command": {"type": ["string", "null"]}
+      },
+      "required": ["rule", "message", "details", "suggested_fix", "suggested_command"],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {"properties": {"rule": {"const": "SHACL_VIOLATION"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "violations": {"type": "array", "items": {"$ref": "#/$defs/violation"}},
+                  "total": {"type": "integer", "minimum": 0},
+                  "truncated": {"type": "boolean"}
+                },
+                "required": ["violations", "total", "truncated"]
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"rule": {"const": "SHAPES_INVALID"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {"file": {"type": "string"}},
+                "required": ["file"]
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"rule": {"const": "LABEL_TAKEN"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "label": {"type": "string"},
+                  "language": {"type": "string"},
+                  "concept": {"type": "string"}
+                },
+                "required": ["label", "language", "concept"]
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "required": ["schema_version", "error"],
+  "additionalProperties": false
+}

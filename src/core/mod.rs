@@ -3,6 +3,7 @@
 
 pub mod concept;
 pub mod config;
+pub mod schema;
 pub mod validate;
 
 use crate::storage;

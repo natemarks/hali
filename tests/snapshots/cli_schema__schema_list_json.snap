@@ -1,0 +1,5 @@
+---
+source: tests/cli_schema.rs
+expression: out.stdout
+---
+{"schema_version":1,"schemas":["concept add","concept list","error","schema","validate"]}

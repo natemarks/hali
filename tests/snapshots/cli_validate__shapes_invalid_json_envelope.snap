@@ -1,0 +1,5 @@
+---
+source: tests/cli_validate.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"SHAPES_INVALID","message":"extensions.ttl has SHACL shapes that hali cannot use","details":{"file":"extensions.ttl"},"suggested_fix":"Fix or remove the shapes in extensions.ttl; hali applies SHACL Core shapes from it.","suggested_command":null}}
