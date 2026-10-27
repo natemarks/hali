@@ -583,8 +583,9 @@ Source: [Repo layout for the CLI and nvim plugin](https://github.com/natemarks/m
 |---|---|
 | `static` | `fmt-check clippy dead-code unit audit shellcheck stylua-check lua-test` |
 | `static-check` | CI variant (check-only), run exactly once per PR and per push to `main` |
-| `unit` | `cargo test` |
-| `unit-update-golden` | `INSTA_UPDATE=always cargo test` |
+| `unit` | `cargo test --features test-hooks`: every test that needs no outside software |
+| `unit-update-golden` | `INSTA_UPDATE=always cargo test --features test-hooks` |
+| `test-external` | `cargo test --features test-hooks -- --ignored`: the `#[ignore]`d tests that need outside software (the MIME database); not in `static` |
 | `lua-test` | headless Neovim + plenary-busted against the fake CLI |
 | `lua-install-test` | per-manager install smoke tests (`spec/install/`) |
 | `bench` | latency benchmark (§14.5); not in `static` |
@@ -664,8 +665,8 @@ About 8 overlapping reader and writer processes run on one store, each writer ad
 - **Usage guide:** the drift test of §11.3.
 
 ### 14.7 Environment-dependent tests and CI
-- **MIME database:** detection tests that need `/usr/share/mime` are marked so they can be skipped on machines without it.
-- **CI** (`ubuntu-latest`): installs `shared-mime-info`, Neovim 0.12 (via a setup action pinned to a commit), stylua and the toolchain from `rust-toolchain.toml`. `lua-install-test` clones lazy.nvim at a pinned commit. `bench` and `coverage` never run in CI.
+- **Outside software:** a test that needs software outside the repository, such as the MIME database (`/usr/share/mime`) for detection tests, is `#[ignore = "<reason>"]`, so `make unit` runs without it. `make test-external` runs those tests.
+- **CI** (`ubuntu-latest`): installs `shared-mime-info` and runs `make test-external` in its own job, apart from `static-check`; it also installs Neovim 0.12 (via a setup action pinned to a commit), stylua and the toolchain from `rust-toolchain.toml`. `lua-install-test` clones lazy.nvim at a pinned commit. `bench` and `coverage` never run in CI.
 
 ---
 

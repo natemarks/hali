@@ -19,8 +19,9 @@ Specified in `docs/spec.md` §13.2. `make help` lists what exists so far; `make 
 |---|---|
 | `make static` | All checks with auto-format. Run before considering a change done. |
 | `make static-check` | What CI runs (check-only). |
-| `make unit` | `cargo test` |
+| `make unit` | `cargo test --features test-hooks`: every test that needs no outside software. |
 | `make unit-update-golden` | Accept changed `insta` snapshots, after reviewing them. |
+| `make test-external` | `cargo test --features test-hooks -- --ignored`: the tests that need outside software (the MIME database). CI runs it in its own job. |
 | `make lua-test` | Plugin tests (headless Neovim + plenary). |
 | `make install` | Install the dev build into `~/.local/bin`. |
 
@@ -28,6 +29,7 @@ Specified in `docs/spec.md` §13.2. `make help` lists what exists so far; `make 
 
 - **TDD at the `core` seam.** Write the failing test first, confirm it fails, implement, confirm it passes, then wire the operation into `cli` as a thin passthrough.
 - **Every command needs** a `core` unit test, a CLI integration test (`assert_cmd`) and an `insta` golden JSON snapshot. **Every error rule needs** a test that triggers it.
+- **Tests that need outside software** (such as the shared-mime-info database) are `#[ignore = "<reason>"]`d, so `make unit` stays self-contained; `make test-external` runs them.
 - **`core` is transport-agnostic.** It never touches clap, stdout or the process environment. `cli` holds no business logic. Clock and ID generation are injected (`Clock`, `IdGen`).
 - **Stay behind the seams.** OS- and storage-specific code lives only in `storage`, `media_type` and `paths`.
 - **Pin dependencies exactly** (`=`) in `Cargo.toml`.

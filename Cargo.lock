@@ -534,6 +534,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dirs-next"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b98cf8ebf19c3d1b223e151f99a4f9f0690dca41414773390fc824184ac833e1"
+dependencies = [
+ "cfg-if",
+ "dirs-sys-next",
+]
+
+[[package]]
 name = "dirs-sys"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -541,8 +551,19 @@ checksum = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab"
 dependencies = [
  "libc",
  "option-ext",
- "redox_users",
+ "redox_users 0.5.3",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "dirs-sys-next"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ebda144c4fe02d1f7ea1a7d9641b6fc6b580adcfa024ae48797ecdeb6825b4d"
+dependencies = [
+ "libc",
+ "redox_users 0.4.6",
+ "winapi",
 ]
 
 [[package]]
@@ -823,6 +844,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glob"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
+
+[[package]]
 name = "hali"
 version = "0.0.0"
 dependencies = [
@@ -833,13 +860,16 @@ dependencies = [
  "oxigraph",
  "oxrdf",
  "oxttl",
+ "percent-encoding",
  "rudof_rdf",
  "serde",
  "serde_json",
+ "sha2",
  "shacl",
  "tempfile",
  "toml 1.1.8+spec-1.1.0",
  "uuid",
+ "xdg-mime",
 ]
 
 [[package]]
@@ -1192,7 +1222,7 @@ dependencies = [
  "jni-sys",
  "log",
  "simd_cesu8",
- "thiserror",
+ "thiserror 2.0.21",
  "walkdir",
  "windows-link",
 ]
@@ -1395,10 +1425,16 @@ dependencies = [
  "rudof_iri",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 2.0.21",
  "tracing",
  "yaml-rust2",
 ]
+
+[[package]]
+name = "mime"
+version = "0.3.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "minimal-lexical"
@@ -1576,7 +1612,7 @@ dependencies = [
  "sparesults",
  "spareval",
  "spargebra",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1613,7 +1649,7 @@ dependencies = [
  "oxiri 0.2.11",
  "oxrdf",
  "ryu-js",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1628,7 +1664,7 @@ dependencies = [
  "oxsdatatypes",
  "rand 0.9.5",
  "sha2",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1641,7 +1677,7 @@ dependencies = [
  "oxrdf",
  "oxrdfxml",
  "oxttl",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1654,7 +1690,7 @@ dependencies = [
  "oxiri 0.2.11",
  "oxrdf",
  "quick-xml",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1664,7 +1700,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "034779b2d182d5069cd28b1f921ba334cad708ab1340db9776312464b6874b78"
 dependencies = [
  "js-sys",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1677,7 +1713,7 @@ dependencies = [
  "oxilangtag",
  "oxiri 0.2.11",
  "oxrdf",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1830,7 +1866,7 @@ dependencies = [
  "proptest",
  "rudof_iri",
  "serde",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1914,7 +1950,7 @@ dependencies = [
  "rustc-hash",
  "rustls",
  "socket2",
- "thiserror",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "web-time",
@@ -1936,7 +1972,7 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "slab",
- "thiserror",
+ "thiserror 2.0.21",
  "tinyvec",
  "tracing",
  "web-time",
@@ -2102,12 +2138,23 @@ dependencies = [
 
 [[package]]
 name = "redox_users"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
+dependencies = [
+ "getrandom 0.2.17",
+ "libredox",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "redox_users"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60dc65c0ff1a7ae1294b0c67b9f14baf70b644404010370171787bfac1038fc0"
 dependencies = [
  "libredox",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2239,7 +2286,7 @@ checksum = "e1d187d93fe162db5cc638e1be7e1f85761705e57b66abd8e15b64cc30636bd2"
 dependencies = [
  "dirs",
  "serde",
- "thiserror",
+ "thiserror 2.0.21",
  "toml 0.9.12+spec-1.1.0",
 ]
 
@@ -2257,7 +2304,7 @@ dependencies = [
  "proptest",
  "reqwest",
  "serde",
- "thiserror",
+ "thiserror 2.0.21",
  "url",
 ]
 
@@ -2298,7 +2345,7 @@ dependencies = [
  "spargebra",
  "tabled",
  "tempfile",
- "thiserror",
+ "thiserror 2.0.21",
  "tokio",
  "toml 0.9.12+spec-1.1.0",
  "tracing",
@@ -2322,7 +2369,7 @@ checksum = "21b0f6589a304ad1817def1a3b79d7c72a44f614461f7f566783d9d148a51f2b"
 dependencies = [
  "serde",
  "tempfile",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2662,7 +2709,7 @@ dependencies = [
  "schemars",
  "serde",
  "sparql_service",
- "thiserror",
+ "thiserror 2.0.21",
  "toml 0.9.12+spec-1.1.0",
  "tracing",
 ]
@@ -2743,7 +2790,7 @@ dependencies = [
  "memchr",
  "oxrdf",
  "quick-xml",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2766,7 +2813,7 @@ dependencies = [
  "sparesults",
  "spargebra",
  "sparopt",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2780,7 +2827,7 @@ dependencies = [
  "oxrdf",
  "peg",
  "rand 0.9.5",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2816,7 +2863,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sparesults",
- "thiserror",
+ "thiserror 2.0.21",
  "toml 0.9.12+spec-1.1.0",
  "tracing",
 ]
@@ -2959,11 +3006,31 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
+version = "1.0.69"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
+dependencies = [
+ "thiserror-impl 1.0.69",
+]
+
+[[package]]
+name = "thiserror"
 version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09e52cb86a36cede5cb101bf8908837b3e4c6e5e59fe7fd85c23fb56200d189e"
 dependencies = [
- "thiserror-impl",
+ "thiserror-impl 2.0.21",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "1.0.69"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -3201,6 +3268,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
 
 [[package]]
+name = "unicase"
+version = "2.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "357cc3acc6a036009fd6c973ed009037c732d60d0b4f6c673e9041497482a28f"
+
+[[package]]
 name = "unicode-general-category"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3436,6 +3509,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "winapi"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c839a674fcd7a98952e593242ea400abe93992746761e38641405d28b00f419"
+dependencies = [
+ "winapi-i686-pc-windows-gnu",
+ "winapi-x86_64-pc-windows-gnu",
+]
+
+[[package]]
+name = "winapi-i686-pc-windows-gnu"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
+
+[[package]]
 name = "winapi-util"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3443,6 +3532,12 @@ checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "winapi-x86_64-pc-windows-gnu"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "windows-link"
@@ -3558,6 +3653,19 @@ name = "writeable"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
+
+[[package]]
+name = "xdg-mime"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58d325d0ca93fb1984a56eb926f019acfc67bd2ec559b0dbf09cafcc92e81ec9"
+dependencies = [
+ "dirs-next",
+ "glob",
+ "mime",
+ "nom",
+ "unicase",
+]
 
 [[package]]
 name = "yaml-rust2"
