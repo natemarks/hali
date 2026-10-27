@@ -53,6 +53,36 @@ enum Command {
         /// A command path as separate words (`concept add`) or `error`; omit to list the names
         name: Vec<String>,
     },
+    /// List Resources, with filters, a sort and paging
+    Find {
+        /// Only titles containing this text, case-insensitively
+        #[arg(long)]
+        title: Option<String>,
+        /// Only this media type: `type/subtype` or `type/*`
+        #[arg(long, value_parser = parse_media_pattern)]
+        media_type: Option<resource::MediaPattern>,
+        /// Only Resources whose file is gone
+        #[arg(long)]
+        missing: bool,
+        /// Only Resources whose file changed since it was cataloged
+        #[arg(long)]
+        stale: bool,
+        /// The order: modified and added are newest first
+        #[arg(long, value_enum, default_value_t = SortArg::Modified)]
+        sort: SortArg,
+        /// Maximum number of results
+        #[arg(long, default_value_t = 50, allow_hyphen_values = true, value_parser = parse_limit)]
+        limit: usize,
+        /// Results to skip
+        #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
+        offset: usize,
+        /// Print only these comma-separated fields of each result, in --json
+        #[arg(long, value_parser = parse_fields)]
+        fields: Option<FieldList>,
+        /// Print only the file paths, one per line
+        #[arg(long)]
+        path_only: bool,
+    },
     /// Show one Resource with its catalog record
     Show {
         /// A path or a full UUID
@@ -71,6 +101,17 @@ enum Command {
         #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
         offset: usize,
     },
+}
+
+/// Field names in record order; a newtype so clap reads it as one value, not a list.
+#[derive(Clone)]
+struct FieldList(Vec<String>);
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum SortArg {
+    Modified,
+    Added,
+    Title,
 }
 
 #[derive(Subcommand)]
@@ -100,6 +141,18 @@ fn parse_label(label: &str) -> Result<String, String> {
 /// Rejects bad titles at parse time, so they are usage errors in clap's format.
 fn parse_title(title: &str) -> Result<String, String> {
     resource::normalise_title(title).map_err(|e| e.message)
+}
+
+/// Rejects bad media type patterns at parse time, so they are usage errors in clap's format.
+fn parse_media_pattern(pattern: &str) -> Result<resource::MediaPattern, String> {
+    resource::parse_media_pattern(pattern).map_err(|e| e.message)
+}
+
+/// Rejects bad `--fields` lists at parse time, so they are usage errors in clap's format.
+fn parse_fields(list: &str) -> Result<FieldList, String> {
+    resource::parse_fields(list)
+        .map(FieldList)
+        .map_err(|e| e.message)
 }
 
 /// A limit below 1 would page forever (`next_offset` would never advance).
@@ -278,6 +331,76 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 );
             };
             mutated(cli, &dir, &store, output, &edited.changes, text)?;
+        }
+        Command::Find {
+            title,
+            media_type,
+            missing,
+            stale,
+            sort,
+            limit,
+            offset,
+            fields,
+            path_only,
+        } => {
+            let query = resource::Query {
+                title: title.clone(),
+                media_type: media_type.clone(),
+                missing: *missing,
+                stale: *stale,
+                sort: match sort {
+                    SortArg::Modified => resource::Sort::Modified,
+                    SortArg::Added => resource::Sort::Added,
+                    SortArg::Title => resource::Sort::Title,
+                },
+                offset: *offset,
+                limit: *limit,
+            };
+            let found = resource::find(&ctx, &store, &query, |p| storage::stat(Path::new(p)));
+            if *path_only {
+                for r in &found.results {
+                    println!("{}", printable(&r.path));
+                }
+            } else if cli.json {
+                let results: Vec<serde_json::Value> = found
+                    .results
+                    .iter()
+                    .map(|r| match fields {
+                        Some(FieldList(f)) => resource::narrow(r, f),
+                        None => serde_json::to_value(r).expect("records serialize"),
+                    })
+                    .collect();
+                print_json(&FindOutput {
+                    schema_version: SCHEMA_VERSION,
+                    results,
+                    total: found.total,
+                    truncated: found.truncated,
+                    next_offset: found.next_offset,
+                });
+            } else {
+                for r in &found.results {
+                    let marker = if r.missing {
+                        "\tmissing"
+                    } else if r.stale {
+                        "\tstale"
+                    } else {
+                        ""
+                    };
+                    println!(
+                        "{}\t{}\t{}{marker}",
+                        printable(&r.id),
+                        printable(&r.title),
+                        printable(&r.path)
+                    );
+                }
+                if let Some(next) = found.next_offset {
+                    eprintln!(
+                        "note: showing {} of {}; next: --offset {next}",
+                        found.results.len(),
+                        found.total
+                    );
+                }
+            }
         }
         Command::Show {
             reference,
@@ -566,6 +689,15 @@ struct ValidateOutput<'a> {
 struct SchemaList {
     schema_version: u32,
     schemas: Vec<&'static str>,
+}
+
+#[derive(Serialize)]
+struct FindOutput {
+    schema_version: u32,
+    results: Vec<serde_json::Value>,
+    total: usize,
+    truncated: bool,
+    next_offset: Option<usize>,
 }
 
 #[derive(Serialize)]

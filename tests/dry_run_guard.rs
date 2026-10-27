@@ -19,6 +19,7 @@ const CASES: &[(&str, &[&str])] = &[
     ("concept add", &["concept", "add", "guard probe"]),
     ("concept list", &["concept", "list"]),
     ("edit", &["edit", STORED, "--title", "guard probe"]),
+    ("find", &["find", "--limit", "1"]),
     ("schema", &["schema"]),
     ("show", &["show", STORED]),
     ("validate", &["validate"]),
