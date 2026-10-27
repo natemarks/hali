@@ -1,0 +1,5 @@
+---
+source: tests/cli_find.rs
+expression: out.stdout
+---
+{"schema_version":1,"results":[{"id":"018bcfe5-6801-710a-adec-89025cc1beeb","path":"/TMP/files/notes.txt","title":"notes","media_type":"text/plain","editable":true,"missing":false,"stale":false,"types":[],"tags":[],"byte_size":6,"modified":"2026-10-20T14:02:11Z"},{"id":"018bcfe5-6804-7099-ac6c-d7363ca585e7","path":"/TMP/files/ideas.txt","title":"ideas","media_type":"text/plain","editable":true,"missing":false,"stale":false,"types":[],"tags":[],"byte_size":6,"modified":"2026-10-20T14:02:11Z"}],"total":2,"truncated":false,"next_offset":null}

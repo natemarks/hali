@@ -1,0 +1,6 @@
+tests/core_find.rs
+tests/cli_find.rs
+tests/schema_contract.rs
+tests/snapshots/cli_find__find_json.snap
+tests/snapshots/cli_find__find_json_fields.snap
+tests/snapshots/cli_find__find_json_empty.snap
