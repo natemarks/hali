@@ -57,7 +57,6 @@ mod goal {
         "cli_find__find_json_fields",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_12: &[(&str, &str)] = &[
         ("cli_find__find_json", "find"),
         ("cli_find__find_json_empty", "find"),
@@ -69,7 +68,6 @@ mod goal {
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
         let mut rows = STDOUT_GOLDENS.to_vec();
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_12);
         rows
     }
@@ -91,7 +89,6 @@ mod goal {
             hidden = &[];
         }
         let mut pending: &[&str] = GOAL_SNAPS_12;
-        #[cfg(feature = "goal")]
         {
             pending = &[];
         }
@@ -203,7 +200,6 @@ mod goal {
     fn every_golden_validates() {
         let goldens = goldens();
         assert!(goldens.len() >= 14, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 23, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
@@ -605,7 +601,6 @@ mod goal {
     }
 
     /// #12: what the `find` schema accepts and refuses.
-    #[cfg(feature = "goal")]
     #[test]
     fn find_schema_accepts_and_rejects() {
         let page = |results: Vec<Value>| {

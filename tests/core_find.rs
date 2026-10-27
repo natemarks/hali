@@ -25,7 +25,6 @@
 //! Stores are built with `resource::add`, whose behaviour #10 settled. Each Resource gets its
 //! own `SeededIdGen` seed and `FixedClock` instant, so the catalog record's `issued` can vary.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::resource::{self, FileFacts, Found, Query, Record, Sort};
     use hali::core::{Context, FixedClock, SeededIdGen};

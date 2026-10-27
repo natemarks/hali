@@ -18,7 +18,6 @@
 //! snapshot tests/snapshots/cli_schema__schema_list_json.snap to include `find`; the test
 //! `schema_lists_find` below covers the new list exactly.
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use hali::core::{IdGen, SeededIdGen};
