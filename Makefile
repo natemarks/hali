@@ -32,7 +32,7 @@ test-external: ## run the #[ignore]d tests that need outside software (shared-mi
 	cargo test --features test-hooks -- --ignored
 
 integration: ## run integration tests
-	cargo test --test '*'
+	cargo test --features test-hooks --test '*'
 
 static-check: fmt-check clippy dead-code unit audit shellcheck ## run all static checks, check-only (CI)
 
