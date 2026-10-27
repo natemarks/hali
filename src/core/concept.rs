@@ -72,7 +72,7 @@ pub fn add(ctx: &Context, store: &mut Store, label: &str) -> Result<Mutation<Con
     .into_iter()
     .map(|(s, p, o)| Quad::new(s.clone(), p, o, graph.clone()))
     .collect();
-    validate::guard(store, &quads)?;
+    validate::guard(store, &quads, &[])?;
     let changes = insert_all(store, &quads);
 
     Ok(Mutation {

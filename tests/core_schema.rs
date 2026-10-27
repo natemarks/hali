@@ -29,7 +29,16 @@ mod goal {
     fn names_and_get() {
         assert_eq!(
             names(),
-            ["concept add", "concept list", "error", "schema", "validate"]
+            [
+                "add",
+                "concept add",
+                "concept list",
+                "edit",
+                "error",
+                "schema",
+                "show",
+                "validate"
+            ]
         );
         for name in names() {
             let doc = schema::get(&name).unwrap_or_else(|| panic!("no schema for {name}"));

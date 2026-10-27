@@ -22,14 +22,17 @@ audit: ## scan for vulnerable dependencies
 shellcheck: ## check shell scripts
 	git ls-files 'scripts/*.sh' | xargs -r shellcheck --severity=error --format=gcc
 
-unit: ## run unit and CLI tests
-	cargo test
+unit: ## run unit and CLI tests that need no outside software (with test-hooks)
+	cargo test --features test-hooks
 
 unit-update-golden: ## accept changed insta snapshots (review them first)
-	INSTA_UPDATE=always cargo test
+	INSTA_UPDATE=always cargo test --features test-hooks
+
+test-external: ## run the #[ignore]d tests that need outside software (shared-mime-info)
+	cargo test --features test-hooks -- --ignored
 
 integration: ## run integration tests
-	cargo test --test '*'
+	cargo test --features test-hooks --test '*'
 
 static-check: fmt-check clippy dead-code unit audit shellcheck ## run all static checks, check-only (CI)
 
@@ -38,7 +41,7 @@ static: fmt clippy dead-code unit audit shellcheck ## run all static checks with
 clean-cache: ## clean Rust build artifacts
 	cargo clean
 
-.PHONY: help fmt fmt-check clippy dead-code audit shellcheck unit unit-update-golden integration static static-check clean-cache
+.PHONY: help fmt fmt-check clippy dead-code audit shellcheck unit unit-update-golden test-external integration static static-check clean-cache
 
 # AI loop: see "AI loop" in AGENTS.md
 GOAL_STATIC ?= static-check

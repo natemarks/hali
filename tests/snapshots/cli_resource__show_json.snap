@@ -1,0 +1,5 @@
+---
+source: tests/cli_resource.rs
+expression: out.stdout
+---
+{"schema_version":1,"resource":{"id":"018bcfe5-6801-710a-adec-89025cc1beeb","path":"/TMP/files/notes.txt","title":"notes","media_type":"text/plain","editable":true,"missing":false,"stale":false,"types":[],"tags":[],"byte_size":6,"modified":"2026-10-20T14:02:11Z","relations":[],"catalog_record":{"id":"018bcfe5-6802-7893-a2ee-fb32555e71c1","issued":"2026-10-24T09:30:00Z","modified":"2026-10-24T09:30:00Z","attributed_to":{"id":"018bcfe5-6803-71bb-94d8-d101b5b9c34d","name":"user"}}}}

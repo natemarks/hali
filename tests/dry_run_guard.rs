@@ -8,12 +8,19 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::SystemTime;
 
+/// The Resource of tests/fixtures/store.
+const STORED: &str = "0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10";
+
 /// Valid argv (after the global flags) for every leaf subcommand, keyed by its path.
 /// Add a row here when you add a subcommand.
 const CASES: &[(&str, &[&str])] = &[
+    // Cargo.toml: a real file, relative to the package root the tests run in.
+    ("add", &["add", "Cargo.toml"]),
     ("concept add", &["concept", "add", "guard probe"]),
     ("concept list", &["concept", "list"]),
+    ("edit", &["edit", STORED, "--title", "guard probe"]),
     ("schema", &["schema"]),
+    ("show", &["show", STORED]),
     ("validate", &["validate"]),
 ];
 

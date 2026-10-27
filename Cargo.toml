@@ -14,15 +14,19 @@ goal = []
 
 [dependencies]
 clap = { version = "=4.6.7", features = ["derive"] }
+libc = "=0.2.191"
 oxigraph = { version = "=0.5.13", default-features = false }
 oxrdf = "=0.3.5"
 oxttl = "=0.2.5"
+percent-encoding = "=2.3.2"
 rudof_rdf = "=0.3.35"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+sha2 = "=0.11.1"
 shacl = "=0.3.35"
 toml = "=1.1.8"
 uuid = { version = "=1.29.0", features = ["v7"] }
+xdg-mime = "=0.4.0"
 
 [dev-dependencies]
 assert_cmd = "=2.2.2"

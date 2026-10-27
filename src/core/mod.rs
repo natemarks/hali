@@ -1,8 +1,9 @@
 //! Transport-agnostic operations. `core` works on an in-memory store and never touches clap,
-//! stdout, the filesystem or the process environment; time and ids are injected.
+//! stdout, the filesystem or the process environment; time, ids and file facts are injected.
 
 pub mod concept;
 pub mod config;
+pub mod resource;
 pub mod schema;
 pub mod validate;
 
@@ -47,15 +48,15 @@ impl Clock for SystemClock {
         let secs = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
-        rfc3339(secs)
+        rfc3339(i64::try_from(secs).unwrap_or(i64::MAX))
     }
 }
 
 /// Formats seconds since the Unix epoch as `YYYY-MM-DDTHH:MM:SSZ`.
-fn rfc3339(secs: u64) -> String {
-    let (days, rem) = (secs / 86_400, secs % 86_400);
+pub fn rfc3339(secs: i64) -> String {
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     // Civil date from days since 1970-01-01 (H. Hinnant's algorithm).
-    let z = days as i64 + 719_468;
+    let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
     let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
@@ -177,29 +178,49 @@ pub struct Mutation<T> {
 /// Inserts the quads the store does not hold yet (in their own graph) and returns them as
 /// `Op::Add` changes, sorted and without duplicates.
 pub(crate) fn insert_all(store: &storage::Store, quads: &[Quad]) -> Vec<Change> {
+    apply(store, quads, &[])
+}
+
+/// Removes the `remove` quads the store holds and that `add` does not put back, inserts the
+/// `add` quads it does not hold yet, and returns what changed, sorted and without duplicates.
+pub(crate) fn apply(store: &storage::Store, add: &[Quad], remove: &[Quad]) -> Vec<Change> {
+    let held = |quad: &Quad| store.contains(quad).expect("reading the in-memory store");
     let mut changes = Vec::new();
-    for quad in quads {
-        if store.contains(quad).expect("reading the in-memory store") {
+    for quad in remove {
+        if add.contains(quad) || !held(quad) {
+            continue;
+        }
+        store
+            .remove(quad)
+            .expect("removing from the in-memory store");
+        changes.push(change(Op::Remove, quad));
+    }
+    for quad in add {
+        if held(quad) {
             continue;
         }
         store
             .insert(quad)
             .expect("inserting into the in-memory store");
-        changes.push(Change {
-            op: Op::Add,
-            triple: format!(
-                "{} .",
-                TripleRef::new(
-                    quad.subject.as_ref(),
-                    quad.predicate.as_ref(),
-                    quad.object.as_ref()
-                )
-            ),
-        });
+        changes.push(change(Op::Add, quad));
     }
     changes.sort();
     changes.dedup();
     changes
+}
+
+fn change(op: Op, quad: &Quad) -> Change {
+    Change {
+        op,
+        triple: format!(
+            "{} .",
+            TripleRef::new(
+                quad.subject.as_ref(),
+                quad.predicate.as_ref(),
+                quad.object.as_ref()
+            )
+        ),
+    }
 }
 
 /// A structured error (spec §9.4). It serializes as the `error` member of the envelope.
@@ -336,7 +357,56 @@ impl Error {
             format!("invalid config file {}: {reason}", path.display()),
             json!({"path": path.display().to_string()}),
         )
-        .fix("Fix the config file; only [vocabulary] language is read.")
+        .fix("Fix the config file; only [user] name and [vocabulary] language are read.")
+    }
+
+    /// A path names no regular file. `kind` is `missing`, `directory` or `other`.
+    pub fn not_a_regular_file(path: &str, kind: &str) -> Error {
+        let what = match kind {
+            "missing" => "does not exist",
+            "directory" => "is a directory",
+            _ => "is not a regular file",
+        };
+        Error::new(
+            "NOT_A_REGULAR_FILE",
+            1,
+            format!("{path} {what}; only regular files can be cataloged"),
+            json!({"path": path, "kind": kind}),
+        )
+        .fix("Give the path of an existing regular file.")
+    }
+
+    /// A path is not UTF-8. `path` is its lossy (U+FFFD) form.
+    pub fn non_utf8_path(path: &str) -> Error {
+        Error::new(
+            "NON_UTF8_PATH",
+            1,
+            format!("{path} is not valid UTF-8; hali catalogs UTF-8 paths only"),
+            json!({"path": path}),
+        )
+        .fix("Rename the file, or the directory on its path, to a valid UTF-8 name.")
+    }
+
+    /// A regular file exists but cannot be opened or read.
+    pub fn file_unreadable(path: &str) -> Error {
+        Error::new(
+            "FILE_UNREADABLE",
+            1,
+            format!("cannot read {path}"),
+            json!({"path": path}),
+        )
+        .fix("Check that you can read the file and the directories above it.")
+    }
+
+    /// A Resource reference matches no Resource.
+    pub fn unknown_resource(reference: &str) -> Error {
+        Error::new(
+            "UNKNOWN_RESOURCE",
+            1,
+            format!("no cataloged Resource matches {reference}"),
+            json!({"ref": reference}),
+        )
+        .fix("Give the path of a cataloged file or the full UUID of a Resource; UUID prefixes are not accepted.")
     }
 }
 

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hali show --json",
+  "type": "object",
+  "properties": {
+    "schema_version": {"const": 1},
+    "resource": {
+      "type": "object",
+      "properties": {
+        "id": {"type": "string"},
+        "path": {"type": "string"},
+        "title": {"type": "string"},
+        "media_type": {"type": "string"},
+        "editable": {"type": "boolean"},
+        "missing": {"type": "boolean"},
+        "stale": {"type": "boolean"},
+        "types": {"type": "array", "items": {"type": "string"}},
+        "tags": {"type": "array", "items": {"$ref": "#/$defs/tag"}},
+        "byte_size": {"type": "integer", "minimum": 0},
+        "modified": {"type": "string"},
+        "relations": {"type": "array"},
+        "catalog_record": {"anyOf": [{"$ref": "#/$defs/catalog_record"}, {"type": "null"}]}
+      },
+      "required": ["id", "path", "title", "media_type", "editable", "missing", "stale", "types",
+        "tags", "byte_size", "modified", "relations", "catalog_record"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["schema_version", "resource"],
+  "additionalProperties": false
+}

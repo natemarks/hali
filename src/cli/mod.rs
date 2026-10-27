@@ -1,9 +1,12 @@
 //! The CLI adapter: clap definitions, wiring of the seams, text/JSON rendering, exit codes.
 
+use crate::core::resource::{self, FileFacts, Record};
 use crate::core::{self, Change, Clock, Context, Error, IdGen, Op, concept, schema, validate};
-use crate::{ontology, paths, storage};
+use crate::{media_type, ontology, paths, storage};
 use clap::{CommandFactory, Parser, Subcommand};
 use serde::Serialize;
+use std::ffi::OsString;
+use std::path::Path;
 use std::process::ExitCode;
 
 /// The JSON contract version (spec §9.3).
@@ -24,13 +27,40 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Catalog files in place; re-adding a cataloged file returns its Resource
+    Add {
+        /// Files to catalog (symlinks are resolved to the real path)
+        #[arg(required = true, value_name = "PATH")]
+        paths: Vec<OsString>,
+        /// The title, for one path only (default: the file name without extension)
+        #[arg(long, value_parser = parse_title)]
+        title: Option<String>,
+    },
     /// Manage the Concepts of the topics scheme
     #[command(subcommand)]
     Concept(ConceptCommand),
+    /// Edit a Resource
+    Edit {
+        /// A path or a full UUID
+        #[arg(value_name = "REF")]
+        reference: String,
+        /// The new title
+        #[arg(long, required = true, value_parser = parse_title)]
+        title: String,
+    },
     /// Print the JSON Schema of a command's --json output, or of the error envelope
     Schema {
         /// A command path as separate words (`concept add`) or `error`; omit to list the names
         name: Vec<String>,
+    },
+    /// Show one Resource with its catalog record
+    Show {
+        /// A path or a full UUID
+        #[arg(value_name = "REF")]
+        reference: String,
+        /// Print only the file's path
+        #[arg(long)]
+        path_only: bool,
     },
     /// Check the store against the SHACL shapes; writes nothing
     Validate {
@@ -65,6 +95,11 @@ enum ConceptCommand {
 /// Rejects bad labels at parse time, so they are usage errors in clap's format.
 fn parse_label(label: &str) -> Result<String, String> {
     core::normalise_label(label).map_err(|e| e.message)
+}
+
+/// Rejects bad titles at parse time, so they are usage errors in clap's format.
+fn parse_title(title: &str) -> Result<String, String> {
+    resource::normalise_title(title).map_err(|e| e.message)
 }
 
 /// A limit below 1 would page forever (`next_offset` would never advance).
@@ -191,6 +226,77 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
     let mut store = storage::load(&dir)?;
 
     match &cli.command {
+        Command::Add { paths, title } => {
+            if title.is_some() && paths.len() > 1 {
+                return Err(Error::usage("--title takes exactly one path"));
+            }
+            let files = inspect_all(paths)?;
+            let user = core::config::user_name(&config, env);
+            let mut added = resource::add_all(&ctx, &mut store, &files, title.as_deref(), &user)?;
+            for record in added
+                .value
+                .added
+                .iter_mut()
+                .chain(&mut added.value.existing)
+            {
+                observe(record);
+            }
+            let output = AddedOutput {
+                schema_version: SCHEMA_VERSION,
+                all: &added.value,
+            };
+            let verb = if cli.dry_run { "would add" } else { "added" };
+            let text = || {
+                for r in &added.value.added {
+                    println!("{verb} resource {}", describe(r));
+                }
+                for r in &added.value.existing {
+                    println!("existing resource {}", describe(r));
+                }
+            };
+            mutated(cli, &dir, &store, output, &added.changes, text)?;
+        }
+        Command::Edit { reference, title } => {
+            let id = resource::resolve_ref(&store, reference, paths::ref_path)?;
+            let mut edited = resource::edit_title(&ctx, &mut store, &id, title)?;
+            observe(&mut edited.value);
+            let output = ResourceOutput {
+                schema_version: SCHEMA_VERSION,
+                resource: &edited.value,
+            };
+            let record = &edited.value;
+            let text = || {
+                let verb = match (cli.dry_run, edited.changes.is_empty()) {
+                    (true, _) => "would retitle",
+                    (false, false) => "retitled",
+                    (false, true) => "unchanged",
+                };
+                println!(
+                    "{verb} resource {} \"{}\"",
+                    printable(&record.id),
+                    printable(&record.title)
+                );
+            };
+            mutated(cli, &dir, &store, output, &edited.changes, text)?;
+        }
+        Command::Show {
+            reference,
+            path_only,
+        } => {
+            let id = resource::resolve_ref(&store, reference, paths::ref_path)?;
+            let mut shown = resource::show(&ctx, &store, &id)?;
+            observe(&mut shown.record);
+            if *path_only {
+                println!("{}", printable(&shown.record.path));
+            } else if cli.json {
+                print_json(&ResourceOutput {
+                    schema_version: SCHEMA_VERSION,
+                    resource: &shown,
+                });
+            } else {
+                print_shown(&shown);
+            }
+        }
         Command::Concept(ConceptCommand::Add { label }) => {
             let added = concept::add(&ctx, &mut store, label)?;
             let concept = &added.value;
@@ -281,6 +387,138 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
         }
     }
     Ok(())
+}
+
+/// Resolves, checks and inspects each path argument in order, stopping at the first error. A
+/// real path given twice is inspected once.
+fn inspect_all(args: &[OsString]) -> Result<Vec<FileFacts>, Error> {
+    let mut files: Vec<FileFacts> = Vec::new();
+    for arg in args {
+        let real = paths::real_path(arg).map_err(|e| match e {
+            paths::PathError::NonUtf8 { path } => Error::non_utf8_path(&path),
+            paths::PathError::Missing { path } => Error::not_a_regular_file(&path, "missing"),
+        })?;
+        if files.iter().any(|f| f.path == real) {
+            continue;
+        }
+        let found = storage::inspect(Path::new(&real)).map_err(|e| match e {
+            storage::InspectError::Missing => Error::not_a_regular_file(&real, "missing"),
+            storage::InspectError::Directory => Error::not_a_regular_file(&real, "directory"),
+            storage::InspectError::Other => Error::not_a_regular_file(&real, "other"),
+            storage::InspectError::Unreadable => Error::file_unreadable(&real),
+        })?;
+        let name = Path::new(&real)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        files.push(FileFacts {
+            media_type: media_type::detect(name, &found.head),
+            path: real,
+            byte_size: found.byte_size,
+            modified: core::rfc3339(found.mtime),
+            sha256: found.sha256,
+        });
+    }
+    Ok(files)
+}
+
+/// Sets a record's `missing` and `stale` from `stat` on its path now.
+fn observe(record: &mut Record) {
+    let seen = storage::stat(Path::new(&record.path));
+    record.observe(seen);
+}
+
+/// `<id> "<title>" <path>`, safe to print.
+fn describe(record: &Record) -> String {
+    format!(
+        "{} \"{}\" {}",
+        printable(&record.id),
+        printable(&record.title),
+        printable(&record.path)
+    )
+}
+
+/// The end of a mutating command on resources.ttl: under `--dry-run`, the payload with the
+/// changes (or the `text` summary and the change lines); otherwise, if anything changed, the
+/// file is saved, then the payload (or the `text` summary) is printed.
+fn mutated(
+    cli: &Cli,
+    dir: &Path,
+    store: &storage::Store,
+    output: impl Serialize,
+    changes: &[Change],
+    text: impl Fn(),
+) -> Result<(), Error> {
+    if cli.dry_run {
+        if cli.json {
+            print_json(&DryRunOutput {
+                payload: output,
+                dry_run: true,
+                changes,
+            });
+        } else {
+            text();
+            print_changes(changes);
+        }
+        return Ok(());
+    }
+    if !changes.is_empty() {
+        storage::save(dir, store, storage::File::Resources)?;
+    }
+    if cli.json {
+        print_json(&output);
+    } else {
+        text();
+    }
+    Ok(())
+}
+
+/// `show` in text mode: one `name<TAB>value` line per field.
+fn print_shown(shown: &resource::Shown) {
+    let r = &shown.record;
+    let tags: Vec<String> = r
+        .tags
+        .iter()
+        .map(|t| format!("{} ({})", t.label, t.id))
+        .collect();
+    let mut lines = vec![
+        ("id", r.id.clone()),
+        ("title", r.title.clone()),
+        ("path", r.path.clone()),
+        ("media_type", r.media_type.clone()),
+        ("editable", r.editable.to_string()),
+        ("missing", r.missing.to_string()),
+        ("stale", r.stale.to_string()),
+        ("types", r.types.join(", ")),
+        ("tags", tags.join(", ")),
+        ("byte_size", r.byte_size.to_string()),
+        ("modified", r.modified.clone()),
+    ];
+    if let Some(c) = &shown.catalog_record {
+        lines.push(("catalog_record", c.id.clone()));
+        lines.push(("issued", c.issued.clone().unwrap_or_default()));
+        lines.push(("record_modified", c.modified.clone().unwrap_or_default()));
+        if let Some(a) = &c.attributed_to {
+            let name = a.name.clone().unwrap_or_default();
+            lines.push(("attributed_to", format!("{name} ({})", a.id)));
+        }
+    }
+    for (name, value) in lines {
+        println!("{name}\t{}", printable(&value));
+    }
+}
+
+#[derive(Serialize)]
+struct AddedOutput<'a> {
+    schema_version: u32,
+    #[serde(flatten)]
+    all: &'a resource::AddedAll,
+}
+
+#[derive(Serialize)]
+struct ResourceOutput<'a, R: Serialize> {
+    schema_version: u32,
+    resource: &'a R,
 }
 
 #[derive(Serialize)]

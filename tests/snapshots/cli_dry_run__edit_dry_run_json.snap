@@ -1,0 +1,5 @@
+---
+source: tests/cli_resource.rs
+expression: out.stdout
+---
+{"schema_version":1,"resource":{"id":"018bcfe5-6801-710a-adec-89025cc1beeb","path":"/TMP/files/notes.txt","title":"Notes","media_type":"text/plain","editable":true,"missing":false,"stale":false,"types":[],"tags":[],"byte_size":6,"modified":"2026-10-20T14:02:11Z"},"dry_run":true,"changes":[{"op":"add","triple":"<urn:uuid:018bcfe5-6801-710a-adec-89025cc1beeb> <http://purl.org/dc/terms/title> \"Notes\" ."},{"op":"add","triple":"<urn:uuid:018bcfe5-6802-7893-a2ee-fb32555e71c1> <http://purl.org/dc/terms/modified> \"2026-10-25T10:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."},{"op":"remove","triple":"<urn:uuid:018bcfe5-6801-710a-adec-89025cc1beeb> <http://purl.org/dc/terms/title> \"notes\" ."},{"op":"remove","triple":"<urn:uuid:018bcfe5-6802-7893-a2ee-fb32555e71c1> <http://purl.org/dc/terms/modified> \"2026-10-24T09:30:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."}]}

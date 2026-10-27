@@ -51,7 +51,7 @@ Source: [Ontology domain model for v1](https://github.com/natemarks/mcp-local-no
 | `dcat:downloadURL` | exactly 1 | `<file:///…>` per RFC 8089 (the canonicalised real path, UTF-8 percent-encoded). |
 | `dcat:mediaType` | exactly 1 of the two | IANA types: `<http://www.iana.org/assignments/media-types/{type}/{subtype}>`. |
 | `dcterms:format` | (the other) | Non-IANA (freedesktop `x-`) types: `<https://w3id.org/hali/media-types/{type}/{subtype}>`, declared `a dcterms:MediaType`. |
-| `dcat:byteSize` | exactly 1 | `xsd:nonNegativeInteger`. |
+| `dcat:byteSize` | exactly 1 | `xsd:integer`, at least 0 (the store normalises `xsd:nonNegativeInteger` to `xsd:integer`, so the shape enforces the lower bound with `sh:minInclusive 0`). |
 | `dcterms:modified` | exactly 1 | The file's mtime as of the last add/refresh/scan. |
 | `spdx:checksum` | exactly 1 | `<urn:uuid:…#sha256>`, a node with an IRI derived from the Resource IRI (not a blank node), with `spdx:algorithm spdx:checksumAlgorithm_sha256` and `spdx:checksumValue "…"^^xsd:hexBinary`. |
 | `rdf:type` | 1 or more | `hali:Resource` and/or Types. |
@@ -118,7 +118,7 @@ hali:linked-data a skos:Concept ; skos:inScheme hali:topics ;
     dcterms:title "Linked Data Patterns" ;
     dcat:downloadURL <file:///home/nmarks/papers/linked-data-patterns.pdf> ;
     dcat:mediaType <http://www.iana.org/assignments/media-types/application/pdf> ;
-    dcat:byteSize "482113"^^xsd:nonNegativeInteger ;
+    dcat:byteSize 482113 ;
     dcterms:modified "2026-10-20T14:02:11Z"^^xsd:dateTime ;
     spdx:checksum <urn:uuid:0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10#sha256> ;
     dcterms:subject hali:linked-data .
@@ -386,7 +386,7 @@ hali generate completions <bash|zsh|fish>
   ```
 - **In text mode**, the output is one `error:` line plus a `hint:` line.
 - **Size:** errors stay well under 10k characters.
-- **Rules** (SCREAMING_SNAKE, minimum set): `UNKNOWN_CONCEPT`, `UNKNOWN_TYPE`, `UNKNOWN_RELATION`, `LABEL_TAKEN`, `POSSIBLE_MOVE`, `FORGET_BLOCKED_BY_RELATIONS`, `IN_USE`, `HASH_MISMATCH`, `NOT_A_REGULAR_FILE`, `NON_UTF8_PATH`, `SHACL_VIOLATION`, `CONFIRMATION_REQUIRED`, `READ_ONLY_QUERY`, `STORE_LOCKED`.
+- **Rules** (SCREAMING_SNAKE, minimum set): `UNKNOWN_RESOURCE`, `UNKNOWN_CONCEPT`, `UNKNOWN_TYPE`, `UNKNOWN_RELATION`, `LABEL_TAKEN`, `POSSIBLE_MOVE`, `FORGET_BLOCKED_BY_RELATIONS`, `IN_USE`, `HASH_MISMATCH`, `NOT_A_REGULAR_FILE`, `NON_UTF8_PATH`, `FILE_UNREADABLE`, `SHACL_VIOLATION`, `CONFIRMATION_REQUIRED`, `READ_ONLY_QUERY`, `STORE_LOCKED`.
 
 ### 9.5 Dry run
 `--dry-run` is a global flag, like `--json`, accepted before or after the subcommand. A mutating command run with it returns the same payload as a real run, with the same keys in the same order, plus `"dry_run": true` and a `changes` list of the triples it would add to or remove from a tool-managed file (`vocabulary.ttl`, `resources.ttl`), in N-Triples form. A real run never prints `dry_run` or `changes`.
@@ -583,8 +583,9 @@ Source: [Repo layout for the CLI and nvim plugin](https://github.com/natemarks/m
 |---|---|
 | `static` | `fmt-check clippy dead-code unit audit shellcheck stylua-check lua-test` |
 | `static-check` | CI variant (check-only), run exactly once per PR and per push to `main` |
-| `unit` | `cargo test` |
-| `unit-update-golden` | `INSTA_UPDATE=always cargo test` |
+| `unit` | `cargo test --features test-hooks`: every test that needs no outside software |
+| `unit-update-golden` | `INSTA_UPDATE=always cargo test --features test-hooks` |
+| `test-external` | `cargo test --features test-hooks -- --ignored`: the `#[ignore]`d tests that need outside software (the MIME database); not in `static` |
 | `lua-test` | headless Neovim + plenary-busted against the fake CLI |
 | `lua-install-test` | per-manager install smoke tests (`spec/install/`) |
 | `bench` | latency benchmark (§14.5); not in `static` |
@@ -664,8 +665,8 @@ About 8 overlapping reader and writer processes run on one store, each writer ad
 - **Usage guide:** the drift test of §11.3.
 
 ### 14.7 Environment-dependent tests and CI
-- **MIME database:** detection tests that need `/usr/share/mime` are marked so they can be skipped on machines without it.
-- **CI** (`ubuntu-latest`): installs `shared-mime-info`, Neovim 0.12 (via a setup action pinned to a commit), stylua and the toolchain from `rust-toolchain.toml`. `lua-install-test` clones lazy.nvim at a pinned commit. `bench` and `coverage` never run in CI.
+- **Outside software:** a test that needs software outside the repository, such as the MIME database (`/usr/share/mime`) for detection tests, is `#[ignore = "<reason>"]`, so `make unit` runs without it. `make test-external` runs those tests.
+- **CI** (`ubuntu-latest`): installs `shared-mime-info` and runs `make test-external` in its own job, apart from `static-check`; it also installs Neovim 0.12 (via a setup action pinned to a commit), stylua and the toolchain from `rust-toolchain.toml`. `lua-install-test` clones lazy.nvim at a pinned commit. `bench` and `coverage` never run in CI.
 
 ---
 

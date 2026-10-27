@@ -59,6 +59,57 @@
               }
             }
           }
+        },
+        {
+          "if": {"properties": {"rule": {"const": "NOT_A_REGULAR_FILE"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "path": {"type": "string"},
+                  "kind": {"enum": ["missing", "directory", "other"]}
+                },
+                "required": ["path", "kind"]
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"rule": {"const": "NON_UTF8_PATH"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"]
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"rule": {"const": "FILE_UNREADABLE"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"]
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"rule": {"const": "UNKNOWN_RESOURCE"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {"ref": {"type": "string"}},
+                "required": ["ref"]
+              }
+            }
+          }
         }
       ]
     }

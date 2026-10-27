@@ -28,6 +28,35 @@ mod goal {
         ("cli_validate__validate_json_violations", "validate"),
     ];
 
+    /// Snapshots written by the active goal (#10). A build without the goal feature does not
+    /// see them, because the schemas they name do not exist until the goal is met; settle
+    /// removes the tags below, which makes every one of them visible and mapped.
+    const GOAL_SNAPS: &[&str] = &[
+        "cli_dry_run__add_dry_run_json",
+        "cli_dry_run__edit_dry_run_json",
+        "cli_resource__add_json",
+        "cli_resource__edit_json",
+        "cli_resource__re_add_json_existing",
+        "cli_resource__show_json",
+    ];
+
+    const GOAL_STDOUT_GOLDENS: &[(&str, &str)] = &[
+        ("cli_dry_run__add_dry_run_json", "add"),
+        ("cli_dry_run__edit_dry_run_json", "edit"),
+        ("cli_resource__add_json", "add"),
+        ("cli_resource__edit_json", "edit"),
+        ("cli_resource__re_add_json_existing", "add"),
+        ("cli_resource__show_json", "show"),
+    ];
+
+    /// Every stdout snapshot's row.
+    #[allow(unused_mut)]
+    fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
+        let mut rows = STDOUT_GOLDENS.to_vec();
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS);
+        rows
+    }
+
     struct Golden {
         stem: String,
         stream: String,
@@ -38,7 +67,12 @@ mod goal {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots")
     }
 
+    #[allow(unused_assignments, unused_mut)]
     fn goldens() -> Vec<Golden> {
+        let mut hidden: &[&str] = GOAL_SNAPS;
+        {
+            hidden = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -46,6 +80,9 @@ mod goal {
                 continue;
             }
             let stem = path.file_stem().unwrap().to_str().unwrap().to_string();
+            if hidden.contains(&stem.as_str()) {
+                continue;
+            }
             let text = std::fs::read_to_string(&path).unwrap();
             let rest = text
                 .strip_prefix("---\n")
@@ -76,10 +113,10 @@ mod goal {
         if g.stream == "stderr" {
             return Some("error");
         }
-        STDOUT_GOLDENS
-            .iter()
+        stdout_goldens()
+            .into_iter()
             .find(|(stem, _)| *stem == g.stem)
-            .map(|(_, name)| *name)
+            .map(|(_, name)| name)
     }
 
     /// `hali schema <name>` through the real binary, so the test sees what an agent sees.
@@ -176,7 +213,7 @@ mod goal {
     #[test]
     fn no_stale_rows() {
         let stems: Vec<String> = goldens().into_iter().map(|g| g.stem).collect();
-        for (stem, name) in STDOUT_GOLDENS {
+        for (stem, name) in stdout_goldens() {
             assert!(
                 stems.iter().any(|s| s == stem),
                 "STDOUT_GOLDENS row `{stem}` -> `{name}` has no snapshot file"
@@ -184,14 +221,14 @@ mod goal {
             assert!(
                 goldens()
                     .iter()
-                    .any(|g| g.stem == *stem && g.stream == "stdout"),
+                    .any(|g| g.stem == stem && g.stream == "stdout"),
                 "STDOUT_GOLDENS row `{stem}` is not a stdout snapshot"
             );
             fetch(name);
         }
         // The list a row's name comes from is itself live output.
         let listed = fetch_list();
-        for (stem, name) in STDOUT_GOLDENS {
+        for (stem, name) in stdout_goldens() {
             assert!(
                 listed.iter().any(|n| n == name),
                 "row `{stem}` names `{name}`, which `hali schema` does not list: {listed:?}"
@@ -199,6 +236,17 @@ mod goal {
         }
     }
 
+    /// The command a dry-run golden belongs to, from its stem:
+    /// `cli_dry_run__concept_add_dry_run_json` -> `concept add`.
+    fn dry_run_command(stem: &str) -> String {
+        let rest = stem.strip_prefix("cli_dry_run__").unwrap_or_else(|| {
+            panic!("{stem}: a dry-run golden is named cli_dry_run__<command>_dry_run...")
+        });
+        let command = rest.split("_dry_run").next().unwrap();
+        command.replace('_', " ")
+    }
+
+    /// Every `*dry_run*` golden maps to its own command's schema and says `dry_run: true`.
     #[test]
     fn dry_run_goldens_named() {
         let dry: Vec<Golden> = goldens()
@@ -206,12 +254,18 @@ mod goal {
             .filter(|g| g.stem.contains("dry_run"))
             .collect();
         assert!(dry.len() >= 3, "expected the three #8 dry-run goldens");
-        let concept_add = validator("concept add");
         for g in dry {
-            assert_eq!(schema_name(&g), Some("concept add"), "{}", g.stem);
+            assert_eq!(g.stream, "stdout", "{}", g.stem);
+            let command = dry_run_command(&g.stem);
+            assert_eq!(
+                schema_name(&g),
+                Some(command.as_str()),
+                "{} must map to the schema of its own command",
+                g.stem
+            );
             assert!(g.body.contains("\"dry_run\":true"), "{}", g.stem);
             let instance: Value = serde_json::from_str(&g.body).unwrap();
-            let errs = problems(&concept_add, &instance);
+            let errs = problems(&validator(&command), &instance);
             assert!(errs.is_empty(), "{}: {errs:?}", g.stem);
         }
     }
@@ -385,6 +439,142 @@ mod goal {
                 errs.is_empty(),
                 valid,
                 "`hali schema {name}` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    fn record() -> Value {
+        json!({"id": "018bcfe5-6801-710a-adec-89025cc1beeb", "path": "/a/notes.txt",
+            "title": "notes", "media_type": "text/plain", "editable": true, "missing": false,
+            "stale": false, "types": [], "tags": [{"id": "ml", "label": "machine learning"}],
+            "byte_size": 6, "modified": "2026-10-20T14:02:11Z"})
+    }
+
+    fn shown() -> Value {
+        let mut r = record();
+        r["relations"] = json!([]);
+        r["catalog_record"] = json!({"id": "c", "issued": "2026-10-24T09:30:00Z",
+            "modified": "2026-10-24T09:30:00Z",
+            "attributed_to": {"id": "p", "name": "nate"}});
+        r
+    }
+
+    /// #10: what the `add`, `show` and `edit` schemas accept and refuse.
+    #[test]
+    fn resource_schemas_accept_and_reject() {
+        let change = json!({"op": "add", "triple": "<a:b> <a:c> <a:d> ."});
+        let add = json!({"schema_version": 1, "added": [record()], "existing": []});
+        let mut add_dry = add.clone();
+        add_dry["dry_run"] = json!(true);
+        add_dry["changes"] = json!([change]);
+        let edit = json!({"schema_version": 1, "resource": record()});
+        let mut edit_dry = edit.clone();
+        edit_dry["dry_run"] = json!(true);
+        edit_dry["changes"] = json!([]);
+        let show = json!({"schema_version": 1, "resource": shown()});
+
+        let mut cases: Vec<(&str, Value, bool)> = vec![
+            ("add", add.clone(), true),
+            ("add", add_dry.clone(), true),
+            ("edit", edit.clone(), true),
+            ("edit", edit_dry.clone(), true),
+            ("show", show.clone(), true),
+            // Each command's schema refuses another command's payload.
+            ("add", edit.clone(), false),
+            ("edit", add.clone(), false),
+            ("show", edit.clone(), false),
+            ("show", add.clone(), false),
+        ];
+        let mut v = add.clone();
+        v["existing"] = json!("none");
+        cases.push(("add", v, false));
+        let mut v = add.clone();
+        v.as_object_mut().unwrap().remove("added");
+        cases.push(("add", v, false));
+        let mut v = add.clone();
+        v["dry_run"] = json!(true);
+        cases.push(("add", v, false));
+        let mut v = add.clone();
+        v["added"][0].as_object_mut().unwrap().remove("byte_size");
+        cases.push(("add", v, false));
+        let mut v = add.clone();
+        v["added"][0]["editable"] = json!("yes");
+        cases.push(("add", v, false));
+        let mut v = add.clone();
+        v["added"][0]["surprise"] = json!(1);
+        cases.push(("add", v, false));
+        let mut v = edit.clone();
+        v["resource"]["modified"] = json!(5);
+        cases.push(("edit", v, false));
+        let mut v = show.clone();
+        v["resource"]
+            .as_object_mut()
+            .unwrap()
+            .remove("catalog_record");
+        cases.push(("show", v, false));
+        let mut v = show.clone();
+        v["resource"]["catalog_record"]["attributed_to"]
+            .as_object_mut()
+            .unwrap()
+            .remove("name");
+        cases.push(("show", v, false));
+        let mut v = show.clone();
+        v["resource"]["relations"] = json!("none");
+        cases.push(("show", v, false));
+        let mut v = show.clone();
+        v["schema_version"] = json!(2);
+        cases.push(("show", v, false));
+
+        for (name, instance, valid) in cases {
+            let errs = problems(&validator(name), &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema {name}` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #10: the new error rules have conditional branches in `error.json`.
+    #[test]
+    fn new_error_rules_have_branches() {
+        let mut cases: Vec<(Value, bool)> = Vec::new();
+        for kind in ["missing", "directory", "other"] {
+            cases.push((
+                error("NOT_A_REGULAR_FILE", json!({"path": "/a/b", "kind": kind})),
+                true,
+            ));
+        }
+        cases.push((
+            error(
+                "NOT_A_REGULAR_FILE",
+                json!({"path": "/a/b", "kind": "socket"}),
+            ),
+            false,
+        ));
+        cases.push((error("NOT_A_REGULAR_FILE", json!({"path": "/a/b"})), false));
+        cases.push((
+            error("NOT_A_REGULAR_FILE", json!({"kind": "missing"})),
+            false,
+        ));
+        cases.push((error("NON_UTF8_PATH", json!({"path": "/a/\u{fffd}"})), true));
+        cases.push((error("NON_UTF8_PATH", json!({})), false));
+        cases.push((error("NON_UTF8_PATH", json!({"path": 5})), false));
+        cases.push((error("UNKNOWN_RESOURCE", json!({"ref": "0192f0c4"})), true));
+        cases.push((error("UNKNOWN_RESOURCE", json!({})), false));
+        cases.push((error("UNKNOWN_RESOURCE", json!({"ref": 5})), false));
+        cases.push((error("FILE_UNREADABLE", json!({"path": "/a/b"})), true));
+        cases.push((error("FILE_UNREADABLE", json!({})), false));
+        cases.push((error("FILE_UNREADABLE", json!({"path": null})), false));
+        let v = validator("error");
+        for (instance, valid) in cases {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema error` should {} {instance}; errors: {errs:?}",
                 if valid { "accept" } else { "reject" }
             );
         }

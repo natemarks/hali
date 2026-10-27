@@ -1,0 +1,23 @@
+@prefix dcat: <http://www.w3.org/ns/dcat#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix hali: <https://w3id.org/hali#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix spdx: <http://spdx.org/rdf/terms#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:uuid:0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10> a hali:Resource ;
+    dcterms:title "Linked Data Patterns" ;
+    dcat:downloadURL <file:///home/nmarks/papers/linked-data-patterns.pdf> ;
+    dcat:byteSize 482113 ;
+    dcterms:modified "2026-10-20T14:02:11Z"^^xsd:dateTime ;
+    spdx:checksum <urn:uuid:0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10#sha256> .
+<urn:uuid:0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10#sha256> spdx:algorithm spdx:checksumAlgorithm_sha256 ;
+    spdx:checksumValue "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"^^xsd:hexBinary .
+<urn:uuid:0192f0c4-7b20-7a01-8d2e-1f0b9c3a5e77> a dcat:CatalogRecord ;
+    foaf:primaryTopic <urn:uuid:0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10> ;
+    dcterms:issued "2026-10-24T09:30:00Z"^^xsd:dateTime ;
+    dcterms:modified "2026-10-24T09:30:00Z"^^xsd:dateTime ;
+    prov:wasAttributedTo <urn:uuid:0192f0c4-0000-7000-8000-000000000001> .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000001> a prov:Person ;
+    foaf:name "nate" .

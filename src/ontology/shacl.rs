@@ -55,11 +55,15 @@ pub struct Violation {
 #[derive(Debug)]
 pub struct ShapesInvalid;
 
-/// Validates the store, plus `extra` quads not (yet) in it, against the shapes in the store.
-/// The results are unordered.
-pub fn validate(store: &Store, extra: &[Quad]) -> Result<Vec<Violation>, ShapesInvalid> {
+/// Validates the store, plus `extra` quads not (yet) in it and minus the `removed` quads, against
+/// the shapes in the store. The results are unordered.
+pub fn validate(
+    store: &Store,
+    extra: &[Quad],
+    removed: &[Quad],
+) -> Result<Vec<Violation>, ShapesInvalid> {
     refuse(store)?;
-    quietly(|| run(store, extra))
+    quietly(|| run(store, extra, removed))
 }
 
 /// Runs the rudof calls with the panic hook silenced, turning a panic into `ShapesInvalid`. The
@@ -72,15 +76,15 @@ fn quietly<T>(f: impl FnOnce() -> Result<T, ShapesInvalid>) -> Result<T, ShapesI
     result.unwrap_or(Err(ShapesInvalid))
 }
 
-fn run(store: &Store, extra: &[Quad]) -> Result<Vec<Violation>, ShapesInvalid> {
+fn run(store: &Store, extra: &[Quad], removed: &[Quad]) -> Result<Vec<Violation>, ShapesInvalid> {
     let schema = shapes(store)?;
 
     let mut data = OxigraphInMemory::new();
     for quad in store.iter() {
-        add(
-            &mut data,
-            quad.expect("reading the in-memory store").as_ref(),
-        );
+        let quad = quad.expect("reading the in-memory store");
+        if !removed.contains(&quad) {
+            add(&mut data, quad.as_ref());
+        }
     }
     for quad in extra {
         add(&mut data, quad.as_ref());

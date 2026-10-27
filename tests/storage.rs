@@ -54,7 +54,7 @@ fn load_puts_each_file_in_its_named_graph() {
     ));
 
     let resources = graph_lines(&store, "resources");
-    assert_eq!(resources.len(), 4, "{resources:#?}");
+    assert_eq!(resources.len(), 18, "{resources:#?}");
     assert!(resources.contains(
         &"<urn:uuid:0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10> <http://purl.org/dc/terms/title> \"Linked Data Patterns\""
             .to_string()
