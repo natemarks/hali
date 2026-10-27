@@ -30,7 +30,7 @@ impl Report {
 
 /// Validates the store against the core and extension shapes, sorted and paged.
 pub fn validate(store: &Store, offset: usize, limit: usize) -> Result<Report, Error> {
-    let all = check(store, &[])?;
+    let all = check(store, &[], &[])?;
     let total = all.len();
     let head = all.iter().take(Error::MAX_VIOLATIONS).cloned().collect();
     let results: Vec<Violation> = all.into_iter().skip(offset).take(limit).collect();
@@ -46,9 +46,10 @@ pub fn validate(store: &Store, offset: usize, limit: usize) -> Result<Report, Er
     })
 }
 
-/// Refuses a mutation whose quads `extra` would leave the store not conforming.
-pub(crate) fn guard(store: &Store, extra: &[Quad]) -> Result<(), Error> {
-    let all = check(store, extra)?;
+/// Refuses a mutation that adds the quads `extra` and removes the quads `removed`, if it would
+/// leave the store not conforming.
+pub(crate) fn guard(store: &Store, extra: &[Quad], removed: &[Quad]) -> Result<(), Error> {
+    let all = check(store, extra, removed)?;
     if all.is_empty() {
         Ok(())
     } else {
@@ -56,10 +57,10 @@ pub(crate) fn guard(store: &Store, extra: &[Quad]) -> Result<(), Error> {
     }
 }
 
-/// Every result for the store plus `extra`, sorted by (focus node, shape, path, constraint,
-/// value, message), a missing member sorting as "".
-fn check(store: &Store, extra: &[Quad]) -> Result<Vec<Violation>, Error> {
-    let mut all = shacl::validate(store, extra).map_err(|_| Error::shapes_invalid())?;
+/// Every result for the store plus `extra` minus `removed`, sorted by (focus node, shape, path,
+/// constraint, value, message), a missing member sorting as "".
+fn check(store: &Store, extra: &[Quad], removed: &[Quad]) -> Result<Vec<Violation>, Error> {
+    let mut all = shacl::validate(store, extra, removed).map_err(|_| Error::shapes_invalid())?;
     all.sort_by(|a, b| key(a).cmp(&key(b)));
     Ok(all)
 }

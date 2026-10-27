@@ -1,6 +1,10 @@
+@prefix dcat: <http://www.w3.org/ns/dcat#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
 @prefix hali: <https://w3id.org/hali#> .
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix spdx: <http://spdx.org/rdf/terms#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 # hali core SHACL shapes (embedded in the binary, spec §3.1). Named shapes only: no blank nodes.
 
@@ -34,3 +38,54 @@ SELECT $this ?value ?label WHERE {
     GROUP BY ?key ?lg HAVING (COUNT(DISTINCT ?c) > 1) }
   ?value a skos:Concept ; skos:inScheme $this ; skos:prefLabel|skos:altLabel ?label .
   FILTER (LCASE(REPLACE(REPLACE(STR(?label), "\\\\s+", " "), "^ | $", "")) = ?key && LCASE(LANG(?label)) = ?lg) }""" .
+
+# A Resource (spec §2.1, §2.7): exactly one title, downloadURL, media type, checksum and size.
+hali:ResourceShape a sh:NodeShape ;
+    sh:targetClass hali:Resource ;
+    sh:property hali:ResourceTitleShape , hali:ResourceDownloadURLShape ,
+        hali:ResourceChecksumShape , hali:ResourceByteSizeShape .
+
+hali:ResourceTitleShape a sh:PropertyShape ;
+    sh:path dcterms:title ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:datatype xsd:string ;
+    sh:message "A Resource needs exactly one dcterms:title, a plain string"@en .
+
+hali:ResourceDownloadURLShape a sh:PropertyShape ;
+    sh:path dcat:downloadURL ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:nodeKind sh:IRI ;
+    sh:pattern "^file:///" ;
+    sh:message "A Resource needs exactly one dcat:downloadURL, a file:/// IRI"@en .
+
+hali:ResourceChecksumShape a sh:PropertyShape ;
+    sh:path spdx:checksum ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:nodeKind sh:IRI ;
+    sh:message "A Resource needs exactly one spdx:checksum"@en .
+
+# The store normalises xsd:nonNegativeInteger to xsd:integer, so the bound is checked here.
+hali:ResourceByteSizeShape a sh:PropertyShape ;
+    sh:path dcat:byteSize ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:datatype xsd:integer ;
+    sh:minInclusive 0 ;
+    sh:message "A Resource needs exactly one dcat:byteSize, an integer of at least 0"@en .
+
+# Exactly one of dcat:mediaType (IANA) and dcterms:format (x- types). A SPARQL constraint, so
+# that no sh:xone list (and no blank node) is needed.
+hali:ResourceMediaTypeShape a sh:NodeShape ;
+    sh:targetClass hali:Resource ;
+    sh:sparql hali:ResourceMediaTypeConstraint .
+
+hali:ResourceMediaTypeConstraint a sh:SPARQLConstraint ;
+    sh:message "A Resource needs exactly one media type: one dcat:mediaType or one dcterms:format"@en ;
+    sh:select """PREFIX dcat: <http://www.w3.org/ns/dcat#>
+PREFIX dcterms: <http://purl.org/dc/terms/>
+SELECT $this WHERE {
+  FILTER (NOT EXISTS { $this dcat:mediaType|dcterms:format ?m }
+    || EXISTS { $this dcat:mediaType|dcterms:format ?a , ?b . FILTER (?a != ?b) }) }""" .
