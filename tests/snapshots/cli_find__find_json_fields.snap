@@ -1,0 +1,5 @@
+---
+source: tests/cli_find.rs
+expression: out.stdout
+---
+{"schema_version":1,"results":[{"id":"018bcfe5-6801-710a-adec-89025cc1beeb","title":"notes"},{"id":"018bcfe5-6804-7099-ac6c-d7363ca585e7","title":"ideas"}],"total":2,"truncated":false,"next_offset":null}

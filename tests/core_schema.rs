@@ -35,6 +35,7 @@ mod goal {
                 "concept list",
                 "edit",
                 "error",
+                "find",
                 "schema",
                 "show",
                 "validate"

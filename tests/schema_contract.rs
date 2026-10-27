@@ -49,11 +49,26 @@ mod goal {
         ("cli_resource__show_json", "show"),
     ];
 
+    /// Snapshots written by the active goal (#12): hidden from a build without the goal
+    /// feature, because the `find` schema they name does not exist until the goal is met.
+    const GOAL_SNAPS_12: &[&str] = &[
+        "cli_find__find_json",
+        "cli_find__find_json_empty",
+        "cli_find__find_json_fields",
+    ];
+
+    const GOAL_STDOUT_GOLDENS_12: &[(&str, &str)] = &[
+        ("cli_find__find_json", "find"),
+        ("cli_find__find_json_empty", "find"),
+        ("cli_find__find_json_fields", "find"),
+    ];
+
     /// Every stdout snapshot's row.
     #[allow(unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
         let mut rows = STDOUT_GOLDENS.to_vec();
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS);
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_12);
         rows
     }
 
@@ -73,6 +88,10 @@ mod goal {
         {
             hidden = &[];
         }
+        let mut pending: &[&str] = GOAL_SNAPS_12;
+        {
+            pending = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -80,7 +99,7 @@ mod goal {
                 continue;
             }
             let stem = path.file_stem().unwrap().to_str().unwrap().to_string();
-            if hidden.contains(&stem.as_str()) {
+            if hidden.contains(&stem.as_str()) || pending.contains(&stem.as_str()) {
                 continue;
             }
             let text = std::fs::read_to_string(&path).unwrap();
@@ -181,6 +200,7 @@ mod goal {
     fn every_golden_validates() {
         let goldens = goldens();
         assert!(goldens.len() >= 14, "found only {} goldens", goldens.len());
+        assert!(goldens.len() >= 23, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
                 .unwrap_or_else(|| panic!("golden `{}` is not mapped to a schema", g.stem));
@@ -575,6 +595,91 @@ mod goal {
                 errs.is_empty(),
                 valid,
                 "`hali schema error` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #12: what the `find` schema accepts and refuses.
+    #[test]
+    fn find_schema_accepts_and_rejects() {
+        let page = |results: Vec<Value>| {
+            let total = results.len();
+            json!({"schema_version": 1, "results": results, "total": total,
+                "truncated": false, "next_offset": null})
+        };
+        let full = page(vec![record(), record()]);
+        let narrowed = page(vec![
+            json!({"title": "notes"}),
+            json!({"id": "a", "modified": "2026-10-20T14:02:11Z"}),
+        ]);
+        let empty = page(vec![]);
+        let mut truncated = page(vec![record()]);
+        truncated["total"] = json!(5);
+        truncated["truncated"] = json!(true);
+        truncated["next_offset"] = json!(1);
+
+        let mut cases: Vec<(Value, bool)> = vec![
+            (full.clone(), true),
+            (narrowed.clone(), true),
+            (empty.clone(), true),
+            (truncated, true),
+        ];
+        // `--fields` can narrow to any one field of the record.
+        for (name, value) in record().as_object().unwrap() {
+            cases.push((page(vec![json!({ name: value })]), true));
+        }
+        // A key outside the record, `content` above all, is refused, narrowed or not.
+        cases.push((page(vec![json!({"title": "notes", "content": "x"})]), false));
+        cases.push((page(vec![json!({"content": "x"})]), false));
+        let mut v = full.clone();
+        v["results"][0]["content"] = json!("hello");
+        cases.push((v, false));
+        let mut v = full.clone();
+        v["results"][0]["surprise"] = json!(1);
+        cases.push((v, false));
+        // A narrowed record has at least one field.
+        cases.push((page(vec![json!({})]), false));
+        // A field keeps its type, narrowed or not.
+        cases.push((page(vec![json!({"editable": "yes"})]), false));
+        cases.push((page(vec![json!({"byte_size": -1})]), false));
+        let mut v = full.clone();
+        v["results"][0]["stale"] = json!("no");
+        cases.push((v, false));
+        // The envelope.
+        for key in [
+            "schema_version",
+            "results",
+            "total",
+            "truncated",
+            "next_offset",
+        ] {
+            let mut v = full.clone();
+            v.as_object_mut().unwrap().remove(key);
+            cases.push((v, false));
+        }
+        let mut v = full.clone();
+        v["schema_version"] = json!(2);
+        cases.push((v, false));
+        let mut v = full.clone();
+        v["extra"] = json!(1);
+        cases.push((v, false));
+        let mut v = full.clone();
+        v["dry_run"] = json!(true);
+        cases.push((v, false));
+        let mut v = full.clone();
+        v["next_offset"] = json!("1");
+        cases.push((v, false));
+        // Another command's payload.
+        cases.push((json!({"schema_version": 1, "resource": record()}), false));
+
+        let v = validator("find");
+        for (instance, valid) in cases {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema find` should {} {instance}; errors: {errs:?}",
                 if valid { "accept" } else { "reject" }
             );
         }

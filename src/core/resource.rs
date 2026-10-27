@@ -361,6 +361,231 @@ pub fn edit_title(
     })
 }
 
+/// The order `find` lists Resources in; ties always break on ascending id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sort {
+    /// The file's recorded mtime, newest first.
+    Modified,
+    /// The catalog record's `issued`, newest first; a Resource without one goes last.
+    Added,
+    /// The title, case-insensitive, ascending.
+    Title,
+}
+
+/// A media type to match: `type/subtype` or `type/*`, lowercase.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MediaPattern {
+    type_: String,
+    /// `None` matches any subtype.
+    subtype: Option<String>,
+}
+
+/// Parses `type/subtype` or `type/*`, case-insensitively.
+pub fn parse_media_pattern(pattern: &str) -> Result<MediaPattern, Error> {
+    let bad = || {
+        Error::usage(&format!(
+            "invalid media type pattern {pattern:?}: use type/subtype or type/*"
+        ))
+    };
+    let token = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "!#$&^_.+-".contains(c))
+    };
+    let (type_, subtype) = pattern.split_once('/').ok_or_else(bad)?;
+    if !token(type_) {
+        return Err(bad());
+    }
+    let subtype = if subtype == "*" {
+        None
+    } else if token(subtype) {
+        Some(subtype.to_ascii_lowercase())
+    } else {
+        return Err(bad());
+    };
+    Ok(MediaPattern {
+        type_: type_.to_ascii_lowercase(),
+        subtype,
+    })
+}
+
+impl MediaPattern {
+    fn matches(&self, media_type: &str) -> bool {
+        match media_type.split_once('/') {
+            Some((t, s)) => t == self.type_ && self.subtype.as_deref().is_none_or(|w| w == s),
+            None => false,
+        }
+    }
+}
+
+/// What `find` lists: filters (ANDed), sort and page.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Query {
+    /// A case-insensitive substring of the title.
+    pub title: Option<String>,
+    pub media_type: Option<MediaPattern>,
+    /// Only Resources whose file is gone.
+    pub missing: bool,
+    /// Only Resources whose file changed.
+    pub stale: bool,
+    pub sort: Sort,
+    pub offset: usize,
+    pub limit: usize,
+}
+
+impl Default for Query {
+    fn default() -> Query {
+        Query {
+            title: None,
+            media_type: None,
+            missing: false,
+            stale: false,
+            sort: Sort::Modified,
+            offset: 0,
+            limit: 50,
+        }
+    }
+}
+
+/// One page of `find`; `total` counts the Resources matching the filters.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Found {
+    pub results: Vec<Record>,
+    pub total: usize,
+    pub truncated: bool,
+    pub next_offset: Option<usize>,
+}
+
+/// Lists Resources (spec §6). `stat` gives the size and mtime of the regular file at a path, or
+/// `None`; it is called for every candidate when `missing` or `stale` filters, else only for the
+/// returned page. Nothing is hashed.
+pub fn find(
+    ctx: &Context,
+    store: &Store,
+    query: &Query,
+    stat: impl Fn(&str) -> Option<(u64, i64)>,
+) -> Found {
+    let title = query.title.as_ref().map(|t| t.to_lowercase());
+    let filtered_by_state = query.missing || query.stale;
+    // (record, issued)
+    let mut candidates: Vec<(Record, Option<String>)> =
+        subjects(store, rdf::TYPE.as_str(), iri(RESOURCE).as_ref())
+            .iter()
+            .map(|r| (record(ctx, store, r), r))
+            .filter(|(rec, _)| {
+                title
+                    .as_ref()
+                    .is_none_or(|t| rec.title.to_lowercase().contains(t))
+                    && query
+                        .media_type
+                        .as_ref()
+                        .is_none_or(|m| m.matches(&rec.media_type))
+            })
+            .map(|(rec, r)| {
+                let issued = (query.sort == Sort::Added)
+                    .then(|| catalog_record_of(store, r))
+                    .flatten()
+                    .and_then(|c| first_literal(store, &c, dcterms::ISSUED));
+                (rec, issued)
+            })
+            .collect();
+    if filtered_by_state {
+        for (rec, _) in &mut candidates {
+            rec.observe(stat(&rec.path));
+        }
+        candidates
+            .retain(|(rec, _)| (!query.missing || rec.missing) && (!query.stale || rec.stale));
+    }
+
+    match query.sort {
+        Sort::Modified => candidates.sort_by(|a, b| {
+            b.0.modified
+                .cmp(&a.0.modified)
+                .then_with(|| a.0.id.cmp(&b.0.id))
+        }),
+        Sort::Added => candidates.sort_by(|a, b| {
+            // `None` sorts before `Some`, so reversing puts it last.
+            b.1.cmp(&a.1).then_with(|| a.0.id.cmp(&b.0.id))
+        }),
+        Sort::Title => candidates.sort_by(|a, b| {
+            a.0.title
+                .to_lowercase()
+                .cmp(&b.0.title.to_lowercase())
+                .then_with(|| a.0.id.cmp(&b.0.id))
+        }),
+    }
+
+    let total = candidates.len();
+    let mut results: Vec<Record> = candidates
+        .into_iter()
+        .skip(query.offset)
+        .take(query.limit)
+        .map(|(rec, _)| rec)
+        .collect();
+    if !filtered_by_state {
+        for rec in &mut results {
+            rec.observe(stat(&rec.path));
+        }
+    }
+    let end = query.offset.saturating_add(results.len());
+    let truncated = end < total;
+    Found {
+        results,
+        total,
+        truncated,
+        next_offset: truncated.then_some(end),
+    }
+}
+
+/// The record's field names, in record order.
+const FIELDS: [&str; 11] = [
+    "id",
+    "path",
+    "title",
+    "media_type",
+    "editable",
+    "missing",
+    "stale",
+    "types",
+    "tags",
+    "byte_size",
+    "modified",
+];
+
+/// Parses a comma-separated `--fields` list into names in record order, without duplicates.
+pub fn parse_fields(list: &str) -> Result<Vec<String>, Error> {
+    let mut wanted = BTreeSet::new();
+    for name in list.split(',') {
+        match FIELDS.iter().position(|f| *f == name) {
+            Some(i) => {
+                wanted.insert(i);
+            }
+            None => {
+                return Err(Error::usage(&format!(
+                    "unknown field {name:?}; valid fields: {}",
+                    FIELDS.join(", ")
+                )));
+            }
+        }
+    }
+    Ok(wanted.into_iter().map(|i| FIELDS[i].to_string()).collect())
+}
+
+/// The record as a JSON object holding only `fields`, in record order.
+pub fn narrow(record: &Record, fields: &[String]) -> serde_json::Value {
+    let serde_json::Value::Object(full) = serde_json::to_value(record).expect("records serialize")
+    else {
+        unreachable!("a record is an object");
+    };
+    let mut out = serde_json::Map::new();
+    for name in FIELDS {
+        if fields.iter().any(|f| f == name) {
+            out.insert(name.to_string(), full[name].clone());
+        }
+    }
+    serde_json::Value::Object(out)
+}
+
 /// The default title: the file name without its (last) extension, control characters replaced
 /// by U+FFFD; the whole file name if that leaves nothing.
 fn default_title(path: &str) -> String {

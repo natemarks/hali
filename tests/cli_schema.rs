@@ -10,7 +10,14 @@ mod goal {
     use std::path::Path;
     use tempfile::TempDir;
 
-    const NAMES: [&str; 5] = ["concept add", "concept list", "error", "schema", "validate"];
+    const NAMES: [&str; 6] = [
+        "concept add",
+        "concept list",
+        "error",
+        "find",
+        "schema",
+        "validate",
+    ];
 
     struct Out {
         code: Option<i32>,
@@ -126,7 +133,7 @@ mod goal {
         assert_eq!(out.stderr, "");
         assert_eq!(
             out.stdout,
-            "add\nconcept add\nconcept list\nedit\nerror\nschema\nshow\nvalidate\n"
+            "add\nconcept add\nconcept list\nedit\nerror\nfind\nschema\nshow\nvalidate\n"
         );
     }
 

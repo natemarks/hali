@@ -62,6 +62,24 @@
       "tags", "byte_size", "modified"],
     "additionalProperties": false
   },
+  "resource_fields": {
+    "type": "object",
+    "properties": {
+      "id": {"type": "string"},
+      "path": {"type": "string"},
+      "title": {"type": "string"},
+      "media_type": {"type": "string"},
+      "editable": {"type": "boolean"},
+      "missing": {"type": "boolean"},
+      "stale": {"type": "boolean"},
+      "types": {"type": "array", "items": {"type": "string"}},
+      "tags": {"type": "array", "items": {"$ref": "#/$defs/tag"}},
+      "byte_size": {"type": "integer", "minimum": 0},
+      "modified": {"type": "string"}
+    },
+    "minProperties": 1,
+    "additionalProperties": false
+  },
   "tag": {
     "type": "object",
     "properties": {
