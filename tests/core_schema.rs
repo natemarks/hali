@@ -3,7 +3,6 @@
 //! Assumed API: `names() -> Vec<&'static str>` (sorted) and
 //! `get(&str) -> Option<serde_json::Value>` (the bare schema document).
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::schema;
     use serde_json::Value;

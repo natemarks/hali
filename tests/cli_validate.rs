@@ -299,7 +299,6 @@ fn invalid_extension_shapes_exit_3() {
 
 // ---- #6: the SHAPES_INVALID envelope is a golden and satisfies `hali schema error` ---------
 
-#[cfg(feature = "goal")]
 #[test]
 fn shapes_invalid_json_envelope() {
     let env = Env::with_fixture("shacl/extension-invalid");

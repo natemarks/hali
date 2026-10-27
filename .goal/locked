@@ -1,5 +1,0 @@
-tests/cli_schema.rs
-tests/core_schema.rs
-tests/schema_contract.rs
-tests/snapshots/cli_schema__schema_list_json.snap
-tests/snapshots/cli_validate__shapes_invalid_json_envelope.snap

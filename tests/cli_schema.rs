@@ -3,7 +3,6 @@
 //! Every run sets HALI_DATA_DIR / XDG_CONFIG_HOME / HOME to temp dirs and clears the rest
 //! of the environment, so the real store and config are never read.
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use std::collections::BTreeMap;

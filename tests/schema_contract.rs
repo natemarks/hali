@@ -3,7 +3,6 @@
 //! must be mapped to its command in `STDOUT_GOLDENS`; a stderr snapshot is the error envelope
 //! and is validated against `error`. Adding a snapshot without mapping it fails the test.
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::{Value, json};
