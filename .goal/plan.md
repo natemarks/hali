@@ -25,6 +25,7 @@ Approved by the human with the planner's recommended answers, except where chang
 | P2 | Hooks compiled into test builds | `cli_resource::test_hooks_are_compiled_in` (green under `make goal-tests` by design; red only under a bare `cargo test`) |
 | P3 | Dry-run guard covers add/show/edit | `.goal/checks/12-dry_run_guard_rows.sh` |
 | P4 | New deps pinned exactly | `.goal/checks/13-deps_pinned.sh` |
+| P5 | Every non-goal `cargo test` Makefile recipe (`unit`, `unit-update-golden`, `test-external`, `integration`) passes `--features test-hooks`, so settled goldens run | `.goal/checks/14-makefile_test_hooks.sh` (expected failure now: `integration` lacks test-hooks) |
 
 ## Approach
 1. Deps pinned exactly: `xdg-mime =0.4.0`, `sha2 =0.11.1`, `percent-encoding =2.3.2`.
