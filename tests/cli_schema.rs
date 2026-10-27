@@ -113,7 +113,10 @@ mod goal {
         let out = env.run(["schema", "--json"]);
         assert_eq!(out.code, Some(0), "{}", out.stderr);
         assert_eq!(out.stderr, "");
-        insta::assert_snapshot!("schema_list_json", out.stdout);
+        // The locked snapshot is named without the `goal__` module segment.
+        insta::with_settings!({prepend_module_to_snapshot => false}, {
+            insta::assert_snapshot!("cli_schema__schema_list_json", out.stdout);
+        });
     }
 
     #[test]
