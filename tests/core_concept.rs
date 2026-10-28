@@ -3,7 +3,7 @@
 //! Assumed API:
 //!   `hali::core::slug(label: &str) -> String`
 //!   `hali::core::Context::new(language: &str, Box<dyn Clock>, Box<dyn IdGen>) -> Context`
-//!   `hali::core::concept::add(&Context, &mut Store, label: &str) -> Result<Concept, hali::core::Error>`
+//!   `hali::core::concept::add(&Context, &mut Store, label: &str, broader: &[String]) -> Result<Concept, hali::core::Error>`
 //!   `hali::core::concept::list(&Context, &Store, offset: usize, limit: usize) -> Page`
 //!   `Concept { id, label: String, alt_labels, broader: Vec<String> }`
 //!   `Page { results: Vec<Concept>, total: usize, truncated: bool, next_offset: Option<usize> }`
@@ -50,7 +50,7 @@ fn slug_rules() {
 #[test]
 fn add_writes_concept_triples_and_scheme() {
     let (mut store, _dir) = empty_store();
-    let c = concept::add(&ctx("en"), &mut store, "machine learning")
+    let c = concept::add(&ctx("en"), &mut store, "machine learning", &[])
         .unwrap()
         .value;
     assert_eq!(c.id, "machine-learning");
@@ -66,7 +66,7 @@ fn add_writes_concept_triples_and_scheme() {
 #[test]
 fn add_normalises_whitespace_in_the_label() {
     let (mut store, _dir) = empty_store();
-    let c = concept::add(&ctx("en"), &mut store, "  machine \t  learning ")
+    let c = concept::add(&ctx("en"), &mut store, "  machine \t  learning ", &[])
         .unwrap()
         .value;
     assert_eq!(c.label, "machine learning");
@@ -76,7 +76,7 @@ fn add_normalises_whitespace_in_the_label() {
 #[test]
 fn add_uses_the_configured_language_tag() {
     let (mut store, _dir) = empty_store();
-    concept::add(&ctx("de"), &mut store, "Maschinelles Lernen").unwrap();
+    concept::add(&ctx("de"), &mut store, "Maschinelles Lernen", &[]).unwrap();
     let ttl = hali::storage::to_turtle(&store, hali::storage::File::Vocabulary);
     assert!(
         ttl.contains("skos:prefLabel \"Maschinelles Lernen\"@de"),
@@ -87,9 +87,15 @@ fn add_uses_the_configured_language_tag() {
 #[test]
 fn colliding_slugs_get_numeric_suffixes() {
     let (mut store, _dir) = empty_store();
-    let a = concept::add(&ctx("en"), &mut store, "Rust").unwrap().value;
-    let b = concept::add(&ctx("en"), &mut store, "rust!").unwrap().value;
-    let c = concept::add(&ctx("en"), &mut store, "Rust?").unwrap().value;
+    let a = concept::add(&ctx("en"), &mut store, "Rust", &[])
+        .unwrap()
+        .value;
+    let b = concept::add(&ctx("en"), &mut store, "rust!", &[])
+        .unwrap()
+        .value;
+    let c = concept::add(&ctx("en"), &mut store, "Rust?", &[])
+        .unwrap()
+        .value;
     assert_eq!(
         (a.id.as_str(), b.id.as_str(), c.id.as_str()),
         ("rust", "rust-2", "rust-3")
@@ -99,11 +105,11 @@ fn colliding_slugs_get_numeric_suffixes() {
 #[test]
 fn duplicate_label_is_label_taken() {
     let (mut store, _dir) = empty_store();
-    concept::add(&ctx("en"), &mut store, "machine learning").unwrap();
+    concept::add(&ctx("en"), &mut store, "machine learning", &[]).unwrap();
     let before = hali::storage::to_turtle(&store, hali::storage::File::Vocabulary);
 
     // Case-insensitive, whitespace-normalised.
-    let err = concept::add(&ctx("en"), &mut store, "Machine   LEARNING").unwrap_err();
+    let err = concept::add(&ctx("en"), &mut store, "Machine   LEARNING", &[]).unwrap_err();
     assert_eq!(err.rule, "LABEL_TAKEN");
     assert_eq!(
         err.message,
@@ -128,7 +134,7 @@ fn duplicate_label_is_label_taken() {
 #[test]
 fn label_taken_also_matches_alt_labels() {
     let mut store = hali::storage::load(&fixture("store")).unwrap();
-    let err = concept::add(&ctx("en"), &mut store, "ld").unwrap_err();
+    let err = concept::add(&ctx("en"), &mut store, "ld", &[]).unwrap_err();
     assert_eq!(err.rule, "LABEL_TAKEN");
     assert_eq!(err.details["concept"], "linked-data");
 }
@@ -136,7 +142,7 @@ fn label_taken_also_matches_alt_labels() {
 #[test]
 fn same_label_in_another_language_is_not_taken() {
     let mut store = hali::storage::load(&fixture("store")).unwrap();
-    let c = concept::add(&ctx("de"), &mut store, "machine learning")
+    let c = concept::add(&ctx("de"), &mut store, "machine learning", &[])
         .unwrap()
         .value;
     assert_eq!(c.label, "machine learning");
@@ -147,7 +153,7 @@ fn invalid_labels_are_rejected() {
     let (mut store, _dir) = empty_store();
     for bad in ["", "   ", "!!!", "a\u{7}b", "a\nb"] {
         assert!(
-            concept::add(&ctx("en"), &mut store, bad).is_err(),
+            concept::add(&ctx("en"), &mut store, bad, &[]).is_err(),
             "{bad:?} must be rejected"
         );
     }
@@ -217,7 +223,7 @@ fn assert_scheme_untouched(store: &hali::storage::Store) {
 #[test]
 fn add_topics_on_an_empty_store_does_not_collide_with_the_scheme() {
     let (mut store, _dir) = empty_store();
-    let c = concept::add(&ctx("en"), &mut store, "topics")
+    let c = concept::add(&ctx("en"), &mut store, "topics", &[])
         .unwrap()
         .value;
     assert_eq!(c.id, "topics-2");
@@ -228,7 +234,7 @@ fn add_topics_on_an_empty_store_does_not_collide_with_the_scheme() {
 #[test]
 fn add_case_variant_topics_does_not_collide_with_the_scheme() {
     let (mut store, _dir) = empty_store();
-    let c = concept::add(&ctx("en"), &mut store, "TOPICS")
+    let c = concept::add(&ctx("en"), &mut store, "TOPICS", &[])
         .unwrap()
         .value;
     assert_eq!(c.id, "topics-2");
@@ -239,8 +245,8 @@ fn add_case_variant_topics_does_not_collide_with_the_scheme() {
 #[test]
 fn add_topics_after_another_concept_does_not_collide_with_the_scheme() {
     let (mut store, _dir) = empty_store();
-    concept::add(&ctx("en"), &mut store, "machine learning").unwrap();
-    let c = concept::add(&ctx("en"), &mut store, "topics")
+    concept::add(&ctx("en"), &mut store, "machine learning", &[]).unwrap();
+    let c = concept::add(&ctx("en"), &mut store, "topics", &[])
         .unwrap()
         .value;
     assert_eq!(c.id, "topics-2");

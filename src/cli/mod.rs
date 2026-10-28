@@ -35,18 +35,27 @@ enum Command {
         /// The title, for one path only (default: the file name without extension)
         #[arg(long, value_parser = parse_title)]
         title: Option<String>,
+        /// Tag new Resources with this Concept (a slug or a label; repeatable)
+        #[arg(long = "tag", value_name = "CONCEPT")]
+        tags: Vec<String>,
     },
     /// Manage the Concepts of the topics scheme
     #[command(subcommand)]
     Concept(ConceptCommand),
-    /// Edit a Resource
+    /// Edit a Resource: its title and its tags
     Edit {
         /// A path or a full UUID
         #[arg(value_name = "REF")]
         reference: String,
         /// The new title
-        #[arg(long, required = true, value_parser = parse_title)]
-        title: String,
+        #[arg(long, value_parser = parse_title)]
+        title: Option<String>,
+        /// Tag the Resource with this Concept (a slug or a label; repeatable)
+        #[arg(long = "add-tag", value_name = "CONCEPT")]
+        add_tags: Vec<String>,
+        /// Untag the Resource from this Concept (a slug or a label; repeatable)
+        #[arg(long = "remove-tag", value_name = "CONCEPT")]
+        remove_tags: Vec<String>,
     },
     /// Print the JSON Schema of a command's --json output, or of the error envelope
     Schema {
@@ -67,6 +76,12 @@ enum Command {
         /// Only Resources whose file changed since it was cataloged
         #[arg(long)]
         stale: bool,
+        /// Only Resources tagged with this Concept or a narrower one (repeatable: all must match)
+        #[arg(long = "tag", value_name = "CONCEPT")]
+        tags: Vec<String>,
+        /// With --tag, match only the Concept itself, not narrower ones
+        #[arg(long)]
+        exact: bool,
         /// The order: modified and added are newest first
         #[arg(long, value_enum, default_value_t = SortArg::Modified)]
         sort: SortArg,
@@ -121,6 +136,9 @@ enum ConceptCommand {
         /// Its preferred label
         #[arg(value_parser = parse_label)]
         label: String,
+        /// A broader Concept (a slug or a label; repeatable)
+        #[arg(long, value_name = "CONCEPT")]
+        broader: Vec<String>,
     },
     /// List Concepts, sorted by label
     List {
@@ -279,13 +297,14 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
     let mut store = storage::load(&dir)?;
 
     match &cli.command {
-        Command::Add { paths, title } => {
+        Command::Add { paths, title, tags } => {
             if title.is_some() && paths.len() > 1 {
                 return Err(Error::usage("--title takes exactly one path"));
             }
             let files = inspect_all(paths)?;
             let user = core::config::user_name(&config, env);
-            let mut added = resource::add_all(&ctx, &mut store, &files, title.as_deref(), &user)?;
+            let mut added =
+                resource::add_all(&ctx, &mut store, &files, title.as_deref(), tags, &user)?;
             for record in added
                 .value
                 .added
@@ -309,9 +328,19 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             };
             mutated(cli, &dir, &store, output, &added.changes, text)?;
         }
-        Command::Edit { reference, title } => {
+        Command::Edit {
+            reference,
+            title,
+            add_tags,
+            remove_tags,
+        } => {
             let id = resource::resolve_ref(&store, reference, paths::ref_path)?;
-            let mut edited = resource::edit_title(&ctx, &mut store, &id, title)?;
+            let edit = resource::Edit {
+                title: title.clone(),
+                add_tags: add_tags.clone(),
+                remove_tags: remove_tags.clone(),
+            };
+            let mut edited = resource::edit(&ctx, &mut store, &id, &edit)?;
             observe(&mut edited.value);
             let output = ResourceOutput {
                 schema_version: SCHEMA_VERSION,
@@ -320,8 +349,8 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             let record = &edited.value;
             let text = || {
                 let verb = match (cli.dry_run, edited.changes.is_empty()) {
-                    (true, _) => "would retitle",
-                    (false, false) => "retitled",
+                    (true, _) => "would edit",
+                    (false, false) => "edited",
                     (false, true) => "unchanged",
                 };
                 println!(
@@ -337,6 +366,8 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             media_type,
             missing,
             stale,
+            tags,
+            exact,
             sort,
             limit,
             offset,
@@ -348,6 +379,8 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 media_type: media_type.clone(),
                 missing: *missing,
                 stale: *stale,
+                tags: tags.clone(),
+                exact: *exact,
                 sort: match sort {
                     SortArg::Modified => resource::Sort::Modified,
                     SortArg::Added => resource::Sort::Added,
@@ -356,7 +389,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 offset: *offset,
                 limit: *limit,
             };
-            let found = resource::find(&ctx, &store, &query, |p| storage::stat(Path::new(p)));
+            let found = resource::find(&ctx, &store, &query, |p| storage::stat(Path::new(p)))?;
             if *path_only {
                 for r in &found.results {
                     println!("{}", printable(&r.path));
@@ -420,8 +453,8 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 print_shown(&shown);
             }
         }
-        Command::Concept(ConceptCommand::Add { label }) => {
-            let added = concept::add(&ctx, &mut store, label)?;
+        Command::Concept(ConceptCommand::Add { label, broader }) => {
+            let added = concept::add(&ctx, &mut store, label, broader)?;
             let concept = &added.value;
             let output = AddOutput {
                 schema_version: SCHEMA_VERSION,

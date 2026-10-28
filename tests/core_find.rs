@@ -3,7 +3,7 @@
 //! Assumed API (invented here; the file facts come in only through the injected `stat`, and
 //! `find` has no hash input, so core never touches the filesystem):
 //!   `resource::Query { title: Option<String>, media_type: Option<MediaPattern>, missing: bool,
-//!        stale: bool, sort: Sort, offset: usize, limit: usize }`
+//!        stale: bool, tags: Vec<String>, exact: bool, sort: Sort, offset: usize, limit: usize }`
 //!       `impl Default`: no filters, `Sort::Modified`, `offset: 0`, `limit: 50`.
 //!   `resource::Sort::{Modified, Added, Title}` (Copy)
 //!   `resource::MediaPattern`, built by
@@ -11,7 +11,7 @@
 //!       accepts `type/subtype` or `type/*`, matched case-insensitively; anything else is a
 //!       usage error (exit code 2).
 //!   `resource::find(&Context, &Store, &Query, stat: impl Fn(&str) -> Option<(u64, i64)>)
-//!        -> Found`
+//!        -> Result<Found, hali::core::Error>`
 //!       `stat(path)` is `Some((size, mtime_secs))` for a regular file, else `None`; it feeds
 //!       `Record::observe`. Every Resource (a `hali:Resource` in resources.ttl) is a candidate.
 //!   `Found { results: Vec<Record>, total: usize, truncated: bool, next_offset: Option<usize> }`
@@ -99,7 +99,7 @@ mod goal {
     }
 
     fn find(store: &Store, query: &Query) -> Found {
-        resource::find(&reader(), store, query, fresh)
+        resource::find(&reader(), store, query, fresh).unwrap()
     }
 
     fn ids(found: &Found) -> Vec<&str> {
@@ -601,7 +601,7 @@ mod goal {
     #[test]
     fn missing_and_stale_from_injected_stat() {
         let (store, _dir) = observed_store();
-        let found = resource::find(&reader(), &store, &Query::default(), stat);
+        let found = resource::find(&reader(), &store, &Query::default(), stat).unwrap();
         assert_eq!(found.total, 4);
         assert_eq!(
             flags(&found),
@@ -621,7 +621,7 @@ mod goal {
             missing: true,
             ..Query::default()
         };
-        let found = resource::find(&reader(), &store, &q, stat);
+        let found = resource::find(&reader(), &store, &q, stat).unwrap();
         assert_eq!(flags(&found), [("gone", true, false)]);
         assert_eq!(found.total, 1);
     }
@@ -636,12 +636,12 @@ mod goal {
             ..Query::default()
         };
         // The filter applies before paging, so `total` counts both stale Resources.
-        let found = resource::find(&reader(), &store, &q, stat);
+        let found = resource::find(&reader(), &store, &q, stat).unwrap();
         assert_eq!(titles(&found), ["grown"]);
         assert_eq!(found.total, 2);
         assert!(found.truncated);
         assert_eq!(found.next_offset, Some(1));
-        let next = resource::find(&reader(), &store, &Query { offset: 1, ..q }, stat);
+        let next = resource::find(&reader(), &store, &Query { offset: 1, ..q }, stat).unwrap();
         assert_eq!(titles(&next), ["touched"]);
         assert!(!next.truncated);
     }
@@ -654,7 +654,7 @@ mod goal {
             stale: true,
             ..Query::default()
         };
-        let found = resource::find(&reader(), &store, &q, stat);
+        let found = resource::find(&reader(), &store, &q, stat).unwrap();
         assert!(found.results.is_empty());
         assert_eq!(found.total, 0);
         assert!(!found.truncated);
@@ -677,7 +677,7 @@ mod goal {
             offset: 1,
             ..Query::default()
         };
-        let found = resource::find(&reader(), &store, &q, counting);
+        let found = resource::find(&reader(), &store, &q, counting).unwrap();
         assert_eq!(found.results.len(), 2);
         assert_eq!(found.total, 5);
         assert_eq!(calls.get(), 2, "only the returned page is stat'ed");
@@ -688,7 +688,7 @@ mod goal {
             offset: 9,
             ..Query::default()
         };
-        let found = resource::find(&reader(), &store, &q, counting);
+        let found = resource::find(&reader(), &store, &q, counting).unwrap();
         assert!(found.results.is_empty());
         assert_eq!(calls.get(), 0);
 
@@ -699,7 +699,7 @@ mod goal {
             limit: 1,
             ..Query::default()
         };
-        let found = resource::find(&reader(), &store, &q, counting);
+        let found = resource::find(&reader(), &store, &q, counting).unwrap();
         assert_eq!(found.total, 0);
         assert_eq!(calls.get(), 5);
     }
