@@ -332,11 +332,14 @@ impl Error {
             json!({"concept": concept, "tagged": tagged, "narrower": narrower}),
         )
         .fix(&format!(
-            "Untag the Resources (hali edit <ref> --remove-tag {concept}) and unlink the narrower Concepts (hali concept edit <C> --remove-broader {concept}), then retry."
+            "Untag the Resources (hali edit <ref> --remove-tag {id}) and unlink the narrower Concepts (hali concept edit <C> --remove-broader {id}), then retry.",
+            id = shell_quote(concept)
         ));
         let id = shell_quote(concept);
         err.suggested_command = Some(if tagged > 0 {
-            format!("hali find --exact --tag {id}")
+            // A leading `-` would be read as a flag, so the value is attached with `=`.
+            let sep = if concept.starts_with('-') { '=' } else { ' ' };
+            format!("hali find --exact --tag{sep}{id}")
         } else {
             format!("hali concept show {id}")
         });

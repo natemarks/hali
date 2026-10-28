@@ -1041,4 +1041,115 @@ mod goal {
         assert_eq!(err.exit_code(), 1);
         assert_eq!(err.details["concept"], "dogg");
     }
+
+    // ---- post-review fixes ---------------------------------------------------------------------
+
+    fn self_scheme_vocabulary(extra: &str) -> String {
+        format!(
+            "@prefix hali: <{H}> .\n@prefix skos: <{SKOS}> .\n\
+             hali:topics a skos:ConceptScheme, skos:Concept ; skos:inScheme hali:topics ;\n\
+             \tskos:prefLabel \"topics\"@en .\n{extra}"
+        )
+    }
+
+    #[test]
+    fn remove_refuses_the_scheme_node_alone() {
+        let (mut store, _dir) = store_from(&self_scheme_vocabulary(""));
+        let before = all_quads(&store);
+        let result = concept::remove(&ctx(), &mut store, "topics");
+        let err = refused(&store, &before, result);
+        assert_eq!(err.rule, "USAGE");
+        assert_eq!(err.exit_code(), 2);
+        assert!(err.message.contains("scheme"), "{}", err.message);
+        assert!(all_quads(&store).contains(&format!(
+            "<{H}topics> <{RDF_TYPE}> <{SKOS}ConceptScheme> <{}>",
+            File::Vocabulary.graph().as_str()
+        )));
+    }
+
+    #[test]
+    fn remove_refuses_the_scheme_node_among_others() {
+        let (mut store, _dir) = store_from(&self_scheme_vocabulary(
+            "hali:solo a skos:Concept ; skos:inScheme hali:topics ; skos:prefLabel \"solo\"@en .\n\
+             hali:kid a skos:Concept ; skos:inScheme hali:topics ; skos:broader hali:topics ;\n\
+             \tskos:prefLabel \"kid\"@en .\n",
+        ));
+        let before = all_quads(&store);
+        let result = concept::remove(&ctx(), &mut store, "topics");
+        let err = refused(&store, &before, result);
+        assert_eq!(err.rule, "USAGE");
+        // Not IN_USE, although kid is under it.
+        assert_ne!(err.rule, "IN_USE");
+    }
+
+    #[test]
+    fn remove_id_collision_is_not_a_self_loop() {
+        // `hali:urn:x` and `<urn:x>` both have the id `urn:x`; the second is narrower of the first.
+        let (mut store, _dir) = store_from(&format!(
+            "@prefix hali: <{H}> .\n@prefix skos: <{SKOS}> .\n\
+             hali:topics a skos:ConceptScheme .\n\
+             <{H}urn:x> a skos:Concept ; skos:inScheme hali:topics ; skos:prefLabel \"one\"@en .\n\
+             <urn:x> a skos:Concept ; skos:inScheme hali:topics ; skos:prefLabel \"two\"@en ;\n\
+             \tskos:broader <{H}urn:x> .\n"
+        ));
+        let before = all_quads(&store);
+        let result = concept::remove(&ctx(), &mut store, "one");
+        let err = refused(&store, &before, result);
+        assert_eq!(err.rule, "IN_USE");
+        assert_eq!(
+            *err.details,
+            json!({"concept": "urn:x", "tagged": 0, "narrower": 1})
+        );
+    }
+
+    #[test]
+    fn remove_true_self_loop_is_ignored() {
+        let (mut store, _dir) = store_from(&format!(
+            "@prefix hali: <{H}> .\n@prefix skos: <{SKOS}> .\n\
+             hali:topics a skos:ConceptScheme .\n\
+             hali:loop a skos:Concept ; skos:inScheme hali:topics ; skos:prefLabel \"loop\"@en ;\n\
+             \tskos:broader hali:loop .\n"
+        ));
+        concept::remove(&ctx(), &mut store, "loop").unwrap();
+    }
+
+    #[test]
+    fn remove_blank_node_narrower_is_in_use() {
+        let (mut store, _dir) = store_from(&format!(
+            "@prefix hali: <{H}> .\n@prefix skos: <{SKOS}> .\n\
+             hali:topics a skos:ConceptScheme .\n\
+             hali:top a skos:Concept ; skos:inScheme hali:topics ; skos:prefLabel \"top\"@en .\n\
+             [] skos:broader hali:top .\n"
+        ));
+        let before = all_quads(&store);
+        let result = concept::remove(&ctx(), &mut store, "top");
+        let err = refused(&store, &before, result);
+        assert_eq!(err.rule, "IN_USE");
+        assert_eq!(
+            *err.details,
+            json!({"concept": "top", "tagged": 0, "narrower": 1})
+        );
+    }
+
+    #[test]
+    fn in_use_texts_are_shell_safe() {
+        let err = Error::in_use("a;b", 1, 0);
+        let fix = err.suggested_fix.as_deref().unwrap();
+        assert!(fix.contains("--remove-tag 'a;b')"), "{fix}");
+        assert!(fix.contains("--remove-broader 'a;b'),"), "{fix}");
+        assert_eq!(
+            err.suggested_command.as_deref(),
+            Some("hali find --exact --tag 'a;b'")
+        );
+        let err = Error::in_use("-x", 1, 0);
+        assert_eq!(
+            err.suggested_command.as_deref(),
+            Some("hali find --exact --tag=-x")
+        );
+        let err = Error::in_use("-x y", 1, 0);
+        assert_eq!(
+            err.suggested_command.as_deref(),
+            Some("hali find --exact --tag='-x y'")
+        );
+    }
 }

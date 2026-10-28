@@ -498,7 +498,8 @@ pub fn edit(
 
 /// Removes a Concept from `vocabulary.ttl`: every triple with it as subject and every triple
 /// with it as object. Refused with `IN_USE` while anything is tagged with it or another Concept
-/// is under it, in any graph. The `hali:topics` scheme node stays. The value is the Concept as
+/// is under it, in any graph (a blank node counts). The `hali:topics` scheme node is refused
+/// with a usage error before anything else. The value is the Concept as
 /// it was.
 pub fn remove(
     ctx: &Context,
@@ -506,12 +507,20 @@ pub fn remove(
     reference: &str,
 ) -> Result<Mutation<Concept>, Error> {
     let concept = resolve_iri(ctx, store, reference)?;
+    if concept.as_str() == TOPICS {
+        return Err(Error::usage(
+            "the hali:topics scheme node is not a Concept that can be removed",
+        ));
+    }
     let was = record(ctx, store, &concept);
     let tagged = subjects(store, dcterms::SUBJECT, &concept).len();
-    let mut narrower = narrower_of(store, &concept);
-    narrower.remove(&was.id);
-    if tagged > 0 || !narrower.is_empty() {
-        return Err(Error::in_use(&was.id, tagged, narrower.len()));
+    // Nodes, not ids: two IRIs can share an id, and a blank node is a narrower Concept too.
+    let narrower = subjects(store, skos::BROADER, &concept)
+        .into_iter()
+        .filter(|s| !matches!(s, NamedOrBlankNode::NamedNode(n) if *n == concept))
+        .count();
+    if tagged > 0 || narrower > 0 {
+        return Err(Error::in_use(&was.id, tagged, narrower));
     }
 
     let graph = File::Vocabulary.graph();

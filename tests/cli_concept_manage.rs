@@ -1046,4 +1046,77 @@ mod goal {
             "show has no dry-run form: {doc}"
         );
     }
+
+    // ---- post-review fixes ---------------------------------------------------------------------
+
+    #[test]
+    fn remove_in_use_texts_are_shell_safe() {
+        let env = Env::new();
+        let skos = "http://www.w3.org/2004/02/skos/core#";
+        let r1 = "urn:uuid:0192f0c4-0000-7000-8000-000000000301";
+        let mut vocabulary = env.vocabulary();
+        let mut resources = env.file("resources.ttl");
+        for (id, label) in [("a;b", "semi"), ("-x", "dash")] {
+            vocabulary.push_str(&format!(
+                "<{HALI}{id}> a <{skos}Concept> ; <{skos}inScheme> <{HALI}topics> ; \
+                 <{skos}prefLabel> \"{label}\"@en .\n"
+            ));
+            resources.push_str(&format!(
+                "<{r1}> <http://purl.org/dc/terms/subject> <{HALI}{id}> .\n"
+            ));
+        }
+        std::fs::write(env.data().join("vocabulary.ttl"), vocabulary).unwrap();
+        std::fs::write(env.data().join("resources.ttl"), resources).unwrap();
+        let before = env.state();
+
+        let v = failed(
+            &env.run(["--json", "concept", "remove", "semi", "--yes"]),
+            1,
+            "IN_USE",
+        );
+        let e = &v["error"];
+        assert_eq!(e["details"]["concept"], "a;b");
+        assert_eq!(
+            e["suggested_fix"],
+            "Untag the Resources (hali edit <ref> --remove-tag 'a;b') and unlink the narrower \
+             Concepts (hali concept edit <C> --remove-broader 'a;b'), then retry."
+        );
+        assert_eq!(e["suggested_command"], "hali find --exact --tag 'a;b'");
+
+        let v = failed(
+            &env.run(["--json", "concept", "remove", "dash", "--yes"]),
+            1,
+            "IN_USE",
+        );
+        assert_eq!(v["error"]["details"]["concept"], "-x");
+        assert_eq!(
+            v["error"]["suggested_command"],
+            "hali find --exact --tag=-x"
+        );
+        assert_eq!(env.state(), before);
+
+        // What a shell reads from the suggested command is the intended single word, and the
+        // command runs: `--tag=-x` parses and finds the tagged Resource.
+        let out = env.run(["--json", "find", "--exact", "--tag=-x"]);
+        assert_eq!(out.code, Some(0), "{}", out.stderr);
+        let out = env.run(["--json", "find", "--exact", "--tag", "a;b"]);
+        assert_eq!(out.code, Some(0), "{}", out.stderr);
+    }
+
+    #[test]
+    fn remove_scheme_node_is_refused() {
+        let env = Env::with_vocabulary(&format!(
+            "@prefix hali: <{HALI}> .\n@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n\
+             hali:topics a skos:ConceptScheme, skos:Concept ; skos:inScheme hali:topics ;\n\
+             \tskos:prefLabel \"topics\"@en .\n"
+        ));
+        let before = env.state();
+        let v = failed(
+            &env.run(["--json", "concept", "remove", "topics", "--yes"]),
+            2,
+            "USAGE",
+        );
+        assert!(v["error"]["message"].as_str().unwrap().contains("scheme"));
+        assert_eq!(env.state(), before);
+    }
 }
