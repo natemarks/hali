@@ -320,6 +320,29 @@ impl Error {
         err
     }
 
+    /// A Concept cannot be removed: `tagged` subjects have it as `dcterms:subject` and
+    /// `narrower` other Concepts are under it, in any graph.
+    pub fn in_use(concept: &str, tagged: usize, narrower: usize) -> Error {
+        let mut err = Error::new(
+            "IN_USE",
+            1,
+            format!(
+                "Concept {concept} is in use: {tagged} tagged, broader of {narrower} Concepts; nothing was written"
+            ),
+            json!({"concept": concept, "tagged": tagged, "narrower": narrower}),
+        )
+        .fix(&format!(
+            "Untag the Resources (hali edit <ref> --remove-tag {concept}) and unlink the narrower Concepts (hali concept edit <C> --remove-broader {concept}), then retry."
+        ));
+        let id = shell_quote(concept);
+        err.suggested_command = Some(if tagged > 0 {
+            format!("hali find --exact --tag {id}")
+        } else {
+            format!("hali concept show {id}")
+        });
+        err
+    }
+
     /// The data dir cannot be resolved, read or created; `path` is `None` when unresolvable.
     pub fn store_io(path: Option<&Path>) -> Error {
         let message = match path {
