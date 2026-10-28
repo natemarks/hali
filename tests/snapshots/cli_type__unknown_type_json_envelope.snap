@@ -1,0 +1,5 @@
+---
+source: tests/cli_type.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"UNKNOWN_TYPE","message":"no Type matches Papr","details":{"type":"Papr","suggestions":[{"id":"Paper","label":"Paper"}]},"suggested_fix":"Use the name of an existing Type, or add the Type first.","suggested_command":"hali --dry-run type add Papr"}}

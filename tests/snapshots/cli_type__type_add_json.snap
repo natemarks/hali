@@ -1,0 +1,5 @@
+---
+source: tests/cli_type.rs
+expression: out.stdout
+---
+{"schema_version":1,"type":{"id":"Report","label":"Report","parents":["Document"]}}

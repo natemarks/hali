@@ -1,0 +1,18 @@
+@prefix hali: <https://w3id.org/hali#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# Hand-written extensions for the Type tests (#15). What the Type commands must read in any
+# graph, and never write, lives here:
+#   Memo: a Type that exists only here, a subclass of Note (so Note has a subtype);
+#   Draft: a Type that exists only here and is used by nothing (removing it is a no-op);
+#   a blank node that is a subclass of Ticket (it counts when removing Ticket);
+#   the Resource r4 (untyped in resources.ttl) is asserted a hali:Invoice here.
+hali:Memo a owl:Class ;
+    rdfs:subClassOf hali:Note ;
+    rdfs:label "Memo"@en .
+hali:Draft a owl:Class ;
+    rdfs:subClassOf hali:Resource ;
+    rdfs:label "Draft"@en .
+[] rdfs:subClassOf hali:Ticket .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000504> a hali:Invoice .

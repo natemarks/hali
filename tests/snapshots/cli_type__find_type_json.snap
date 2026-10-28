@@ -1,0 +1,5 @@
+---
+source: tests/cli_type.rs
+expression: out.stdout
+---
+{"schema_version":1,"results":[{"id":"0192f0c4-0000-7000-8000-000000000501","path":"/fixtures/types/r1.txt","title":"r1","media_type":"text/plain","editable":true,"missing":true,"stale":false,"types":["Paper"],"tags":[{"id":"ml","label":"ml"}],"byte_size":6,"modified":"2026-10-20T14:02:11Z"},{"id":"0192f0c4-0000-7000-8000-000000000502","path":"/fixtures/types/r2.txt","title":"r2","media_type":"text/plain","editable":true,"missing":true,"stale":false,"types":["Document"],"tags":[],"byte_size":6,"modified":"2026-10-20T14:02:11Z"}],"total":2,"truncated":false,"next_offset":null}

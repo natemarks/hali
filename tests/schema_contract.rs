@@ -122,6 +122,37 @@ mod goal {
         ("cli_dry_run__concept_rename_dry_run_json", "concept rename"),
     ];
 
+    /// Snapshots written by the active goal (#15): hidden from a build without the goal
+    /// feature (the `type add|list|remove` schemas, the `UNKNOWN_TYPE` branch and the Type
+    /// shape of `IN_USE` they name do not exist until the goal is met, and `types` in the
+    /// `add`, `edit` and `find` goldens only validates once the commands take the new flags).
+    const GOAL_SNAPS_15: &[&str] = &[
+        "cli_dry_run__type_add_dry_run_json",
+        "cli_dry_run__type_remove_dry_run_json",
+        "cli_type__add_type_json",
+        "cli_type__edit_add_remove_type_json",
+        "cli_type__find_type_json",
+        "cli_type__type_add_json",
+        "cli_type__type_in_use_json_envelope",
+        "cli_type__type_label_taken_json_envelope",
+        "cli_type__type_list_json",
+        "cli_type__type_remove_confirmation_required_json_envelope",
+        "cli_type__type_remove_json",
+        "cli_type__unknown_type_json_envelope",
+    ];
+
+    #[cfg(feature = "goal")]
+    const GOAL_STDOUT_GOLDENS_15: &[(&str, &str)] = &[
+        ("cli_dry_run__type_add_dry_run_json", "type add"),
+        ("cli_dry_run__type_remove_dry_run_json", "type remove"),
+        ("cli_type__add_type_json", "add"),
+        ("cli_type__edit_add_remove_type_json", "edit"),
+        ("cli_type__find_type_json", "find"),
+        ("cli_type__type_add_json", "type add"),
+        ("cli_type__type_list_json", "type list"),
+        ("cli_type__type_remove_json", "type remove"),
+    ];
+
     /// Every stdout snapshot's row.
     #[allow(unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
@@ -131,6 +162,8 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_16);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_14);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_17);
+        #[cfg(feature = "goal")]
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_15);
         rows
     }
 
@@ -166,6 +199,11 @@ mod goal {
         {
             pending_17 = &[];
         }
+        let mut pending_15: &[&str] = GOAL_SNAPS_15;
+        #[cfg(feature = "goal")]
+        {
+            pending_15 = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -178,6 +216,7 @@ mod goal {
                 || pending_16.contains(&stem.as_str())
                 || pending_14.contains(&stem.as_str())
                 || pending_17.contains(&stem.as_str())
+                || pending_15.contains(&stem.as_str())
             {
                 continue;
             }
@@ -283,6 +322,8 @@ mod goal {
         assert!(goldens.len() >= 29, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 32, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 41, "found only {} goldens", goldens.len());
+        #[cfg(feature = "goal")]
+        assert!(goldens.len() >= 53, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
                 .unwrap_or_else(|| panic!("golden `{}` is not mapped to a schema", g.stem));
@@ -1031,6 +1072,283 @@ mod goal {
                 in_use(json!({"concept": "fish", "tagged": 1, "narrower": null})),
                 false,
             ),
+        ] {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema error` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #15: what the `type add`, `type remove` and `type list` schemas accept and refuse.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn type_schemas_accept_and_reject() {
+        let record = || json!({"id": "Report", "label": "Report", "parents": ["Document"]});
+        let real = json!({"schema_version": 1, "type": record()});
+        let mut dry = real.clone();
+        dry["dry_run"] = json!(true);
+        dry["changes"] = json!([{"op": "add", "triple": "<a:b> <a:c> <a:d> ."}]);
+        let page = json!({"schema_version": 1, "results": [record()], "total": 1,
+            "truncated": false, "next_offset": null});
+
+        let mut cases: Vec<(&str, Value, bool)> = Vec::new();
+        for name in ["type add", "type remove"] {
+            cases.push((name, real.clone(), true));
+            cases.push((name, dry.clone(), true));
+            let mut v = dry.clone();
+            v["changes"] = json!([]);
+            cases.push((name, v, true));
+            let mut v = real.clone();
+            v["type"]["parents"] = json!([]);
+            cases.push((name, v, true));
+            // Another command's payload.
+            cases.push((name, page.clone(), false));
+            cases.push((
+                name,
+                json!({"schema_version": 1, "concept": {"id": "ml", "label": "ml",
+                    "alt_labels": [], "broader": []}}),
+                false,
+            ));
+            // A missing or an extra key, in the payload and in the record.
+            let mut v = real.clone();
+            v.as_object_mut().unwrap().remove("type");
+            cases.push((name, v, false));
+            for key in ["id", "label", "parents"] {
+                let mut v = real.clone();
+                v["type"].as_object_mut().unwrap().remove(key);
+                cases.push((name, v, false));
+            }
+            let mut v = real.clone();
+            v["type"]["surprise"] = json!(1);
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["extra"] = json!(1);
+            cases.push((name, v, false));
+            // Types of the values: `parents` is an array of strings.
+            let mut v = real.clone();
+            v["type"]["parents"] = json!("Document");
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["type"]["parents"] = json!([1]);
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["type"]["label"] = json!(null);
+            cases.push((name, v, false));
+            // The version, and the dry-run keys.
+            let mut v = real.clone();
+            v["schema_version"] = json!(2);
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["dry_run"] = json!(true);
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["changes"] = json!([]);
+            cases.push((name, v, false));
+            let mut v = dry.clone();
+            v["dry_run"] = json!(false);
+            cases.push((name, v, false));
+            let mut v = dry.clone();
+            v.as_object_mut().unwrap().remove("changes");
+            cases.push((name, v, false));
+            let mut v = dry.clone();
+            v["changes"] = json!([{"op": "replace", "triple": "<a:b> <a:c> <a:d> ."}]);
+            cases.push((name, v, false));
+        }
+
+        // `type list` is read-only: the list envelope, and no dry-run keys.
+        cases.push(("type list", page.clone(), true));
+        let mut v = page.clone();
+        v["results"] = json!([]);
+        v["total"] = json!(0);
+        cases.push(("type list", v, true));
+        let mut v = page.clone();
+        v["truncated"] = json!(true);
+        v["next_offset"] = json!(1);
+        cases.push(("type list", v, true));
+        cases.push(("type list", real.clone(), false));
+        for key in ["results", "total", "truncated", "next_offset"] {
+            let mut v = page.clone();
+            v.as_object_mut().unwrap().remove(key);
+            cases.push(("type list", v, false));
+        }
+        let mut v = page.clone();
+        v["results"][0].as_object_mut().unwrap().remove("parents");
+        cases.push(("type list", v, false));
+        let mut v = page.clone();
+        v["results"][0]["surprise"] = json!(1);
+        cases.push(("type list", v, false));
+        let mut v = page.clone();
+        v["results"] = json!([{"id": "ml", "label": "ml", "alt_labels": [], "broader": []}]);
+        cases.push(("type list", v, false));
+        let mut v = page.clone();
+        v["dry_run"] = json!(true);
+        v["changes"] = json!([]);
+        cases.push(("type list", v, false));
+        let mut v = page.clone();
+        v["total"] = json!(-1);
+        cases.push(("type list", v, false));
+        let mut v = page.clone();
+        v["schema_version"] = json!(2);
+        cases.push(("type list", v, false));
+
+        for (name, instance, valid) in cases {
+            let errs = problems(&validator(name), &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema {name}` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #15: the `UNKNOWN_TYPE` branch of `error`.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn unknown_type_branch() {
+        let unknown = |details: Value| error("UNKNOWN_TYPE", details);
+        let suggestion = |id: &str| json!({"id": id, "label": id});
+        let v = validator("error");
+        for (instance, valid) in [
+            (unknown(json!({"type": "Papr", "suggestions": []})), true),
+            (
+                unknown(json!({"type": "Papr", "suggestions": [suggestion("Paper")]})),
+                true,
+            ),
+            (
+                unknown(json!({"type": "e", "suggestions": [
+                    suggestion("Memo"), suggestion("Note"), suggestion("Paper")]})),
+                true,
+            ),
+            (
+                unknown(json!({"type": "e", "suggestions": [
+                    suggestion("A"), suggestion("B"), suggestion("C"), suggestion("D")]})),
+                false,
+            ),
+            (unknown(json!({"suggestions": []})), false),
+            (unknown(json!({"type": "Papr"})), false),
+            (unknown(json!({})), false),
+            (unknown(json!({"type": 5, "suggestions": []})), false),
+            (
+                unknown(json!({"type": "Papr", "suggestions": [{"id": "Paper"}]})),
+                false,
+            ),
+            (
+                unknown(json!({"type": "Papr", "suggestions": [
+                    {"id": "Paper", "label": "Paper", "extra": 1}]})),
+                false,
+            ),
+            // The Concept key does not satisfy the Type rule.
+            (
+                unknown(json!({"concept": "Papr", "suggestions": []})),
+                false,
+            ),
+        ] {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema error` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #15: `IN_USE` is either the Concept shape or the Type shape, each with every key.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn in_use_type_branch() {
+        let in_use = |details: Value| error("IN_USE", details);
+        let v = validator("error");
+        for (instance, valid) in [
+            (
+                in_use(json!({"type": "Paper", "typed": 1, "subtypes": 0})),
+                true,
+            ),
+            (
+                in_use(json!({"type": "Document", "typed": 0, "subtypes": 3})),
+                true,
+            ),
+            // The Concept shape still holds.
+            (
+                in_use(json!({"concept": "fish", "tagged": 1, "narrower": 0})),
+                true,
+            ),
+            // Partial and mixed shapes.
+            (in_use(json!({"typed": 1, "subtypes": 0})), false),
+            (in_use(json!({"type": "Paper", "subtypes": 0})), false),
+            (in_use(json!({"type": "Paper", "typed": 1})), false),
+            (
+                in_use(json!({"type": "Paper", "tagged": 1, "narrower": 0})),
+                false,
+            ),
+            (
+                in_use(json!({"concept": "fish", "typed": 1, "subtypes": 0})),
+                false,
+            ),
+            (in_use(json!({"type": "Paper"})), false),
+            (in_use(json!({})), false),
+            // Types of the values.
+            (in_use(json!({"type": 5, "typed": 1, "subtypes": 0})), false),
+            (
+                in_use(json!({"type": "Paper", "typed": -1, "subtypes": 0})),
+                false,
+            ),
+            (
+                in_use(json!({"type": "Paper", "typed": 1.5, "subtypes": 0})),
+                false,
+            ),
+            (
+                in_use(json!({"type": "Paper", "typed": 1, "subtypes": null})),
+                false,
+            ),
+            (
+                in_use(json!({"type": "Paper", "typed": "1", "subtypes": 0})),
+                false,
+            ),
+        ] {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema error` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #15: `LABEL_TAKEN` is either the Concept shape or the Type shape, each with every key.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn label_taken_type_branch() {
+        let taken = |details: Value| error("LABEL_TAKEN", details);
+        let v = validator("error");
+        for (instance, valid) in [
+            (
+                taken(json!({"label": "paper", "language": "en", "type": "Paper"})),
+                true,
+            ),
+            // The Concept shape still holds.
+            (
+                taken(json!({"label": "ml", "language": "en", "concept": "ml"})),
+                true,
+            ),
+            (taken(json!({"label": "paper", "language": "en"})), false),
+            (taken(json!({"language": "en", "type": "Paper"})), false),
+            (taken(json!({"label": "paper", "type": "Paper"})), false),
+            (
+                taken(json!({"label": "paper", "language": "en", "type": 5})),
+                false,
+            ),
+            (
+                taken(json!({"label": 1, "language": "en", "type": "Paper"})),
+                false,
+            ),
+            (taken(json!({})), false),
         ] {
             let errs = problems(&v, &instance);
             assert_eq!(

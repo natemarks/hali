@@ -1,0 +1,5 @@
+---
+source: tests/cli_type.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"LABEL_TAKEN","message":"label \"paper\"@en is already used by Type Paper","details":{"label":"paper","language":"en","type":"Paper"},"suggested_fix":"Use the existing Type, or choose a different name.","suggested_command":"hali type list"}}
