@@ -360,6 +360,28 @@ impl Error {
         .fix("Fix the config file; only [user] name and [vocabulary] language are read.")
     }
 
+    /// A destructive command was not confirmed: `declined` is true when the user answered no
+    /// at the prompt, false when there was no terminal to ask. `retry` is the command that
+    /// confirms it.
+    pub fn confirmation_required(command: &str, retry: &str, declined: bool) -> Error {
+        let message = if declined {
+            format!("{command} was not confirmed; nothing was written")
+        } else {
+            format!(
+                "{command} needs confirmation, but stdin or stderr is not a terminal; nothing was written"
+            )
+        };
+        let mut err = Error::new(
+            "CONFIRMATION_REQUIRED",
+            1,
+            message,
+            json!({"command": command, "declined": declined}),
+        )
+        .fix("Run it again with --yes to confirm, or with --dry-run to see what it would change.");
+        err.suggested_command = Some(retry.to_string());
+        err
+    }
+
     /// A path names no regular file. `kind` is `missing`, `directory` or `other`.
     pub fn not_a_regular_file(path: &str, kind: &str) -> Error {
         let what = match kind {

@@ -36,6 +36,7 @@ mod goal {
                 "edit",
                 "error",
                 "find",
+                "forget",
                 "schema",
                 "show",
                 "validate"

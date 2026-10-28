@@ -419,6 +419,65 @@ pub fn edit(
     })
 }
 
+/// Forgets a Resource in one mutation, in resources.ttl only: removes the Resource, its checksum
+/// node, its catalog record and every triple that points at it, and the `a dcterms:MediaType`
+/// triple of its non-IANA format if no other Resource uses that format. The user Person and
+/// the Concepts stay. The value is the record as it was. Needs no clock and no id, and never
+/// looks at the file. Refused, with the store unchanged, if the store would not conform.
+pub fn forget(ctx: &Context, store: &mut Store, id: &str) -> Result<Mutation<Record>, Error> {
+    let resource = known(store, id)?;
+    let was = record(ctx, store, &resource);
+    let graph = File::Resources.graph();
+    let quads_of = |s: Option<&NamedNode>, o: Option<TermRef<'_>>| -> Vec<Quad> {
+        store
+            .quads_for_pattern(
+                s.map(|s| s.as_ref().into()),
+                None,
+                o,
+                Some(graph.as_ref().into()),
+            )
+            .map(|q| q.expect("reading the in-memory store"))
+            .collect()
+    };
+
+    let mut removed = quads_of(Some(&resource), None);
+    if let Some(node) = first_iri(store, &resource, spdx::CHECKSUM) {
+        removed.extend(quads_of(Some(&node), None));
+    }
+    if let Some(c) = catalog_record_of(store, &resource) {
+        removed.extend(quads_of(Some(&c), None));
+    }
+    removed.extend(quads_of(None, Some(resource.as_ref().into())));
+    let format = first_iri(store, &resource, dcterms::FORMAT)
+        .filter(|f| f.as_str().starts_with(HALI_MEDIA_TYPES));
+    if let Some(format) = format {
+        let shared = subjects(store, dcterms::FORMAT, format.as_ref().into())
+            .into_iter()
+            .any(|r| r != resource && is_resource(store, &r));
+        if !shared {
+            removed.extend(
+                store
+                    .quads_for_pattern(
+                        Some(format.as_ref().into()),
+                        Some(rdf::TYPE),
+                        Some(iri(dcterms::MEDIA_TYPE).as_ref()),
+                        Some(graph.as_ref().into()),
+                    )
+                    .map(|q| q.expect("reading the in-memory store")),
+            );
+        }
+    }
+    removed.sort_by_cached_key(ToString::to_string);
+    removed.dedup();
+
+    validate::guard(store, &[], &removed)?;
+    let changes = apply(store, &[], &removed);
+    Ok(Mutation {
+        value: was,
+        changes,
+    })
+}
+
 /// The order `find` lists Resources in; ties always break on ascending id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sort {
