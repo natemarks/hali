@@ -322,7 +322,7 @@ hali find [--tag C]… [--exact] [--type T]… [--title TEXT] [--media-type M]
           [--related-to REF [--via REL]] [--missing] [--stale]
           [--sort modified|added|title] [--limit N] [--offset N] [--fields F,…] [--path-only]
 hali show <ref> [--path-only]            # one Resource incl. relations and catalog record
-hali edit <ref> [--title T] [--add-type T] [--remove-type T] [--add-tag C] [--remove-tag C]
+hali edit <ref> [--title T] [--add-type T]… [--remove-type T]… [--add-tag C]… [--remove-tag C]…
 hali relate <ref> <relation> <ref>
 hali unrelate <ref> <relation> <ref>
 hali forget <ref> [--force]
@@ -348,11 +348,13 @@ hali generate completions <bash|zsh|fish>
 ```
 **Not in v1:** `export`/`import` (the files are the export), `infer`, `open`.
 
+**Tags:** `add --tag C` tags the Resources it newly catalogs; for an already-cataloged path it is ignored, like `--title`. `edit` needs at least one change flag (else a usage error); naming one Concept in both `--add-tag` and `--remove-tag` is a usage error. Adding a present tag or removing an absent one is a silent no-op. An edit is one mutation with one SHACL check, and bumps the catalog record's `dcterms:modified` only when something changed. Its text summary is `edited|would edit|unchanged resource <id> "<title>"`. `concept add --broader C` writes a `skos:broader` link to each resolved Concept; the output's `broader` lists their ids, sorted. Every Concept reference is resolved before anything changes.
+
 **`hali schema`:** a name is the subcommand path as separate words (`hali schema concept add`), or `error` for the error envelope. With no name it lists the names, sorted: one per line in text mode, `{"schema_version":1,"schemas":[…]}` with `--json`. With a name it prints the bare JSON Schema document (draft 2020-12, no `$id`, no external `$ref`) on one line, in text and `--json` mode alike, not wrapped in the envelope (as with `hali query`, §9.9). An unknown name, or extra words, is a usage error (exit 2) that lists the valid names. It reads no config or store and writes nothing. Every command with a `--json` output has a schema, and the test suite checks every golden JSON snapshot against its schema (§14.6).
 
 ### 9.2 References
 - **Resource `<ref>`:** a path (absolute, or relative to the current directory, resolved to the real path) or the **full** UUID. Prefixes are not accepted.
-- **Concept:** its slug or any of its labels.
+- **Concept:** its slug or any of its labels. The exact slug (the `hali:` local name, as printed in `tags[].id`) wins; then any `prefLabel` or `altLabel` in the configured language, compared whitespace-normalised and case-insensitive (as label uniqueness is). Anything else is `UNKNOWN_CONCEPT` (exit 1), with `details {"concept": <ref>, "suggestions": [{"id","label"}…]}`: at most 3 Concepts whose folded slug or any label contains the folded reference, or is within edit distance max(2, len/3) of it, ranked by distance, then label, then id. Its `suggested_command` is `hali --dry-run concept add <ref>`, the reference POSIX single-quoted unless it is made of `[A-Za-z0-9._-]` only. With several references, the first unknown one in argument order is reported.
 - **Type:** its local name (`Paper`).
 - **Relation:** a local name (`annotates`) or a prefixed standard term (`dcterms:isPartOf`).
 
@@ -409,7 +411,7 @@ hali generate completions <bash|zsh|fish>
 - An unknown name mints a new `prov:SoftwareAgent` that `prov:actedOnBehalfOf` the user.
 
 ### 9.7 `find` semantics
-- `--tag` matches the Concept **and every narrower Concept** (`skos:broader*`); `--exact` turns that off.
+- `--tag` matches the Concept **and every narrower Concept** (`dcterms:subject/skos:broader*`, with the `skos:broader` triples of every file, `extensions.ttl` included; cycles terminate); `--exact` turns that off for every `--tag`, and without `--tag` it does nothing. An unknown Concept is `UNKNOWN_CONCEPT`, not an empty result.
 - `--type` matches subclasses.
 - `--related-to` matches either direction, and `--via` restricts it to a relation and its sub-properties.
 - Repeated filters are **AND**.
