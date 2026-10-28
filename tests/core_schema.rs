@@ -32,7 +32,11 @@ mod goal {
             [
                 "add",
                 "concept add",
+                "concept edit",
                 "concept list",
+                "concept remove",
+                "concept rename",
+                "concept show",
                 "edit",
                 "error",
                 "find",

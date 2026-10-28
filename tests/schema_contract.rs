@@ -97,6 +97,31 @@ mod goal {
         ("cli_forget__forget_json", "forget"),
     ];
 
+    /// Snapshots written by the active goal (#17): hidden from a build without the goal
+    /// feature (the `concept show|rename|edit|remove` schemas and the `IN_USE` branch they
+    /// name do not exist until the goal is met).
+    const GOAL_SNAPS_17: &[&str] = &[
+        "cli_concept_manage__concept_edit_json",
+        "cli_concept_manage__concept_remove_json",
+        "cli_concept_manage__concept_rename_json",
+        "cli_concept_manage__concept_show_json",
+        "cli_concept_manage__in_use_json_envelope",
+        "cli_concept_manage__remove_confirmation_required_json_envelope",
+        "cli_dry_run__concept_edit_dry_run_json",
+        "cli_dry_run__concept_remove_dry_run_json",
+        "cli_dry_run__concept_rename_dry_run_json",
+    ];
+
+    const GOAL_STDOUT_GOLDENS_17: &[(&str, &str)] = &[
+        ("cli_concept_manage__concept_edit_json", "concept edit"),
+        ("cli_concept_manage__concept_remove_json", "concept remove"),
+        ("cli_concept_manage__concept_rename_json", "concept rename"),
+        ("cli_concept_manage__concept_show_json", "concept show"),
+        ("cli_dry_run__concept_edit_dry_run_json", "concept edit"),
+        ("cli_dry_run__concept_remove_dry_run_json", "concept remove"),
+        ("cli_dry_run__concept_rename_dry_run_json", "concept rename"),
+    ];
+
     /// Every stdout snapshot's row.
     #[allow(unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
@@ -105,6 +130,7 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_12);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_16);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_14);
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_17);
         rows
     }
 
@@ -136,6 +162,10 @@ mod goal {
         {
             pending_14 = &[];
         }
+        let mut pending_17: &[&str] = GOAL_SNAPS_17;
+        {
+            pending_17 = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -147,6 +177,7 @@ mod goal {
                 || pending.contains(&stem.as_str())
                 || pending_16.contains(&stem.as_str())
                 || pending_14.contains(&stem.as_str())
+                || pending_17.contains(&stem.as_str())
             {
                 continue;
             }
@@ -251,6 +282,7 @@ mod goal {
         assert!(goldens.len() >= 23, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 29, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 32, "found only {} goldens", goldens.len());
+        assert!(goldens.len() >= 41, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
                 .unwrap_or_else(|| panic!("golden `{}` is not mapped to a schema", g.stem));
@@ -816,6 +848,187 @@ mod goal {
             ),
             (
                 confirmation(json!({"command": 5, "declined": false})),
+                false,
+            ),
+        ] {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema error` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #17: what the `concept show`, `concept rename`, `concept edit` and `concept remove`
+    /// schemas accept and refuse.
+    #[test]
+    fn concept_manage_schemas_accept_and_reject() {
+        let shown_concept = || {
+            json!({"id": "dog", "label": "dog", "alt_labels": ["hound"],
+                "broader": ["mammal", "pet"], "narrower": [], "tagged": 1})
+        };
+        let real = json!({"schema_version": 1, "concept": concept()});
+        let mut dry = real.clone();
+        dry["dry_run"] = json!(true);
+        dry["changes"] = json!([{"op": "remove", "triple": "<a:b> <a:c> <a:d> ."}]);
+        let show = json!({"schema_version": 1, "concept": shown_concept()});
+
+        let mut cases: Vec<(&str, Value, bool)> = Vec::new();
+        for name in ["concept rename", "concept edit", "concept remove"] {
+            cases.push((name, real.clone(), true));
+            cases.push((name, dry.clone(), true));
+            let mut v = dry.clone();
+            v["changes"] = json!([]);
+            cases.push((name, v, true));
+            // Another command's payload: show's has the derived fields; add's list has none.
+            cases.push((name, show.clone(), false));
+            cases.push((
+                name,
+                json!({"schema_version": 1, "results": [], "total": 0,
+                    "truncated": false, "next_offset": null}),
+                false,
+            ));
+            // A missing or an extra key, in the payload and in the record.
+            let mut v = real.clone();
+            v.as_object_mut().unwrap().remove("concept");
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["concept"].as_object_mut().unwrap().remove("broader");
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["concept"]["surprise"] = json!(1);
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["extra"] = json!(1);
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["concept"]["alt_labels"] = json!("none");
+            cases.push((name, v, false));
+            // The version, and the dry-run keys.
+            let mut v = real.clone();
+            v["schema_version"] = json!(2);
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["dry_run"] = json!(true);
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["changes"] = json!([]);
+            cases.push((name, v, false));
+            let mut v = dry.clone();
+            v["dry_run"] = json!(false);
+            cases.push((name, v, false));
+            let mut v = dry.clone();
+            v.as_object_mut().unwrap().remove("changes");
+            cases.push((name, v, false));
+            let mut v = dry.clone();
+            v["changes"] = json!([{"op": "replace", "triple": "<a:b> <a:c> <a:d> ."}]);
+            cases.push((name, v, false));
+        }
+
+        cases.push(("concept show", show.clone(), true));
+        // Another command's payload, and a dry run: show writes nothing.
+        cases.push(("concept show", real.clone(), false));
+        let mut v = show.clone();
+        v["dry_run"] = json!(true);
+        v["changes"] = json!([]);
+        cases.push(("concept show", v, false));
+        let mut v = show.clone();
+        v["dry_run"] = json!(false);
+        cases.push(("concept show", v, false));
+        // Missing keys, one at a time.
+        for key in ["id", "label", "alt_labels", "broader", "narrower", "tagged"] {
+            let mut v = show.clone();
+            v["concept"].as_object_mut().unwrap().remove(key);
+            cases.push(("concept show", v, false));
+        }
+        let mut v = show.clone();
+        v.as_object_mut().unwrap().remove("concept");
+        cases.push(("concept show", v, false));
+        // Extra keys.
+        let mut v = show.clone();
+        v["concept"]["surprise"] = json!(1);
+        cases.push(("concept show", v, false));
+        let mut v = show.clone();
+        v["extra"] = json!(1);
+        cases.push(("concept show", v, false));
+        // Types: `narrower` is an array of strings, `tagged` an integer of at least 0.
+        for tagged in [json!("1"), json!(1.5), json!(-1), json!(null), json!(true)] {
+            let mut v = show.clone();
+            v["concept"]["tagged"] = tagged;
+            cases.push(("concept show", v, false));
+        }
+        let mut v = show.clone();
+        v["concept"]["tagged"] = json!(0);
+        cases.push(("concept show", v, true));
+        let mut v = show.clone();
+        v["concept"]["narrower"] = json!(["cat", "dog"]);
+        cases.push(("concept show", v, true));
+        let mut v = show.clone();
+        v["concept"]["narrower"] = json!("cat");
+        cases.push(("concept show", v, false));
+        let mut v = show.clone();
+        v["concept"]["narrower"] = json!([1]);
+        cases.push(("concept show", v, false));
+        let mut v = show.clone();
+        v["concept"]["alt_labels"] = json!([1]);
+        cases.push(("concept show", v, false));
+        let mut v = show.clone();
+        v["schema_version"] = json!(2);
+        cases.push(("concept show", v, false));
+
+        for (name, instance, valid) in cases {
+            let errs = problems(&validator(name), &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema {name}` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #17: the `IN_USE` branch of `error` requires the Concept and both counts.
+    #[test]
+    fn in_use_branch() {
+        let in_use = |details: Value| error("IN_USE", details);
+        let v = validator("error");
+        for (instance, valid) in [
+            (
+                in_use(json!({"concept": "fish", "tagged": 1, "narrower": 0})),
+                true,
+            ),
+            (
+                in_use(json!({"concept": "mammal", "tagged": 0, "narrower": 2})),
+                true,
+            ),
+            (in_use(json!({"tagged": 1, "narrower": 0})), false),
+            (in_use(json!({"concept": "fish", "narrower": 0})), false),
+            (in_use(json!({"concept": "fish", "tagged": 1})), false),
+            (in_use(json!({})), false),
+            (
+                in_use(json!({"concept": 5, "tagged": 1, "narrower": 0})),
+                false,
+            ),
+            (
+                in_use(json!({"concept": "fish", "tagged": -1, "narrower": 0})),
+                false,
+            ),
+            (
+                in_use(json!({"concept": "fish", "tagged": 1.5, "narrower": 0})),
+                false,
+            ),
+            (
+                in_use(json!({"concept": "fish", "tagged": "1", "narrower": 0})),
+                false,
+            ),
+            (
+                in_use(json!({"concept": "fish", "tagged": 1, "narrower": -2})),
+                false,
+            ),
+            (
+                in_use(json!({"concept": "fish", "tagged": 1, "narrower": null})),
                 false,
             ),
         ] {

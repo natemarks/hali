@@ -2,13 +2,15 @@
 //! resolution of Concept references (§9.2).
 
 use super::resource::Tag;
-use super::{Context, Error, Mutation, insert_all, normalise_label, slug, validate};
-use crate::ontology::{HALI, TOPICS, skos};
+use super::{Context, Error, Mutation, apply, insert_all, normalise_label, slug, validate};
+use crate::ontology::{HALI, TOPICS, dcterms, skos};
 use crate::storage::{File, Store};
 use oxigraph::model::vocab::rdf;
-use oxigraph::model::{Literal, NamedNode, NamedNodeRef, NamedOrBlankNodeRef, Quad, Term, TermRef};
+use oxigraph::model::{
+    Literal, NamedNode, NamedNodeRef, NamedOrBlankNode, NamedOrBlankNodeRef, Quad, Term, TermRef,
+};
 use serde::Serialize;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 /// A Concept record, as `--json` prints it.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -190,24 +192,7 @@ pub fn add(
 pub fn list(ctx: &Context, store: &Store, offset: usize, limit: usize) -> Page {
     let mut all: Vec<Concept> = concepts(store)
         .into_iter()
-        .map(|c| {
-            let lang = ctx.language();
-            let pref: BTreeSet<String> =
-                labels(store, c.as_ref(), skos::PREF_LABEL, lang).collect();
-            let alt: BTreeSet<String> = labels(store, c.as_ref(), skos::ALT_LABEL, lang).collect();
-            let broader: BTreeSet<String> = objects(store, c.as_ref(), skos::BROADER)
-                .filter_map(|o| match o {
-                    Term::NamedNode(n) => Some(id_of(&n)),
-                    _ => None,
-                })
-                .collect();
-            Concept {
-                id: id_of(&c),
-                label: pref.into_iter().next().unwrap_or_default(),
-                alt_labels: alt.into_iter().collect(),
-                broader: broader.into_iter().collect(),
-            }
-        })
+        .map(|c| record(ctx, store, &c))
         .collect();
     all.sort_by(|a, b| (&a.label, &a.id).cmp(&(&b.label, &b.id)));
 
@@ -221,6 +206,350 @@ pub fn list(ctx: &Context, store: &Store, offset: usize, limit: usize) -> Page {
         truncated,
         next_offset: truncated.then_some(end),
     }
+}
+
+/// A Concept's record, in the configured language, read from every graph.
+fn record(ctx: &Context, store: &Store, concept: &NamedNode) -> Concept {
+    let lang = ctx.language();
+    let pref: BTreeSet<String> = labels(store, concept.as_ref(), skos::PREF_LABEL, lang).collect();
+    let alt: BTreeSet<String> = labels(store, concept.as_ref(), skos::ALT_LABEL, lang).collect();
+    let broader: BTreeSet<String> = objects(store, concept.as_ref(), skos::BROADER)
+        .filter_map(|o| match o {
+            Term::NamedNode(n) => Some(id_of(&n)),
+            _ => None,
+        })
+        .collect();
+    Concept {
+        id: id_of(concept),
+        label: pref.into_iter().next().unwrap_or_default(),
+        alt_labels: alt.into_iter().collect(),
+        broader: broader.into_iter().collect(),
+    }
+}
+
+/// The ids of the Concepts directly under `concept` (`skos:broader <concept>`), in any graph,
+/// sorted. Derived by query; `skos:narrower` is never stored.
+fn narrower_of(store: &Store, concept: &NamedNode) -> BTreeSet<String> {
+    subjects(store, skos::BROADER, concept)
+        .into_iter()
+        .filter_map(|s| match s {
+            NamedOrBlankNode::NamedNode(n) => Some(id_of(&n)),
+            NamedOrBlankNode::BlankNode(_) => None,
+        })
+        .collect()
+}
+
+/// The distinct subjects with `<predicate> <object>`, in any graph.
+fn subjects(store: &Store, predicate: &str, object: &NamedNode) -> HashSet<NamedOrBlankNode> {
+    store
+        .quads_for_pattern(
+            None,
+            Some(named(predicate)),
+            Some(TermRef::from(object.as_ref())),
+            None,
+        )
+        .map(|q| q.expect("reading the in-memory store").subject)
+        .collect()
+}
+
+/// A Concept as `concept show` prints it.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Shown {
+    pub id: String,
+    pub label: String,
+    pub alt_labels: Vec<String>,
+    pub broader: Vec<String>,
+    pub narrower: Vec<String>,
+    pub tagged: usize,
+}
+
+/// One Concept with its derived `narrower` and the number of subjects tagged with it. Read only.
+pub fn show(ctx: &Context, store: &Store, reference: &str) -> Result<Shown, Error> {
+    let concept = resolve_iri(ctx, store, reference)?;
+    let Concept {
+        id,
+        label,
+        alt_labels,
+        broader,
+    } = record(ctx, store, &concept);
+    Ok(Shown {
+        id,
+        label,
+        alt_labels,
+        broader,
+        narrower: narrower_of(store, &concept).into_iter().collect(),
+        tagged: subjects(store, dcterms::SUBJECT, &concept).len(),
+    })
+}
+
+/// What `concept edit` changes; labels are in the configured language.
+#[derive(Clone, Debug, Default)]
+pub struct ConceptEdit {
+    pub add_alt: Vec<String>,
+    pub remove_alt: Vec<String>,
+    pub add_broader: Vec<String>,
+    pub remove_broader: Vec<String>,
+}
+
+/// A Concept other than `own` that holds the label folded to `key` in the configured language.
+fn label_holder(ctx: &Context, store: &Store, own: &NamedNode, key: &str) -> Option<NamedNode> {
+    concepts(store).into_iter().find(|c| {
+        c != own
+            && all_labels(store, c.as_ref(), ctx.language())
+                .iter()
+                .any(|l| fold(l) == key)
+    })
+}
+
+/// The vocabulary-graph quads of `subject`'s `predicate` whose literal is in `language`, with
+/// the literal's text.
+fn vocabulary_labels(
+    store: &Store,
+    subject: &NamedNode,
+    predicate: &str,
+    language: &str,
+) -> Vec<(String, Quad)> {
+    let graph = File::Vocabulary.graph();
+    store
+        .quads_for_pattern(
+            Some(subject.as_ref().into()),
+            Some(named(predicate)),
+            None,
+            Some(graph.as_ref().into()),
+        )
+        .map(|q| q.expect("reading the in-memory store"))
+        .filter_map(|q| match &q.object {
+            Term::Literal(l) if l.language() == Some(language) => Some((l.value().to_string(), q)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn label_quad(
+    ctx: &Context,
+    concept: &NamedNode,
+    predicate: &str,
+    label: &str,
+) -> Result<Quad, Error> {
+    let literal = Literal::new_language_tagged_literal(label, ctx.language())
+        .map_err(|_| Error::usage("the configured language is not a valid language tag"))?;
+    Ok(Quad::new(
+        concept.clone(),
+        named(predicate),
+        literal,
+        File::Vocabulary.graph(),
+    ))
+}
+
+fn broader_quad(concept: &NamedNode, parent: &NamedNode) -> Quad {
+    Quad::new(
+        concept.clone(),
+        named(skos::BROADER),
+        parent.clone(),
+        File::Vocabulary.graph(),
+    )
+}
+
+/// Replaces the Concept's prefLabel in the configured language with `new_label` and keeps the
+/// old one as an altLabel; the IRI never changes. A label another Concept holds is refused
+/// (`LABEL_TAKEN`); one of the Concept's own altLabels swaps places with the prefLabel.
+pub fn rename(
+    ctx: &Context,
+    store: &mut Store,
+    reference: &str,
+    new_label: &str,
+) -> Result<Mutation<Concept>, Error> {
+    let new_label = normalise_label(new_label)?;
+    let concept = resolve_iri(ctx, store, reference)?;
+    let key = fold(&new_label);
+    if let Some(holder) = label_holder(ctx, store, &concept, &key) {
+        return Err(Error::label_taken(
+            &new_label,
+            ctx.language(),
+            &id_of(&holder),
+        ));
+    }
+
+    let lang = ctx.language();
+    let old_prefs = vocabulary_labels(store, &concept, skos::PREF_LABEL, lang);
+    if old_prefs.iter().any(|(l, _)| *l == new_label) {
+        return Ok(Mutation {
+            value: record(ctx, store, &concept),
+            changes: Vec::new(),
+        });
+    }
+    let mut added = vec![label_quad(ctx, &concept, skos::PREF_LABEL, &new_label)?];
+    let mut removed: Vec<Quad> = old_prefs.iter().map(|(_, q)| q.clone()).collect();
+    for (old, _) in &old_prefs {
+        if fold(old) != key {
+            added.push(label_quad(ctx, &concept, skos::ALT_LABEL, old)?);
+        }
+    }
+    for (alt, quad) in vocabulary_labels(store, &concept, skos::ALT_LABEL, lang) {
+        if fold(&alt) == key {
+            removed.push(quad);
+        }
+    }
+
+    validate::guard(store, &added, &removed)?;
+    let changes = apply(store, &added, &removed);
+    Ok(Mutation {
+        value: record(ctx, store, &concept),
+        changes,
+    })
+}
+
+/// A usage error when one folded label is in both `--add-alt` and `--remove-alt`. The CLI runs
+/// it before it reads the store; `edit` runs it again.
+pub fn check_alt_lists(add_alt: &[String], remove_alt: &[String]) -> Result<(), Error> {
+    let removing: BTreeSet<String> = remove_alt.iter().map(|l| fold(l)).collect();
+    if add_alt.iter().any(|l| removing.contains(&fold(l))) {
+        return Err(Error::usage(
+            "a label cannot be both added and removed as an altLabel",
+        ));
+    }
+    Ok(())
+}
+
+/// Adds and removes altLabels and broader links of one Concept, in one mutation. The checks run
+/// in the order of spec §9.1; every no-op is silent.
+pub fn edit(
+    ctx: &Context,
+    store: &mut Store,
+    reference: &str,
+    edit: &ConceptEdit,
+) -> Result<Mutation<Concept>, Error> {
+    if edit.add_alt.is_empty()
+        && edit.remove_alt.is_empty()
+        && edit.add_broader.is_empty()
+        && edit.remove_broader.is_empty()
+    {
+        return Err(Error::usage(
+            "nothing to change: give at least one change flag",
+        ));
+    }
+    let add_alt: Vec<String> = edit
+        .add_alt
+        .iter()
+        .map(|l| normalise_label(l))
+        .collect::<Result<_, _>>()?;
+    let remove_alt: Vec<String> = edit
+        .remove_alt
+        .iter()
+        .map(|l| normalise_label(l))
+        .collect::<Result<_, _>>()?;
+    check_alt_lists(&add_alt, &remove_alt)?;
+
+    let concept = resolve_iri(ctx, store, reference)?;
+    let add_broader: Vec<NamedNode> = edit
+        .add_broader
+        .iter()
+        .map(|r| resolve_iri(ctx, store, r))
+        .collect::<Result<_, _>>()?;
+    let remove_broader: Vec<NamedNode> = edit
+        .remove_broader
+        .iter()
+        .map(|r| resolve_iri(ctx, store, r))
+        .collect::<Result<_, _>>()?;
+    if add_broader.contains(&concept) {
+        return Err(Error::usage("a Concept cannot be broader than itself"));
+    }
+    if add_broader.iter().any(|p| remove_broader.contains(p)) {
+        return Err(Error::usage(
+            "a Concept cannot be both added and removed as broader",
+        ));
+    }
+
+    let lang = ctx.language();
+    let mut held: BTreeSet<String> = all_labels(store, concept.as_ref(), lang)
+        .iter()
+        .map(|l| fold(l))
+        .collect();
+    let mut added: Vec<Quad> = Vec::new();
+    for label in &add_alt {
+        let key = fold(label);
+        if let Some(holder) = label_holder(ctx, store, &concept, &key) {
+            return Err(Error::label_taken(label, lang, &id_of(&holder)));
+        }
+        if held.insert(key) {
+            added.push(label_quad(ctx, &concept, skos::ALT_LABEL, label)?);
+        }
+    }
+    added.extend(add_broader.iter().map(|p| broader_quad(&concept, p)));
+
+    let removing: BTreeSet<String> = remove_alt.iter().map(|l| fold(l)).collect();
+    let mut removed: Vec<Quad> = vocabulary_labels(store, &concept, skos::ALT_LABEL, lang)
+        .into_iter()
+        .filter(|(alt, _)| removing.contains(&fold(alt)))
+        .map(|(_, q)| q)
+        .collect();
+    removed.extend(remove_broader.iter().map(|p| broader_quad(&concept, p)));
+
+    let holds = |q: &Quad| store.contains(q).expect("reading the in-memory store");
+    if !(added.iter().all(holds) && !removed.iter().any(holds)) {
+        validate::guard(store, &added, &removed)?;
+    }
+    let changes = apply(store, &added, &removed);
+    Ok(Mutation {
+        value: record(ctx, store, &concept),
+        changes,
+    })
+}
+
+/// Removes a Concept from `vocabulary.ttl`: every triple with it as subject and every triple
+/// with it as object. Refused with `IN_USE` while anything is tagged with it or another Concept
+/// is under it, in any graph (a blank node counts). The `hali:topics` scheme node is refused
+/// with a usage error before anything else. The value is the Concept as
+/// it was.
+pub fn remove(
+    ctx: &Context,
+    store: &mut Store,
+    reference: &str,
+) -> Result<Mutation<Concept>, Error> {
+    let concept = resolve_iri(ctx, store, reference)?;
+    if concept.as_str() == TOPICS {
+        return Err(Error::usage(
+            "the hali:topics scheme node is not a Concept that can be removed",
+        ));
+    }
+    let was = record(ctx, store, &concept);
+    let tagged = subjects(store, dcterms::SUBJECT, &concept).len();
+    // Nodes, not ids: two IRIs can share an id, and a blank node is a narrower Concept too.
+    let narrower = subjects(store, skos::BROADER, &concept)
+        .into_iter()
+        .filter(|s| !matches!(s, NamedOrBlankNode::NamedNode(n) if *n == concept))
+        .count();
+    if tagged > 0 || narrower > 0 {
+        return Err(Error::in_use(&was.id, tagged, narrower));
+    }
+
+    let graph = File::Vocabulary.graph();
+    let mut removed: Vec<Quad> = store
+        .quads_for_pattern(
+            Some(concept.as_ref().into()),
+            None,
+            None,
+            Some(graph.as_ref().into()),
+        )
+        .chain(store.quads_for_pattern(
+            None,
+            None,
+            Some(TermRef::from(concept.as_ref())),
+            Some(graph.as_ref().into()),
+        ))
+        .map(|q| q.expect("reading the in-memory store"))
+        .collect();
+    removed.sort_by_cached_key(ToString::to_string);
+    removed.dedup();
+
+    if !removed.is_empty() {
+        validate::guard(store, &[], &removed)?;
+    }
+    let changes = apply(store, &[], &removed);
+    Ok(Mutation {
+        value: was,
+        changes,
+    })
 }
 
 /// Every Concept in `hali:topics`, in any graph.

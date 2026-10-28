@@ -1,0 +1,5 @@
+---
+source: tests/cli_dry_run.rs
+expression: out.stdout
+---
+{"schema_version":1,"concept":{"id":"cat","label":"cat","alt_labels":["kitty"],"broader":["mammal"]},"dry_run":true,"changes":[{"op":"remove","triple":"<https://w3id.org/hali#cat> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2004/02/skos/core#Concept> ."},{"op":"remove","triple":"<https://w3id.org/hali#cat> <http://www.w3.org/2004/02/skos/core#altLabel> \"kitty\"@en ."},{"op":"remove","triple":"<https://w3id.org/hali#cat> <http://www.w3.org/2004/02/skos/core#broader> <https://w3id.org/hali#mammal> ."},{"op":"remove","triple":"<https://w3id.org/hali#cat> <http://www.w3.org/2004/02/skos/core#inScheme> <https://w3id.org/hali#topics> ."},{"op":"remove","triple":"<https://w3id.org/hali#cat> <http://www.w3.org/2004/02/skos/core#prefLabel> \"cat\"@en ."},{"op":"remove","triple":"<https://w3id.org/hali#cat> <http://www.w3.org/2004/02/skos/core#prefLabel> \"chat\"@fr ."},{"op":"remove","triple":"<https://w3id.org/hali#pet> <http://www.w3.org/2004/02/skos/core#related> <https://w3id.org/hali#cat> ."}]}

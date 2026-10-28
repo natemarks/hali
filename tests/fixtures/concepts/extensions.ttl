@@ -1,0 +1,13 @@
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix hali: <https://w3id.org/hali#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# Hand-written extensions for the Concept-management tests (#17). What the Concept commands
+# must read in any graph, and never write, lives here:
+#   parrot: a Concept that exists only here, narrower than bird (so bird is "in use" by it);
+#   a tag on the Resource (plant is tagged only from this file).
+hali:parrot a skos:Concept ;
+    skos:inScheme hali:topics ;
+    skos:prefLabel "parrot"@en ;
+    skos:broader hali:bird .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000301> dcterms:subject hali:plant .

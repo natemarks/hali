@@ -1,0 +1,5 @@
+---
+source: tests/cli_dry_run.rs
+expression: out.stdout
+---
+{"schema_version":1,"concept":{"id":"cat","label":"cat","alt_labels":["Moggy"],"broader":["mammal","pet"]},"dry_run":true,"changes":[{"op":"add","triple":"<https://w3id.org/hali#cat> <http://www.w3.org/2004/02/skos/core#altLabel> \"Moggy\"@en ."},{"op":"add","triple":"<https://w3id.org/hali#cat> <http://www.w3.org/2004/02/skos/core#broader> <https://w3id.org/hali#pet> ."},{"op":"remove","triple":"<https://w3id.org/hali#cat> <http://www.w3.org/2004/02/skos/core#altLabel> \"kitty\"@en ."}]}

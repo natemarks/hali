@@ -1,0 +1,5 @@
+---
+source: tests/cli_concept_manage.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"IN_USE","message":"Concept fish is in use: 1 tagged, broader of 0 Concepts; nothing was written","details":{"concept":"fish","tagged":1,"narrower":0},"suggested_fix":"Untag the Resources (hali edit <ref> --remove-tag fish) and unlink the narrower Concepts (hali concept edit <C> --remove-broader fish), then retry.","suggested_command":"hali find --exact --tag fish"}}
