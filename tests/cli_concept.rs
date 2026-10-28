@@ -561,7 +561,6 @@ fn list_text_escapes_control_characters_in_labels() {
 
 // ---- #16: concept add --broader --------------------------------------------------------------
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_add_broader_json() {
     let env = Env::with_store();
@@ -586,7 +585,6 @@ fn concept_add_broader_json() {
     );
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_add_broader_lists_sorted_ids_without_repeats() {
     let env = Env::with_store();
@@ -620,7 +618,6 @@ fn concept_add_broader_lists_sorted_ids_without_repeats() {
     assert_eq!(dl["broader"], serde_json::json!(["linked-data", "ml"]));
 }
 
-#[cfg(feature = "goal")]
 #[test]
 fn concept_add_with_an_unknown_broader_writes_nothing() {
     let env = Env::with_store();

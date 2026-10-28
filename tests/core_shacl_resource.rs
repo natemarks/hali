@@ -81,7 +81,6 @@ mod goal {
     /// #16 (spec §2.7): every `dcterms:subject` value of a Resource is a `skos:Concept` with
     /// `skos:inScheme hali:topics`. The shape is named (the implementer's name); add it to
     /// `SHAPE_FIXTURES` in tests/core_shacl.rs with one of these fixtures.
-    #[cfg(feature = "goal")]
     #[test]
     fn subject_must_be_topics_concept() {
         const SUBJECT: &str = "http://purl.org/dc/terms/subject";

@@ -114,7 +114,6 @@ mod goal {
 
     /// #16: the `error` schema has an `UNKNOWN_CONCEPT` branch: `details` carries the reference
     /// and at most three `{id, label}` suggestions.
-    #[cfg(feature = "goal")]
     #[test]
     fn unknown_concept_details_required() {
         use serde_json::json;

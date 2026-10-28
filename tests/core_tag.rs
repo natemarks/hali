@@ -29,7 +29,6 @@
 //! `a-first` (label "Zulu"); one Resource tagged `linked-data` and `ml`) and
 //! tests/fixtures/tags (see the comment in its vocabulary.ttl).
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::resource::{self, Edit, FileFacts, Query};
     use hali::core::{Context, FixedClock, Op, SeededIdGen, concept};

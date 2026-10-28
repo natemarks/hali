@@ -75,7 +75,6 @@ mod goal {
         "cli_tag__unknown_concept_json_envelope",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_16: &[(&str, &str)] = &[
         ("cli_concept__concept_add_broader_json", "concept add"),
         ("cli_find__find_tag_exact_json", "find"),
@@ -90,7 +89,6 @@ mod goal {
         let mut rows = STDOUT_GOLDENS.to_vec();
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_12);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_16);
         rows
     }
@@ -116,7 +114,6 @@ mod goal {
             pending = &[];
         }
         let mut pending_16: &[&str] = GOAL_SNAPS_16;
-        #[cfg(feature = "goal")]
         {
             pending_16 = &[];
         }
@@ -232,7 +229,6 @@ mod goal {
         let goldens = goldens();
         assert!(goldens.len() >= 14, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 23, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 29, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)

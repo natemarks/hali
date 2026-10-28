@@ -775,7 +775,6 @@ mod goal {
     /// The data dir holds tests/fixtures/tags: a hierarchy (animal <- mammal <- dog -> pet,
     /// bird -> animal from extensions.ttl alone, a loop) and nine Resources whose files do not
     /// exist (so every record is `missing`).
-    #[cfg(feature = "goal")]
     fn tags_env() -> Env {
         let env = Env::new();
         std::fs::create_dir_all(env.data()).unwrap();
@@ -786,7 +785,6 @@ mod goal {
         env
     }
 
-    #[cfg(feature = "goal")]
     #[test]
     fn find_tag_json() {
         let env = tags_env();
@@ -797,7 +795,6 @@ mod goal {
         assert_eq!(again.stdout, out.stdout);
     }
 
-    #[cfg(feature = "goal")]
     #[test]
     fn find_tag_exact_json() {
         let env = tags_env();
@@ -819,7 +816,6 @@ mod goal {
         );
     }
 
-    #[cfg(feature = "goal")]
     #[test]
     fn find_tag_unknown_and_cycles() {
         let env = tags_env();

@@ -605,7 +605,6 @@ mod resource {
 /// #16: `--tag`, `--add-tag`/`--remove-tag` and `--broader` under the dry-run equality helper
 /// (spec §9.5, §14.3), over tests/fixtures/store (Concepts `ml`, `semantic-web`, `linked-data`
 /// with altLabel "LD"; one Resource tagged `linked-data` and `ml`).
-#[cfg(feature = "goal")]
 mod tags {
     use super::{fixture, support};
     use serde_json::{Value, json};

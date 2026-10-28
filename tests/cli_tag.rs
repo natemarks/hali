@@ -16,7 +16,6 @@
 //! `no Concept matches <ref>` and its suggested_fix is
 //! `Use the slug or a label of an existing Concept, or add the Concept first.`
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::Value;
