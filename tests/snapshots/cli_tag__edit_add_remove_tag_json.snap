@@ -1,0 +1,5 @@
+---
+source: tests/cli_tag.rs
+expression: out.stdout
+---
+{"schema_version":1,"resource":{"id":"018bcfe5-6801-710a-adec-89025cc1beeb","path":"/TMP/files/notes.txt","title":"notes","media_type":"text/plain","editable":true,"missing":false,"stale":false,"types":[],"tags":[{"id":"deep-learning","label":"deep learning"},{"id":"machine-learning","label":"machine learning"}],"byte_size":6,"modified":"2026-10-20T14:02:11Z"}}

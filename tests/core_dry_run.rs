@@ -6,7 +6,7 @@
 //!   lowercase (`"add"`, `"remove"`)
 //!   `Change { op: Op, triple: String }`: Debug, Serialize; `{"op":"add","triple":"..."}`
 //!   `Mutation<T> { value: T, changes: Vec<Change> }`
-//!   `hali::core::concept::add(&Context, &mut Store, &str) -> Result<Mutation<Concept>, Error>`
+//!   `hali::core::concept::add(&Context, &mut Store, &str, broader: &[String]) -> Result<Mutation<Concept>, Error>`
 //!   `changes` lists, in order (add before remove, then the whole triple string in byte
 //!   order), the canonical N-Triples (`format!("{triple} .")`) of every triple the real run
 //!   adds to a tool-managed graph and the graph did not have yet.
@@ -39,7 +39,7 @@ fn empty_store() -> (hali::storage::Store, tempfile::TempDir) {
 }
 
 fn add(store: &mut hali::storage::Store, label: &str) -> Mutation<concept::Concept> {
-    match concept::add(&ctx(), store, label) {
+    match concept::add(&ctx(), store, label, &[]) {
         Ok(m) => m,
         Err(e) => panic!("{label}: {} {}", e.rule, e.message),
     }

@@ -1,5 +1,7 @@
-//! Concepts in the `hali:topics` scheme (spec §2.3): `concept add` and `concept list`.
+//! Concepts in the `hali:topics` scheme (spec §2.3): `concept add`, `concept list`, and the
+//! resolution of Concept references (§9.2).
 
+use super::resource::Tag;
 use super::{Context, Error, Mutation, insert_all, normalise_label, slug, validate};
 use crate::ontology::{HALI, TOPICS, skos};
 use crate::storage::{File, Store};
@@ -26,21 +28,114 @@ pub struct Page {
     pub next_offset: Option<usize>,
 }
 
-/// Adds a Concept with `label` as its prefLabel, minting its IRI from the label's slug.
-/// Writes the `hali:topics` scheme too, the first time. Refused, with the store unchanged, if
-/// the store would not conform to the SHACL shapes.
-pub fn add(ctx: &Context, store: &mut Store, label: &str) -> Result<Mutation<Concept>, Error> {
+/// The id of the Concept a reference names (spec §9.2): first the Concept whose id (slug) is
+/// exactly the reference, then the one with a prefLabel or altLabel in the configured language
+/// that equals it, whitespace-normalised and case-insensitive. Otherwise `UNKNOWN_CONCEPT`,
+/// with the closest Concepts as suggestions.
+pub fn resolve(ctx: &Context, store: &Store, reference: &str) -> Result<String, Error> {
+    resolve_iri(ctx, store, reference).map(|c| id_of(&c))
+}
+
+/// As `resolve`, the Concept's IRI.
+pub(crate) fn resolve_iri(
+    ctx: &Context,
+    store: &Store,
+    reference: &str,
+) -> Result<NamedNode, Error> {
+    if reference.trim().is_empty() {
+        return Err(Error::usage("a Concept reference is empty"));
+    }
+    let all = concepts(store);
+    if let Some(c) = all.iter().find(|c| id_of(c) == reference) {
+        return Ok(c.clone());
+    }
+    let key = fold(reference);
+    let by_label = all.iter().find(|c| {
+        all_labels(store, c.as_ref(), ctx.language())
+            .iter()
+            .any(|l| fold(l) == key)
+    });
+    match by_label {
+        Some(c) => Ok(c.clone()),
+        None => Err(Error::unknown_concept(
+            reference,
+            &suggest(ctx, store, &all, &key),
+        )),
+    }
+}
+
+/// At most this many Concepts are suggested for an unknown reference.
+const MAX_SUGGESTIONS: usize = 3;
+
+/// The Concepts closest to the folded reference `key`: those whose folded id or any label
+/// contains it, or is within edit distance max(2, len/3) of it, by distance, label, then id.
+fn suggest(ctx: &Context, store: &Store, all: &BTreeSet<NamedNode>, key: &str) -> Vec<Tag> {
+    let limit = (key.chars().count() / 3).max(2);
+    let mut found: Vec<(usize, Tag)> = all
+        .iter()
+        .filter_map(|c| {
+            let id = id_of(c);
+            let mut names = all_labels(store, c.as_ref(), ctx.language());
+            names.push(id.clone());
+            let names: Vec<String> = names.iter().map(|n| fold(n)).collect();
+            let distance = names.iter().map(|n| levenshtein(n, key)).min()?;
+            let close = distance <= limit || names.iter().any(|n| n.contains(key));
+            close.then(|| {
+                let label = labels(store, c.as_ref(), skos::PREF_LABEL, ctx.language())
+                    .min()
+                    .unwrap_or_default();
+                (distance, Tag { id, label })
+            })
+        })
+        .collect();
+    found.sort_by(|(da, a), (db, b)| (da, &a.label, &a.id).cmp(&(db, &b.label, &b.id)));
+    found
+        .into_iter()
+        .take(MAX_SUGGESTIONS)
+        .map(|(_, t)| t)
+        .collect()
+}
+
+/// The edit distance between two strings, in characters.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = if ca == *cb {
+                diagonal
+            } else {
+                1 + diagonal.min(above).min(row[j])
+            };
+            diagonal = above;
+        }
+    }
+    row[b.len()]
+}
+
+/// Adds a Concept with `label` as its prefLabel, minting its IRI from the label's slug, and a
+/// `skos:broader` link to each Concept that `broader` references. Writes the `hali:topics`
+/// scheme too, the first time. Refused, with the store unchanged, on an unknown reference or
+/// if the store would not conform to the SHACL shapes.
+pub fn add(
+    ctx: &Context,
+    store: &mut Store,
+    label: &str,
+    broader: &[String],
+) -> Result<Mutation<Concept>, Error> {
     let label = normalise_label(label)?;
+    let parents: BTreeSet<NamedNode> = broader
+        .iter()
+        .map(|r| resolve_iri(ctx, store, r))
+        .collect::<Result<_, _>>()?;
     let key = fold(&label);
     for concept in concepts(store) {
-        let taken = labels(store, concept.as_ref(), skos::PREF_LABEL, ctx.language())
-            .chain(labels(
-                store,
-                concept.as_ref(),
-                skos::ALT_LABEL,
-                ctx.language(),
-            ))
-            .any(|l| fold(&l) == key);
+        let taken = all_labels(store, concept.as_ref(), ctx.language())
+            .iter()
+            .any(|l| fold(l) == key);
         if taken {
             return Err(Error::label_taken(&label, ctx.language(), &id_of(&concept)));
         }
@@ -63,24 +158,29 @@ pub fn add(ctx: &Context, store: &mut Store, label: &str) -> Result<Mutation<Con
     let literal = Literal::new_language_tagged_literal(&label, ctx.language())
         .map_err(|_| Error::usage("the configured language is not a valid language tag"))?;
     let graph = File::Vocabulary.graph();
-    let quads: Vec<Quad> = [
+    let mut triples = vec![
         (&topics, rdf::TYPE, term(skos::CONCEPT_SCHEME)),
         (&concept, rdf::TYPE, term(skos::CONCEPT)),
         (&concept, named(skos::IN_SCHEME), Term::from(topics.clone())),
         (&concept, named(skos::PREF_LABEL), Term::from(literal)),
-    ]
-    .into_iter()
-    .map(|(s, p, o)| Quad::new(s.clone(), p, o, graph.clone()))
-    .collect();
+    ];
+    for parent in &parents {
+        triples.push((&concept, named(skos::BROADER), Term::from(parent.clone())));
+    }
+    let quads: Vec<Quad> = triples
+        .into_iter()
+        .map(|(s, p, o)| Quad::new(s.clone(), p, o, graph.clone()))
+        .collect();
     validate::guard(store, &quads, &[])?;
     let changes = insert_all(store, &quads);
 
+    let broader: BTreeSet<String> = parents.iter().map(id_of).collect();
     Ok(Mutation {
         value: Concept {
             id,
             label,
             alt_labels: Vec::new(),
-            broader: Vec::new(),
+            broader: broader.into_iter().collect(),
         },
         changes,
     })
@@ -168,6 +268,13 @@ fn labels<'a>(
         Term::Literal(l) if l.language() == Some(language) => Some(l.value().to_string()),
         _ => None,
     })
+}
+
+/// A Concept's prefLabels and altLabels in `language`.
+fn all_labels(store: &Store, subject: NamedNodeRef<'_>, language: &str) -> Vec<String> {
+    labels(store, subject, skos::PREF_LABEL, language)
+        .chain(labels(store, subject, skos::ALT_LABEL, language))
+        .collect()
 }
 
 /// Whether an IRI already names something, in any graph.

@@ -220,7 +220,7 @@ fn assert_shapes_invalid(name: &str) {
     assert!(!text.contains("SECRET-CANARY-4242"), "{text}");
 
     let mut store = store;
-    let add = concept::add(&ctx(), &mut store, "brand new").expect_err("add must fail");
+    let add = concept::add(&ctx(), &mut store, "brand new", &[]).expect_err("add must fail");
     assert_eq!(add.rule, "SHAPES_INVALID", "{name}");
     assert_eq!(add.exit_code(), 3);
     assert_eq!(
@@ -374,7 +374,7 @@ fn conforming_fixtures_have_no_violations() {
 }
 
 /// The shapes that can appear in a result, with a fixture that violates each.
-const SHAPE_FIXTURES: [(&str, &str); 8] = [
+const SHAPE_FIXTURES: [(&str, &str); 9] = [
     ("ConceptInSchemeShape", "shacl/not-in-scheme"),
     ("ConceptPrefLabelShape", "shacl/no-pref-label"),
     ("LabelUniqueShape", "shacl/duplicate-label"),
@@ -385,6 +385,7 @@ const SHAPE_FIXTURES: [(&str, &str); 8] = [
         "shacl/resource-two-download-urls",
     ),
     ("ResourceMediaTypeShape", "shacl/resource-no-media-type"),
+    ("ResourceSubjectShape", "shacl/resource-subject-not-concept"),
     ("ResourceTitleShape", "shacl/resource-no-title"),
 ];
 
@@ -499,7 +500,7 @@ fn report_pages() {
 fn concept_add_refused_by_shacl_leaves_store_unchanged() {
     let mut store = load("shacl/extension-shape");
     let before = snapshot(&store);
-    let err = concept::add(&ctx(), &mut store, "deep learning")
+    let err = concept::add(&ctx(), &mut store, "deep learning", &[])
         .expect_err("the extension shape requires an altLabel");
     assert_eq!(err.rule, "SHACL_VIOLATION");
     assert_eq!(err.exit_code(), 1);
@@ -521,7 +522,7 @@ fn concept_add_refused_by_shacl_leaves_store_unchanged() {
 fn concept_add_refused_on_pre_existing_violation() {
     let mut store = load("shacl/duplicate-label");
     let before = snapshot(&store);
-    let err = concept::add(&ctx(), &mut store, "quantum computing")
+    let err = concept::add(&ctx(), &mut store, "quantum computing", &[])
         .expect_err("the store already violates the label shape");
     assert_eq!(err.rule, "SHACL_VIOLATION");
     assert_eq!(err.exit_code(), 1);
@@ -533,7 +534,7 @@ fn concept_add_refused_on_pre_existing_violation() {
 fn label_taken_is_checked_before_shacl() {
     // "ML" is the altLabel of hali:ml, and a new Concept would also lack the required alias.
     let mut store = load("shacl/extension-shape");
-    let err = concept::add(&ctx(), &mut store, "ML").expect_err("the label is taken");
+    let err = concept::add(&ctx(), &mut store, "ML", &[]).expect_err("the label is taken");
     assert_eq!(err.rule, "LABEL_TAKEN");
     assert_eq!(err.exit_code(), 1);
 }
@@ -591,7 +592,7 @@ fn extension_alignment_with_core_terms_still_conforms() {
         "{:?}",
         r.results.iter().map(key).collect::<Vec<_>>()
     );
-    concept::add(&ctx(), &mut store, "brand new").unwrap();
+    concept::add(&ctx(), &mut store, "brand new", &[]).unwrap();
 }
 
 // ---- round 2 security: extensions may not reference core shapes as objects ----------------

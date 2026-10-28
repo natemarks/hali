@@ -1,0 +1,5 @@
+---
+source: tests/cli_find.rs
+expression: out.stdout
+---
+{"schema_version":1,"results":[{"id":"0192f0c4-0000-7000-8000-000000000102","path":"/fixtures/tags/mammal.txt","title":"mammal doc","media_type":"text/plain","editable":true,"missing":true,"stale":false,"types":[],"tags":[{"id":"mammal","label":"mammal"}],"byte_size":6,"modified":"2026-10-20T14:02:11Z"},{"id":"0192f0c4-0000-7000-8000-000000000103","path":"/fixtures/tags/dog.txt","title":"dog doc","media_type":"text/plain","editable":true,"missing":true,"stale":false,"types":[],"tags":[{"id":"dog","label":"dog"}],"byte_size":6,"modified":"2026-10-20T14:02:11Z"},{"id":"0192f0c4-0000-7000-8000-000000000109","path":"/fixtures/tags/dog-plant.txt","title":"dog plant doc","media_type":"text/plain","editable":true,"missing":true,"stale":false,"types":[],"tags":[{"id":"dog","label":"dog"},{"id":"plant","label":"plant"}],"byte_size":6,"modified":"2026-10-20T14:02:11Z"}],"total":3,"truncated":false,"next_offset":null}

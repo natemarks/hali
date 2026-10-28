@@ -1,4 +1,4 @@
-//! Goal tests for `core::resource::{add, edit_title}` (#10, spec §2.1, §2.5).
+//! Goal tests for `core::resource::{add, edit}` (#10, spec §2.1, §2.5).
 //!
 //! Assumed API (the file facts are injected, so core never touches the filesystem):
 //!   `hali::core::resource::FileFacts { path: String, byte_size: u64, modified: String,
@@ -10,8 +10,8 @@
 //!   `Added { record: Record, existing: bool }`
 //!   `Record { id: String (bare UUID), path: String, title: String, media_type: String,
 //!        byte_size: u64, modified: String, .. }`
-//!   `resource::edit_title(&Context, &mut Store, id: &str, title: &str)
-//!        -> Result<Mutation<Record>, hali::core::Error>`
+//!   `resource::edit(&Context, &mut Store, id: &str, &Edit)
+//!        -> Result<Mutation<Record>, hali::core::Error>`, `Edit { title: Option<String>, .. }`
 //!   Ids are minted in the order Resource, catalog record, user Person (first time only).
 //!
 //! Expected triples are written out here from spec §2.1 and §2.5. Oxigraph stores
@@ -33,6 +33,13 @@ mod goal {
     const NOW: &str = "2026-10-24T09:30:00Z";
     const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
     const SHA: &str = "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03";
+
+    fn retitle(title: &str) -> resource::Edit {
+        resource::Edit {
+            title: Some(title.to_string()),
+            ..resource::Edit::default()
+        }
+    }
 
     fn ctx_at(now: &str) -> Context {
         Context::new(
@@ -310,7 +317,8 @@ mod goal {
         resource::add(&ctx_at(NOW), &mut store, &f, None, "nate").unwrap();
 
         let later = "2026-10-25T10:00:00Z";
-        let out = resource::edit_title(&ctx_at(later), &mut store, R1, "A better title").unwrap();
+        let out =
+            resource::edit(&ctx_at(later), &mut store, R1, &retitle("A better title")).unwrap();
         assert_eq!(out.value.title, "A better title");
         assert_eq!(out.value.id, R1);
 
@@ -356,11 +364,11 @@ mod goal {
 
         // The same title is a no-op: no changes, nothing bumped.
         let before = hali::storage::to_turtle(&store, File::Resources);
-        let same = resource::edit_title(
+        let same = resource::edit(
             &ctx_at("2026-11-01T00:00:00Z"),
             &mut store,
             R1,
-            "A better title",
+            &retitle("A better title"),
         )
         .unwrap();
         assert!(same.changes.is_empty(), "{:?}", same.changes);
@@ -370,7 +378,7 @@ mod goal {
     #[test]
     fn edit_title_of_an_unknown_resource_is_unknown_resource() {
         let (mut store, _dir) = empty_store();
-        let err = resource::edit_title(&ctx_at(NOW), &mut store, R1, "x").unwrap_err();
+        let err = resource::edit(&ctx_at(NOW), &mut store, R1, &retitle("x")).unwrap_err();
         assert_eq!(err.rule, "UNKNOWN_RESOURCE");
         assert_eq!(err.exit_code(), 1);
         assert_eq!(err.details["ref"], R1);

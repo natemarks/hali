@@ -769,4 +769,70 @@ mod goal {
         assert_eq!(fields["additionalProperties"], false);
         assert!(fields.get("required").is_none());
     }
+
+    // ---- #16: --tag and --exact over tests/fixtures/tags ------------------------------------
+
+    /// The data dir holds tests/fixtures/tags: a hierarchy (animal <- mammal <- dog -> pet,
+    /// bird -> animal from extensions.ttl alone, a loop) and nine Resources whose files do not
+    /// exist (so every record is `missing`).
+    fn tags_env() -> Env {
+        let env = Env::new();
+        std::fs::create_dir_all(env.data()).unwrap();
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tags");
+        for name in ["vocabulary.ttl", "resources.ttl", "extensions.ttl"] {
+            std::fs::copy(dir.join(name), env.data().join(name)).unwrap();
+        }
+        env
+    }
+
+    #[test]
+    fn find_tag_json() {
+        let env = tags_env();
+        let out = env.run(["--json", "find", "--tag", "mammal"]);
+        snapshot_stdout("cli_find__find_tag_json", &out);
+        // The same through the label, in another case.
+        let again = env.run(["--json", "find", "--tag", "  MAMMAL "]);
+        assert_eq!(again.stdout, out.stdout);
+    }
+
+    #[test]
+    fn find_tag_exact_json() {
+        let env = tags_env();
+        let out = env.run(["--json", "find", "--tag", "animal", "--exact"]);
+        snapshot_stdout("cli_find__find_tag_exact_json", &out);
+        // The flag may come first; without --exact the narrower Concepts count.
+        let again = env.run(["--json", "find", "--exact", "--tag", "animal"]);
+        assert_eq!(again.stdout, out.stdout);
+        let v = ok(&env.run(["--json", "find", "--tag", "animal", "--sort", "title"]));
+        assert_eq!(
+            titles(&v),
+            [
+                "animal doc",
+                "bird doc",
+                "dog doc",
+                "dog plant doc",
+                "mammal doc"
+            ]
+        );
+    }
+
+    #[test]
+    fn find_tag_unknown_and_cycles() {
+        let env = tags_env();
+        // A broader cycle terminates.
+        let v = ok(&env.run(["--json", "find", "--tag", "loop-b"]));
+        assert_eq!(titles(&v), ["loop doc"]);
+        // The unknown Concept is an error even beside a known one.
+        let out = env.run(["--json", "find", "--tag", "animal", "--tag", "nope"]);
+        assert_eq!(out.code, Some(1), "{}", out.stderr);
+        assert_eq!(out.stdout, "");
+        let e: Value = serde_json::from_str(&out.stderr).unwrap();
+        assert_eq!(e["error"]["rule"], "UNKNOWN_CONCEPT");
+        assert_eq!(e["error"]["details"]["concept"], "nope");
+        // --exact alone lists everything, as without it.
+        let all = ok(&env.run(["--json", "find"]));
+        let exact = ok(&env.run(["--json", "find", "--exact"]));
+        assert_eq!(all, exact);
+        assert_eq!(exact["total"], 9);
+    }
 }

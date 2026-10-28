@@ -110,6 +110,33 @@
               }
             }
           }
+        },
+        {
+          "if": {"properties": {"rule": {"const": "UNKNOWN_CONCEPT"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "concept": {"type": "string"},
+                  "suggestions": {
+                    "type": "array",
+                    "maxItems": 3,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {"type": "string"},
+                        "label": {"type": "string"}
+                      },
+                      "required": ["id", "label"],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": ["concept", "suggestions"]
+              }
+            }
+          }
         }
       ]
     }

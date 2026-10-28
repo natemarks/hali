@@ -601,3 +601,139 @@ mod resource {
         assert_eq!(dry["changes"], serde_json::json!([]));
     }
 }
+
+/// #16: `--tag`, `--add-tag`/`--remove-tag` and `--broader` under the dry-run equality helper
+/// (spec §9.5, §14.3), over tests/fixtures/store (Concepts `ml`, `semantic-web`, `linked-data`
+/// with altLabel "LD"; one Resource tagged `linked-data` and `ml`).
+mod tags {
+    use super::{fixture, support};
+    use serde_json::{Value, json};
+
+    const EXISTING: &str = "urn:uuid:0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10";
+    const SUBJECT: &str = "<http://purl.org/dc/terms/subject>";
+    const BROADER: &str = "<http://www.w3.org/2004/02/skos/core#broader>";
+
+    fn changes_with(dry: &Value, op: &str, needle: &str) -> usize {
+        dry["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["op"] == op && c["triple"].as_str().unwrap().contains(needle))
+            .count()
+    }
+
+    fn tag_ids(record: &Value) -> Vec<&str> {
+        record["tags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn add_tag_dry_run_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = std::fs::canonicalize(dir.path()).unwrap().join("a.txt");
+        std::fs::write(&path, b"hello\n").unwrap();
+        let path = path.to_str().unwrap();
+        let store = fixture("store");
+
+        // By slug and by label.
+        let dry = support::assert_dry_run_matches_real_run(
+            Some(&store),
+            &["add", path, "--tag", "ml", "--tag", "Linked  Data"],
+        );
+        assert_eq!(tag_ids(&dry["added"][0]), ["linked-data", "ml"]);
+        assert_eq!(changes_with(&dry, "add", SUBJECT), 2, "{dry}");
+        assert_eq!(changes_with(&dry, "remove", SUBJECT), 0, "{dry}");
+    }
+
+    #[test]
+    fn edit_tags_dry_run_matches() {
+        let store = fixture("store");
+
+        // One tag out, one in: subject remove, subject add, modified remove and add.
+        let dry = support::assert_dry_run_matches_real_run(
+            Some(&store),
+            &[
+                "edit",
+                EXISTING,
+                "--add-tag",
+                "Semantic Web",
+                "--remove-tag",
+                "ml",
+            ],
+        );
+        assert_eq!(tag_ids(&dry["resource"]), ["linked-data", "semantic-web"]);
+        assert_eq!(dry["changes"].as_array().unwrap().len(), 4, "{dry}");
+        assert_eq!(changes_with(&dry, "add", SUBJECT), 1);
+        assert_eq!(changes_with(&dry, "remove", SUBJECT), 1);
+
+        // Adding only.
+        let dry = support::assert_dry_run_matches_real_run(
+            Some(&store),
+            &["edit", EXISTING, "--add-tag", "semantic-web"],
+        );
+        assert_eq!(dry["changes"].as_array().unwrap().len(), 3, "{dry}");
+
+        // With a title: one mutation, one `modified` bump.
+        let dry = support::assert_dry_run_matches_real_run(
+            Some(&store),
+            &[
+                "edit",
+                EXISTING,
+                "--title",
+                "T",
+                "--add-tag",
+                "semantic-web",
+            ],
+        );
+        assert_eq!(dry["changes"].as_array().unwrap().len(), 5, "{dry}");
+
+        // A present tag added (also by altLabel), an absent one removed: no changes at all.
+        let dry = support::assert_dry_run_matches_real_run(
+            Some(&store),
+            &[
+                "edit",
+                EXISTING,
+                "--add-tag",
+                "LD",
+                "--remove-tag",
+                "semantic-web",
+            ],
+        );
+        assert_eq!(dry["changes"], json!([]));
+    }
+
+    #[test]
+    fn concept_add_broader_dry_run_matches() {
+        let store = fixture("store");
+        // The scheme is in the store already: three Concept triples and one broader.
+        let dry = support::assert_dry_run_matches_real_run(
+            Some(&store),
+            &["concept", "add", "deep learning", "--broader", "ml"],
+        );
+        assert_eq!(dry["concept"]["broader"], json!(["ml"]));
+        assert_eq!(dry["changes"].as_array().unwrap().len(), 4, "{dry}");
+        assert_eq!(changes_with(&dry, "add", BROADER), 1);
+
+        // By slug and label, repeated: sorted, once each.
+        let dry = support::assert_dry_run_matches_real_run(
+            Some(&store),
+            &[
+                "concept",
+                "add",
+                "deep learning",
+                "--broader",
+                "semantic-web",
+                "--broader",
+                "Machine Learning",
+                "--broader",
+                "ml",
+            ],
+        );
+        assert_eq!(dry["concept"]["broader"], json!(["ml", "semantic-web"]));
+        assert_eq!(changes_with(&dry, "add", BROADER), 2, "{dry}");
+    }
+}

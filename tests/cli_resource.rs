@@ -1081,7 +1081,7 @@ mod goal {
         assert_eq!(out.code, Some(0), "{}", out.stderr);
         assert_eq!(out.stderr, "note: dry run; nothing was written\n");
         let lines: Vec<&str> = out.stdout.lines().collect();
-        assert_eq!(lines[0], format!("would retitle resource {R1} \"Notes\""));
+        assert_eq!(lines[0], format!("would edit resource {R1} \"Notes\""));
         assert_eq!(lines.len(), 1 + 4, "{}", out.stdout);
         assert!(lines[1..3].iter().all(|l| l.starts_with("+ ")));
         assert!(lines[3..].iter().all(|l| l.starts_with("- ")));

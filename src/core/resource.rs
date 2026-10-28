@@ -1,14 +1,18 @@
-//! Resources (spec §2.1), their catalog records and the user Person (§2.5): `add`, `show` and
-//! `edit --title`. What hali knows of a file comes in as `FileFacts`; `core` never reads it.
+//! Resources (spec §2.1), their catalog records and the user Person (§2.5): `add`, `show`,
+//! `edit` and `find`, with tags (§2.3). What hali knows of a file comes in as `FileFacts`;
+//! `core` never reads it.
 
-use super::{Context, Error, Mutation, apply, rfc3339, validate};
+use super::{Context, Error, Mutation, apply, concept, rfc3339, validate};
 use crate::ontology::{
     HALI, HALI_MEDIA_TYPES, IANA_MEDIA_TYPES, RESOURCE, dcat, dcterms, foaf, prov, skos, spdx,
 };
 use crate::paths::{file_url, path_from_file_url};
 use crate::storage::{File, Store};
 use oxigraph::model::vocab::{rdf, xsd};
-use oxigraph::model::{Literal, NamedNode, NamedNodeRef, NamedOrBlankNode, Quad, Term, TermRef};
+use oxigraph::model::{
+    Literal, NamedNode, NamedNodeRef, NamedOrBlankNode, Quad, Term, TermRef, Variable,
+};
+use oxigraph::sparql::{QueryResults, SparqlEvaluator};
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -129,6 +133,18 @@ pub fn add(
     title: Option<&str>,
     user_name: &str,
 ) -> Result<Mutation<Added>, Error> {
+    catalog(ctx, store, facts, title, &[], user_name)
+}
+
+/// As `add`, tagging a newly cataloged Resource with the Concepts `tags`.
+fn catalog(
+    ctx: &Context,
+    store: &mut Store,
+    facts: &FileFacts,
+    title: Option<&str>,
+    tags: &[NamedNode],
+    user_name: &str,
+) -> Result<Mutation<Added>, Error> {
     let title = title.map(normalise_title).transpose()?;
     if let Some(existing) = by_path(store, &facts.path) {
         return Ok(Mutation {
@@ -195,6 +211,9 @@ pub fn add(
             person.clone().into(),
         ),
     ];
+    for tag in tags {
+        triples.push((&resource, named(dcterms::SUBJECT), tag.clone().into()));
+    }
     if new_person {
         triples.push((&person, named(rdf::TYPE.as_str()), iri(prov::PERSON)));
         triples.push((
@@ -229,16 +248,19 @@ pub fn add(
     })
 }
 
-/// Catalogs several files, all or nothing: on an error the store may hold some of them, and
-/// must not be saved. A path given twice counts once. The changes are sorted, without
-/// duplicates.
+/// Catalogs several files, tagging the newly cataloged ones with the Concepts `tags` references,
+/// all or nothing: every reference is resolved first, and on a later error the store may hold
+/// some of the files, and must not be saved. A path given twice counts once. The changes are
+/// sorted, without duplicates.
 pub fn add_all(
     ctx: &Context,
     store: &mut Store,
     files: &[FileFacts],
     title: Option<&str>,
+    tags: &[String],
     user_name: &str,
 ) -> Result<Mutation<AddedAll>, Error> {
+    let tags = resolve_tags(ctx, store, tags)?;
     let mut seen = BTreeSet::new();
     let mut out = AddedAll {
         added: Vec::new(),
@@ -249,7 +271,7 @@ pub fn add_all(
         if !seen.insert(facts.path.as_str()) {
             continue;
         }
-        let one = add(ctx, store, facts, title, user_name)?;
+        let one = catalog(ctx, store, facts, title, &tags, user_name)?;
         changes.extend(one.changes);
         if one.value.existing {
             out.existing.push(one.value.record);
@@ -303,17 +325,37 @@ pub fn show(ctx: &Context, store: &Store, id: &str) -> Result<Shown, Error> {
     })
 }
 
-/// Replaces a Resource's title and sets its catalog record's `dcterms:modified` to now. The
-/// same title is a no-op with no changes. Refused, with the store unchanged, if the store would
-/// not conform to the SHACL shapes.
-pub fn edit_title(
+/// What `edit` changes: a new title, and Concept references to tag with or to untag.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Edit {
+    pub title: Option<String>,
+    pub add_tags: Vec<String>,
+    pub remove_tags: Vec<String>,
+}
+
+/// Edits a Resource in one mutation: replaces its title, adds and removes tags, and, if that
+/// changes anything, sets its catalog record's `dcterms:modified` to now. The same title, a
+/// present tag added or an absent one removed changes nothing. A usage error if nothing is
+/// asked for, or one Concept is both added and removed. Refused, with the store unchanged, on an
+/// unknown Concept reference or if the store would not conform to the SHACL shapes.
+pub fn edit(
     ctx: &Context,
     store: &mut Store,
     id: &str,
-    title: &str,
+    edit: &Edit,
 ) -> Result<Mutation<Record>, Error> {
+    if edit.title.is_none() && edit.add_tags.is_empty() && edit.remove_tags.is_empty() {
+        return Err(Error::usage(
+            "edit needs --title, --add-tag or --remove-tag",
+        ));
+    }
     let resource = known(store, id)?;
-    let title = normalise_title(title)?;
+    let title = edit.title.as_deref().map(normalise_title).transpose()?;
+    let add_tags = resolve_tags(ctx, store, &edit.add_tags)?;
+    let remove_tags = resolve_tags(ctx, store, &edit.remove_tags)?;
+    if add_tags.iter().any(|t| remove_tags.contains(t)) {
+        return Err(Error::usage("a Concept cannot be both added and removed"));
+    }
     let graph = File::Resources.graph();
     let quads_of = |s: &NamedNode, p: &str| -> Vec<Quad> {
         store
@@ -327,23 +369,39 @@ pub fn edit_title(
             .collect()
     };
 
-    let titles = quads_of(&resource, dcterms::TITLE);
-    let unchanged = matches!(titles.as_slice(),
-        [q] if matches!(&q.object, Term::Literal(l) if l.value() == title && l.datatype() == xsd::STRING));
-    if unchanged {
+    let held = |quad: &Quad| store.contains(quad).expect("reading the in-memory store");
+    let subject = |tag: &NamedNode| {
+        Quad::new(
+            resource.clone(),
+            named(dcterms::SUBJECT),
+            tag.clone(),
+            graph.clone(),
+        )
+    };
+
+    let mut removed: Vec<Quad> = remove_tags.iter().map(subject).filter(held).collect();
+    let mut added: Vec<Quad> = add_tags.iter().map(subject).filter(|q| !held(q)).collect();
+    if let Some(title) = title {
+        let titles = quads_of(&resource, dcterms::TITLE);
+        let same = matches!(titles.as_slice(),
+            [q] if matches!(&q.object, Term::Literal(l) if l.value() == title && l.datatype() == xsd::STRING));
+        if !same {
+            removed.extend(titles);
+            added.push(Quad::new(
+                resource.clone(),
+                named(dcterms::TITLE),
+                Literal::new_simple_literal(title),
+                graph.clone(),
+            ));
+        }
+    }
+    if added.is_empty() && removed.is_empty() {
         return Ok(Mutation {
             value: record(ctx, store, &resource),
             changes: Vec::new(),
         });
     }
 
-    let mut removed = titles;
-    let mut added = vec![Quad::new(
-        resource.clone(),
-        named(dcterms::TITLE),
-        Literal::new_simple_literal(title),
-        graph.clone(),
-    )];
     if let Some(c) = catalog_record_of(store, &resource) {
         removed.extend(quads_of(&c, dcterms::MODIFIED));
         added.push(Quad::new(
@@ -428,6 +486,10 @@ pub struct Query {
     pub missing: bool,
     /// Only Resources whose file changed.
     pub stale: bool,
+    /// Concept references: only Resources tagged with each, or with a narrower Concept.
+    pub tags: Vec<String>,
+    /// Only the asserted tags count, not narrower Concepts.
+    pub exact: bool,
     pub sort: Sort,
     pub offset: usize,
     pub limit: usize,
@@ -440,6 +502,8 @@ impl Default for Query {
             media_type: None,
             missing: false,
             stale: false,
+            tags: Vec::new(),
+            exact: false,
             sort: Sort::Modified,
             offset: 0,
             limit: 50,
@@ -456,21 +520,71 @@ pub struct Found {
     pub next_offset: Option<usize>,
 }
 
+/// The Resources whose `dcterms:subject` reaches `?c` through `skos:broader*`. `?c` is bound
+/// with `substitute_variable`; the query text is fixed.
+const TAGGED_NARROWER: &str = "SELECT DISTINCT ?r ?c WHERE { \
+    ?r <http://purl.org/dc/terms/subject>/<http://www.w3.org/2004/02/skos/core#broader>* ?c }";
+
+/// The Resources whose `dcterms:subject` is `?c`.
+const TAGGED_EXACT: &str =
+    "SELECT DISTINCT ?r ?c WHERE { ?r <http://purl.org/dc/terms/subject> ?c }";
+
+/// The Resources tagged with `concept` (or, unless `exact`, a narrower Concept), with the
+/// `skos:broader` triples of every graph.
+fn tagged(store: &Store, concept: &NamedNode, exact: bool) -> BTreeSet<NamedNode> {
+    let text = if exact { TAGGED_EXACT } else { TAGGED_NARROWER };
+    let mut query = SparqlEvaluator::new()
+        .without_default_http_service_handler()
+        .parse_query(text)
+        .expect("the fixed query parses")
+        .substitute_variable(Variable::new_unchecked("c"), concept.clone());
+    query.dataset_mut().set_default_graph_as_union();
+    let QueryResults::Solutions(solutions) = query
+        .on_store(store)
+        .execute()
+        .expect("evaluating a fixed query on the in-memory store")
+    else {
+        unreachable!("a SELECT query gives solutions");
+    };
+    solutions
+        .filter_map(|s| {
+            match s
+                .expect("evaluating a fixed query on the in-memory store")
+                .get("r")
+            {
+                Some(Term::NamedNode(r)) => Some(r.clone()),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 /// Lists Resources (spec §6). `stat` gives the size and mtime of the regular file at a path, or
 /// `None`; it is called for every candidate when `missing` or `stale` filters, else only for the
-/// returned page. Nothing is hashed.
+/// returned page. Nothing is hashed. An unknown Concept reference in `tags` is
+/// `UNKNOWN_CONCEPT`.
 pub fn find(
     ctx: &Context,
     store: &Store,
     query: &Query,
     stat: impl Fn(&str) -> Option<(u64, i64)>,
-) -> Found {
+) -> Result<Found, Error> {
+    let tags = resolve_tags(ctx, store, &query.tags)?;
+    let mut tagged_all: Option<BTreeSet<NamedNode>> = None;
+    for tag in &tags {
+        let these = tagged(store, tag, query.exact);
+        tagged_all = Some(match tagged_all {
+            None => these,
+            Some(before) => before.intersection(&these).cloned().collect(),
+        });
+    }
     let title = query.title.as_ref().map(|t| t.to_lowercase());
     let filtered_by_state = query.missing || query.stale;
     // (record, issued)
     let mut candidates: Vec<(Record, Option<String>)> =
         subjects(store, rdf::TYPE.as_str(), iri(RESOURCE).as_ref())
             .iter()
+            .filter(|r| tagged_all.as_ref().is_none_or(|t| t.contains(*r)))
             .map(|r| (record(ctx, store, r), r))
             .filter(|(rec, _)| {
                 title
@@ -529,12 +643,29 @@ pub fn find(
     }
     let end = query.offset.saturating_add(results.len());
     let truncated = end < total;
-    Found {
+    Ok(Found {
         results,
         total,
         truncated,
         next_offset: truncated.then_some(end),
+    })
+}
+
+/// The Concepts that `references` name, in order and without repeats; the first unknown one is
+/// `UNKNOWN_CONCEPT`.
+fn resolve_tags(
+    ctx: &Context,
+    store: &Store,
+    references: &[String],
+) -> Result<Vec<NamedNode>, Error> {
+    let mut out: Vec<NamedNode> = Vec::new();
+    for reference in references {
+        let concept = concept::resolve_iri(ctx, store, reference)?;
+        if !out.contains(&concept) {
+            out.push(concept);
+        }
     }
+    Ok(out)
 }
 
 /// The record's field names, in record order.

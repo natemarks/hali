@@ -558,3 +558,82 @@ fn list_text_escapes_control_characters_in_labels() {
     assert!(out.stdout.contains("\\u{1b}"), "{:?}", out.stdout);
     assert!(out.stdout.contains("\\u{a}"), "{:?}", out.stdout);
 }
+
+// ---- #16: concept add --broader --------------------------------------------------------------
+
+#[test]
+fn concept_add_broader_json() {
+    let env = Env::with_store();
+    let out = env.run([
+        "concept",
+        "add",
+        "deep learning",
+        "--broader",
+        "ml",
+        "--broader",
+        "Semantic  Web",
+        "--json",
+    ]);
+    assert_eq!(out.code, Some(0), "{}", out.stderr);
+    assert_eq!(out.stderr, "");
+    insta::assert_snapshot!("concept_add_broader_json", out.stdout);
+    assert!(
+        env.vocabulary()
+            .contains("skos:broader hali:ml , hali:semantic-web"),
+        "{}",
+        env.vocabulary()
+    );
+}
+
+#[test]
+fn concept_add_broader_lists_sorted_ids_without_repeats() {
+    let env = Env::with_store();
+    // By slug and by label: the same Concept twice, and an altLabel of another.
+    let out = env.run([
+        "concept",
+        "add",
+        "deep learning",
+        "--broader",
+        "ml",
+        "--broader",
+        "machine learning",
+        "--broader",
+        "LD",
+        "--json",
+    ]);
+    assert_eq!(out.code, Some(0), "{}", out.stderr);
+    let v = json(&out.stdout);
+    assert_eq!(
+        v["concept"]["broader"],
+        serde_json::json!(["linked-data", "ml"])
+    );
+    let list = env.run(["concept", "list", "--json"]);
+    let v = json(&list.stdout);
+    let dl = v["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "deep-learning")
+        .unwrap();
+    assert_eq!(dl["broader"], serde_json::json!(["linked-data", "ml"]));
+}
+
+#[test]
+fn concept_add_with_an_unknown_broader_writes_nothing() {
+    let env = Env::with_store();
+    let before = env.vocabulary();
+    let out = env.run([
+        "concept",
+        "add",
+        "deep learning",
+        "--broader",
+        "nope",
+        "--json",
+    ]);
+    assert_eq!(out.code, Some(1), "{}", out.stderr);
+    assert_eq!(out.stdout, "");
+    let v = json(&out.stderr);
+    assert_eq!(v["error"]["rule"], "UNKNOWN_CONCEPT");
+    assert_eq!(v["error"]["details"]["concept"], "nope");
+    assert_eq!(env.vocabulary(), before);
+}

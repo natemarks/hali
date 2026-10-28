@@ -408,6 +408,42 @@ impl Error {
         )
         .fix("Give the path of a cataloged file or the full UUID of a Resource; UUID prefixes are not accepted.")
     }
+
+    /// A Concept reference matches no Concept. `suggestions` are the closest Concepts.
+    pub fn unknown_concept(reference: &str, suggestions: &[resource::Tag]) -> Error {
+        let mut err = Error::new(
+            "UNKNOWN_CONCEPT",
+            1,
+            format!("no Concept matches {reference}"),
+            json!({"concept": reference, "suggestions": suggestions}),
+        )
+        .fix("Use the slug or a label of an existing Concept, or add the Concept first.");
+        // A leading `-` would be read as a flag, so such a reference follows `--`.
+        let separator = if reference.starts_with('-') {
+            "-- "
+        } else {
+            ""
+        };
+        err.suggested_command = Some(format!(
+            "hali --dry-run concept add {separator}{}",
+            shell_quote(reference)
+        ));
+        err
+    }
+}
+
+/// A word as a POSIX shell reads it back: as is when it is made of `[A-Za-z0-9._-]` only,
+/// otherwise single-quoted, with each `'` written as `'\''`.
+fn shell_quote(word: &str) -> String {
+    let safe = !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if safe {
+        word.to_string()
+    } else {
+        format!("'{}'", word.replace('\'', r"'\''"))
+    }
 }
 
 impl From<storage::Error> for Error {

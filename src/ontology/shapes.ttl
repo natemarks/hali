@@ -89,3 +89,17 @@ PREFIX dcterms: <http://purl.org/dc/terms/>
 SELECT $this WHERE {
   FILTER (NOT EXISTS { $this dcat:mediaType|dcterms:format ?m }
     || EXISTS { $this dcat:mediaType|dcterms:format ?a , ?b . FILTER (?a != ?b) }) }""" .
+
+# Every tag (dcterms:subject) of a Resource is a Concept of hali:topics (spec §2.3, §2.7). A
+# SPARQL constraint, so the Concept's type and scheme are checked with no blank node.
+hali:ResourceSubjectShape a sh:NodeShape ;
+    sh:targetClass hali:Resource ;
+    sh:sparql hali:ResourceSubjectConstraint .
+
+hali:ResourceSubjectConstraint a sh:SPARQLConstraint ;
+    sh:message "A Resource's dcterms:subject must be a skos:Concept in the hali:topics scheme"@en ;
+    sh:select """PREFIX dcterms: <http://purl.org/dc/terms/>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+SELECT $this ?value WHERE {
+  $this dcterms:subject ?value .
+  FILTER NOT EXISTS { ?value a skos:Concept ; skos:inScheme <https://w3id.org/hali#topics> } }""" .
