@@ -17,7 +17,17 @@ const CASES: &[(&str, &[&str])] = &[
     // Cargo.toml: a real file, relative to the package root the tests run in.
     ("add", &["add", "Cargo.toml"]),
     ("concept add", &["concept", "add", "guard probe"]),
+    (
+        "concept edit",
+        &["concept", "edit", "ml", "--add-alt", "guard probe"],
+    ),
     ("concept list", &["concept", "list"]),
+    ("concept remove", &["concept", "remove", "a-first"]),
+    (
+        "concept rename",
+        &["concept", "rename", "ml", "guard probe"],
+    ),
+    ("concept show", &["concept", "show", "ml"]),
     ("edit", &["edit", STORED, "--title", "guard probe"]),
     ("find", &["find", "--limit", "1"]),
     ("forget", &["forget", STORED]),

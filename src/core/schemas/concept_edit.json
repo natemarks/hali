@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hali concept edit --json",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "concept": {"$ref": "#/$defs/concept"}
+      },
+      "required": ["schema_version", "concept"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "concept": {"$ref": "#/$defs/concept"},
+        "dry_run": {"const": true},
+        "changes": {"type": "array", "items": {"$ref": "#/$defs/change"}}
+      },
+      "required": ["schema_version", "concept", "dry_run", "changes"],
+      "additionalProperties": false
+    }
+  ]
+}

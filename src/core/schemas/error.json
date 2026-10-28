@@ -73,6 +73,22 @@
           }
         },
         {
+          "if": {"properties": {"rule": {"const": "IN_USE"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "concept": {"type": "string"},
+                  "tagged": {"type": "integer", "minimum": 0},
+                  "narrower": {"type": "integer", "minimum": 0}
+                },
+                "required": ["concept", "tagged", "narrower"]
+              }
+            }
+          }
+        },
+        {
           "if": {"properties": {"rule": {"const": "NOT_A_REGULAR_FILE"}}, "required": ["rule"]},
           "then": {
             "properties": {

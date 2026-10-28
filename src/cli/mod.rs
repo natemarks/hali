@@ -159,6 +159,51 @@ enum ConceptCommand {
         #[arg(long, value_name = "CONCEPT")]
         broader: Vec<String>,
     },
+    /// Show a Concept with its narrower Concepts and the number of Resources tagged with it
+    Show {
+        /// A slug or a label
+        #[arg(value_name = "CONCEPT")]
+        reference: String,
+    },
+    /// Rename a Concept: the old preferred label becomes an alternative label
+    Rename {
+        /// A slug or a label
+        #[arg(value_name = "CONCEPT")]
+        reference: String,
+        /// The new preferred label
+        #[arg(value_parser = parse_label)]
+        label: String,
+    },
+    /// Edit a Concept's alternative labels and broader Concepts
+    #[command(group(
+        clap::ArgGroup::new("change")
+            .required(true)
+            .multiple(true)
+            .args(["add_alt", "remove_alt", "add_broader", "remove_broader"])
+    ))]
+    Edit {
+        /// A slug or a label
+        #[arg(value_name = "CONCEPT")]
+        reference: String,
+        /// Add this alternative label (repeatable)
+        #[arg(long = "add-alt", value_name = "LABEL", value_parser = parse_label)]
+        add_alt: Vec<String>,
+        /// Remove this alternative label (repeatable)
+        #[arg(long = "remove-alt", value_name = "LABEL", value_parser = parse_label)]
+        remove_alt: Vec<String>,
+        /// Add a broader Concept (a slug or a label; repeatable)
+        #[arg(long = "add-broader", value_name = "CONCEPT")]
+        add_broader: Vec<String>,
+        /// Remove a broader Concept (a slug or a label; repeatable)
+        #[arg(long = "remove-broader", value_name = "CONCEPT")]
+        remove_broader: Vec<String>,
+    },
+    /// Remove a Concept that nothing is tagged with and no other Concept is under
+    Remove {
+        /// A slug or a label
+        #[arg(value_name = "CONCEPT")]
+        reference: String,
+    },
     /// List Concepts, sorted by label
     List {
         /// Maximum number of results
@@ -312,6 +357,15 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
         Err(paths::Unresolved) => core::config::Config::default(),
     };
     let ctx = Context::new(&config.language, clock, ids);
+    // Usage errors come before the store is read.
+    if let Command::Concept(ConceptCommand::Edit {
+        add_alt,
+        remove_alt,
+        ..
+    }) = &cli.command
+    {
+        concept::check_alt_lists(add_alt, remove_alt)?;
+    }
     let dir = paths::data_dir(env).map_err(|_| Error::store_io(None))?;
     let mut store = storage::load(&dir)?;
 
@@ -345,7 +399,16 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                     println!("existing resource {}", describe(r));
                 }
             };
-            mutated(cli, &dir, &store, output, &added.changes, text, None)?;
+            mutated(
+                cli,
+                &dir,
+                &store,
+                storage::File::Resources,
+                output,
+                &added.changes,
+                text,
+                None,
+            )?;
         }
         Command::Edit {
             reference,
@@ -378,7 +441,16 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                     printable(&record.title)
                 );
             };
-            mutated(cli, &dir, &store, output, &edited.changes, text, None)?;
+            mutated(
+                cli,
+                &dir,
+                &store,
+                storage::File::Resources,
+                output,
+                &edited.changes,
+                text,
+                None,
+            )?;
         }
         Command::Forget { reference } => {
             let id = resource::resolve_ref(&store, reference, paths::ref_path)?;
@@ -406,6 +478,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 cli,
                 &dir,
                 &store,
+                storage::File::Resources,
                 output,
                 &forgotten.changes,
                 text,
@@ -538,6 +611,80 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                     );
                 }
             }
+        }
+        Command::Concept(ConceptCommand::Show { reference }) => {
+            let shown = concept::show(&ctx, &store, reference)?;
+            if cli.json {
+                print_json(&ShowConceptOutput {
+                    schema_version: SCHEMA_VERSION,
+                    concept: &shown,
+                });
+            } else {
+                let lines = [
+                    ("id", shown.id.clone()),
+                    ("label", shown.label.clone()),
+                    ("alt_labels", shown.alt_labels.join(", ")),
+                    ("broader", shown.broader.join(", ")),
+                    ("narrower", shown.narrower.join(", ")),
+                    ("tagged", shown.tagged.to_string()),
+                ];
+                for (name, value) in lines {
+                    println!("{name}\t{}", printable(&value));
+                }
+            }
+        }
+        Command::Concept(ConceptCommand::Rename { reference, label }) => {
+            let renamed = concept::rename(&ctx, &mut store, reference, label)?;
+            concept_mutated(
+                cli,
+                &dir,
+                &store,
+                &renamed,
+                ["renamed", "would rename"],
+                None,
+            )?;
+        }
+        Command::Concept(ConceptCommand::Edit {
+            reference,
+            add_alt,
+            remove_alt,
+            add_broader,
+            remove_broader,
+        }) => {
+            let change = concept::ConceptEdit {
+                add_alt: add_alt.clone(),
+                remove_alt: remove_alt.clone(),
+                add_broader: add_broader.clone(),
+                remove_broader: remove_broader.clone(),
+            };
+            let edited = concept::edit(&ctx, &mut store, reference, &change)?;
+            concept_mutated(cli, &dir, &store, &edited, ["edited", "would edit"], None)?;
+        }
+        Command::Concept(ConceptCommand::Remove { reference }) => {
+            let removed = concept::remove(&ctx, &mut store, reference)?;
+            let c = &removed.value;
+            let retry = if c.id.starts_with('-') {
+                format!("hali --yes concept remove -- {}", core::shell_quote(&c.id))
+            } else {
+                format!("hali concept remove {} --yes", core::shell_quote(&c.id))
+            };
+            let confirmation = Confirmation {
+                command: "concept remove",
+                question: format!(
+                    "remove concept {} \"{}\"",
+                    printable(&c.id),
+                    printable(&c.label)
+                ),
+                retry,
+            };
+            concept_mutated(
+                cli,
+                &dir,
+                &store,
+                &removed,
+                ["removed", "would remove"],
+                Some(&confirmation),
+            )?;
         }
         Command::Concept(ConceptCommand::List { limit, offset }) => {
             let page = concept::list(&ctx, &store, *offset, *limit);
@@ -707,14 +854,55 @@ fn confirm(cli: &Cli, what: &Confirmation) -> Result<(), Error> {
     }
 }
 
-/// The end of a mutating command on resources.ttl: under `--dry-run`, the payload with the
+/// The end of `concept rename|edit|remove`: `verbs` are the past and the dry-run verb; an
+/// unchanged Concept reads `unchanged`.
+fn concept_mutated(
+    cli: &Cli,
+    dir: &Path,
+    store: &storage::Store,
+    done: &core::Mutation<concept::Concept>,
+    verbs: [&str; 2],
+    confirmation: Option<&Confirmation>,
+) -> Result<(), Error> {
+    let c = &done.value;
+    let output = AddOutput {
+        schema_version: SCHEMA_VERSION,
+        concept: c,
+    };
+    let text = || {
+        let verb = match (cli.dry_run, done.changes.is_empty()) {
+            (true, _) => verbs[1],
+            (false, false) => verbs[0],
+            (false, true) => "unchanged",
+        };
+        println!(
+            "{verb} concept {} \"{}\"",
+            printable(&c.id),
+            printable(&c.label)
+        );
+    };
+    mutated(
+        cli,
+        dir,
+        store,
+        storage::File::Vocabulary,
+        output,
+        &done.changes,
+        text,
+        confirmation,
+    )
+}
+
+/// The end of a mutating command on one store file: under `--dry-run`, the payload with the
 /// changes (or the `text` summary and the change lines); otherwise, if anything changed, it is
 /// confirmed (when the command asks), the file is saved, then the payload (or the `text`
 /// summary) is printed.
+#[allow(clippy::too_many_arguments)]
 fn mutated(
     cli: &Cli,
     dir: &Path,
     store: &storage::Store,
+    file: storage::File,
     output: impl Serialize,
     changes: &[Change],
     text: impl Fn(),
@@ -737,7 +925,7 @@ fn mutated(
         if let Some(what) = confirmation {
             confirm(cli, what)?;
         }
-        storage::save(dir, store, storage::File::Resources)?;
+        storage::save(dir, store, file)?;
     }
     if cli.json {
         print_json(&output);
@@ -799,6 +987,12 @@ struct ResourceOutput<'a, R: Serialize> {
 struct AddOutput<'a> {
     schema_version: u32,
     concept: &'a concept::Concept,
+}
+
+#[derive(Serialize)]
+struct ShowConceptOutput<'a> {
+    schema_version: u32,
+    concept: &'a concept::Shown,
 }
 
 /// A mutating command's payload under `--dry-run`: the real payload, then the changes.
