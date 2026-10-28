@@ -1,0 +1,5 @@
+---
+source: tests/cli_dry_run.rs
+expression: out.stdout
+---
+{"schema_version":1,"concept":{"id":"dog","label":"pooch","alt_labels":["dog","hound"],"broader":["mammal","pet"]},"dry_run":true,"changes":[{"op":"add","triple":"<https://w3id.org/hali#dog> <http://www.w3.org/2004/02/skos/core#altLabel> \"dog\"@en ."},{"op":"add","triple":"<https://w3id.org/hali#dog> <http://www.w3.org/2004/02/skos/core#prefLabel> \"pooch\"@en ."},{"op":"remove","triple":"<https://w3id.org/hali#dog> <http://www.w3.org/2004/02/skos/core#prefLabel> \"dog\"@en ."}]}

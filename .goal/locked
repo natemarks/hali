@@ -1,0 +1,16 @@
+tests/core_concept_manage.rs
+tests/cli_concept_manage.rs
+tests/cli_dry_run.rs
+tests/schema_contract.rs
+tests/fixtures/concepts/vocabulary.ttl
+tests/fixtures/concepts/resources.ttl
+tests/fixtures/concepts/extensions.ttl
+tests/snapshots/cli_concept_manage__concept_show_json.snap
+tests/snapshots/cli_concept_manage__concept_rename_json.snap
+tests/snapshots/cli_concept_manage__concept_edit_json.snap
+tests/snapshots/cli_concept_manage__concept_remove_json.snap
+tests/snapshots/cli_concept_manage__in_use_json_envelope.snap
+tests/snapshots/cli_concept_manage__remove_confirmation_required_json_envelope.snap
+tests/snapshots/cli_dry_run__concept_rename_dry_run_json.snap
+tests/snapshots/cli_dry_run__concept_edit_dry_run_json.snap
+tests/snapshots/cli_dry_run__concept_remove_dry_run_json.snap

@@ -795,3 +795,118 @@ mod forget {
         );
     }
 }
+
+/// #17: the new Concept commands under the dry-run equality helper (spec §9.5, §14.3), over
+/// tests/fixtures/concepts, and their hand-written dry-run goldens
+/// (tests/snapshots/cli_dry_run__concept_{rename,edit,remove}_dry_run_json.snap). The real run
+/// of `remove` gets `--yes`, as it has no terminal; a dry run ignores it.
+#[cfg(feature = "goal")]
+mod concept_manage {
+    use super::{Env, fixture, support};
+    use serde_json::{Value, json};
+
+    fn ops(dry: &Value) -> Vec<(&str, &str)> {
+        dry["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| (c["op"].as_str().unwrap(), c["triple"].as_str().unwrap()))
+            .collect()
+    }
+
+    /// The dry run through the real binary, as stdout bytes, for the golden.
+    fn dry_stdout(args: &[&str]) -> String {
+        let env = Env::with_fixture("concepts");
+        let before = env.state();
+        let mut argv = vec!["--json", "--dry-run"];
+        argv.extend_from_slice(args);
+        let out = env.run(argv);
+        assert_eq!(out.code, Some(0), "{}", out.stderr);
+        assert_eq!(out.stderr, "");
+        assert_eq!(env.state(), before, "a dry run writes nothing");
+        out.stdout
+    }
+
+    #[test]
+    fn concept_rename_dry_run_matches() {
+        let store = fixture("concepts");
+        let args = ["concept", "rename", "dog", "pooch"];
+        let dry = support::assert_dry_run_matches_real_run(Some(&store), &args);
+        assert_eq!(dry["concept"]["label"], "pooch");
+        assert_eq!(dry["concept"]["alt_labels"], json!(["dog", "hound"]));
+        assert_eq!(ops(&dry).len(), 3, "{dry}");
+        insta::with_settings!({prepend_module_to_snapshot => false}, {
+            insta::assert_snapshot!(
+                "cli_dry_run__concept_rename_dry_run_json",
+                dry_stdout(&args)
+            );
+        });
+
+        // A rename to the same label changes nothing: `changes` is `[]`.
+        let dry = support::assert_dry_run_matches_real_run(
+            Some(&store),
+            &["concept", "rename", "dog", "dog"],
+        );
+        assert_eq!(dry["changes"], json!([]));
+    }
+
+    #[test]
+    fn concept_edit_dry_run_matches() {
+        let store = fixture("concepts");
+        let args = [
+            "concept",
+            "edit",
+            "cat",
+            "--add-alt",
+            "Moggy",
+            "--remove-alt",
+            "kitty",
+            "--add-broader",
+            "pet",
+        ];
+        let dry = support::assert_dry_run_matches_real_run(Some(&store), &args);
+        assert_eq!(dry["concept"]["alt_labels"], json!(["Moggy"]));
+        assert_eq!(dry["concept"]["broader"], json!(["mammal", "pet"]));
+        assert_eq!(ops(&dry).len(), 3, "{dry}");
+        insta::with_settings!({prepend_module_to_snapshot => false}, {
+            insta::assert_snapshot!("cli_dry_run__concept_edit_dry_run_json", dry_stdout(&args));
+        });
+
+        // No-ops: nothing to list. A link only extensions.ttl holds is not removable.
+        for noop in [
+            vec!["concept", "edit", "cat", "--add-broader", "mammal"],
+            vec!["concept", "edit", "cat", "--remove-alt", "nonesuch"],
+            vec!["concept", "edit", "parrot", "--remove-broader", "bird"],
+        ] {
+            let dry = support::assert_dry_run_matches_real_run(Some(&store), &noop);
+            assert_eq!(dry["changes"], json!([]), "{noop:?}");
+        }
+    }
+
+    #[test]
+    fn concept_remove_dry_run_matches() {
+        let store = fixture("concepts");
+        let args = ["concept", "remove", "cat"];
+        let mut real_args = args.to_vec();
+        real_args.push("--yes");
+        let dry = support::assert_dry_run_matches_real_run(Some(&store), &real_args);
+        assert_eq!(dry["concept"]["id"], "cat");
+        let listed = ops(&dry);
+        assert_eq!(listed.len(), 7, "{dry}");
+        assert!(listed.iter().all(|(op, _)| *op == "remove"), "{dry}");
+        // The inbound `pet skos:related cat` is listed.
+        let related = "<https://w3id.org/hali#pet> <http://www.w3.org/2004/02/skos/core#related> \
+                       <https://w3id.org/hali#cat> .";
+        assert!(listed.iter().any(|(_, t)| *t == related), "{dry}");
+        insta::with_settings!({prepend_module_to_snapshot => false}, {
+            insta::assert_snapshot!("cli_dry_run__concept_remove_dry_run_json", dry_stdout(&args));
+        });
+
+        // A Concept that exists only in extensions.ttl: `changes` is `[]`.
+        let dry = support::assert_dry_run_matches_real_run(
+            Some(&store),
+            &["concept", "remove", "parrot", "--yes"],
+        );
+        assert_eq!(dry["changes"], json!([]));
+    }
+}

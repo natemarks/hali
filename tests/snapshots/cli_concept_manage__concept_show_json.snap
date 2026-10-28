@@ -1,0 +1,5 @@
+---
+source: tests/cli_concept_manage.rs
+expression: out.stdout
+---
+{"schema_version":1,"concept":{"id":"dog","label":"dog","alt_labels":["hound"],"broader":["mammal","pet"],"narrower":[],"tagged":1}}
