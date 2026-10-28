@@ -29,7 +29,6 @@
 //! resources.ttl: one Resource tagged dog and fish. extensions.ttl: parrot (a Concept, broader
 //! bird) and a `dcterms:subject plant` on the Resource.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::concept::{self, Concept, ConceptEdit};
     use hali::core::{Context, Error, FixedClock, Mutation, Op, SeededIdGen};

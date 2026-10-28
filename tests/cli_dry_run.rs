@@ -800,7 +800,6 @@ mod forget {
 /// tests/fixtures/concepts, and their hand-written dry-run goldens
 /// (tests/snapshots/cli_dry_run__concept_{rename,edit,remove}_dry_run_json.snap). The real run
 /// of `remove` gets `--yes`, as it has no terminal; a dry run ignores it.
-#[cfg(feature = "goal")]
 mod concept_manage {
     use super::{Env, fixture, support};
     use serde_json::{Value, json};

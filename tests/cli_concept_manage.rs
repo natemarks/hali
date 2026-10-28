@@ -24,7 +24,6 @@
 //!   the message keeps "Concepts" whatever the count;
 //! - the `CONFIRMATION_REQUIRED` message names the command as `concept remove`.
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::Value;

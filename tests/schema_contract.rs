@@ -112,7 +112,6 @@ mod goal {
         "cli_dry_run__concept_rename_dry_run_json",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_17: &[(&str, &str)] = &[
         ("cli_concept_manage__concept_edit_json", "concept edit"),
         ("cli_concept_manage__concept_remove_json", "concept remove"),
@@ -131,7 +130,6 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_12);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_16);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_14);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_17);
         rows
     }
@@ -165,7 +163,6 @@ mod goal {
             pending_14 = &[];
         }
         let mut pending_17: &[&str] = GOAL_SNAPS_17;
-        #[cfg(feature = "goal")]
         {
             pending_17 = &[];
         }
@@ -285,7 +282,6 @@ mod goal {
         assert!(goldens.len() >= 23, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 29, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 32, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 41, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
@@ -867,7 +863,6 @@ mod goal {
 
     /// #17: what the `concept show`, `concept rename`, `concept edit` and `concept remove`
     /// schemas accept and refuse.
-    #[cfg(feature = "goal")]
     #[test]
     fn concept_manage_schemas_accept_and_reject() {
         let shown_concept = || {
@@ -995,7 +990,6 @@ mod goal {
     }
 
     /// #17: the `IN_USE` branch of `error` requires the Concept and both counts.
-    #[cfg(feature = "goal")]
     #[test]
     fn in_use_branch() {
         let in_use = |details: Value| error("IN_USE", details);
