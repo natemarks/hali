@@ -43,6 +43,12 @@ enum Command {
     #[command(subcommand)]
     Concept(ConceptCommand),
     /// Edit a Resource: its title and its tags
+    #[command(group(
+        clap::ArgGroup::new("change")
+            .required(true)
+            .multiple(true)
+            .args(["title", "add_tags", "remove_tags"])
+    ))]
     Edit {
         /// A path or a full UUID
         #[arg(value_name = "REF")]

@@ -42,6 +42,9 @@ pub(crate) fn resolve_iri(
     store: &Store,
     reference: &str,
 ) -> Result<NamedNode, Error> {
+    if reference.trim().is_empty() {
+        return Err(Error::usage("a Concept reference is empty"));
+    }
     let all = concepts(store);
     if let Some(c) = all.iter().find(|c| id_of(c) == reference) {
         return Ok(c.clone());

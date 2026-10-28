@@ -427,6 +427,39 @@ mod goal {
     }
 
     #[test]
+    fn leading_dash_suggestion_parses_and_empty_reference_is_usage() {
+        let env = Env::new();
+        let out = env.run(["--json", "find", "--tag=-x"]);
+        assert_eq!(out.code, Some(1), "{}", out.stderr);
+        let e = json(&out.stderr);
+        let cmd = e["error"]["suggested_command"].as_str().unwrap();
+        assert!(cmd.ends_with(" -- -x"), "{cmd}");
+        // The suggested command is accepted by clap (a dry run adds nothing).
+        let words: Vec<&str> = cmd.split(' ').skip(1).collect();
+        let out = env.run(words);
+        assert_eq!(out.code, Some(0), "{}", out.stderr);
+
+        let path = env.file("notes.txt");
+        ok(&env.run(["--json", "add", &path]));
+        for args in [
+            vec!["find", "--tag="],
+            vec!["find", "--tag", "  "],
+            vec!["add", &path, "--tag="],
+            vec!["concept", "add", "X", "--broader="],
+            vec!["edit", &path, "--add-tag="],
+            vec!["edit", &path, "--remove-tag="],
+        ] {
+            usage(&env.run(&args), &format!("{args:?}"));
+        }
+    }
+
+    #[test]
+    fn edit_without_a_change_is_a_usage_error_before_the_store_is_read() {
+        let env = Env::new();
+        usage(&env.run(["edit", "/nonexistent"]), "edit, no flags");
+    }
+
+    #[test]
     fn unknown_concept_text() {
         let env = Env::new();
         let out = env.run(["find", "--tag", "machin learning"]);

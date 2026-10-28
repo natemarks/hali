@@ -415,6 +415,34 @@ mod goal {
     }
 
     #[test]
+    fn leading_dash_reference_gets_a_double_dash_in_the_suggested_command() {
+        let store = load("store");
+        let command = |reference: &str| {
+            concept::resolve(&ctx(), &store, reference)
+                .unwrap_err()
+                .suggested_command
+                .unwrap()
+        };
+        assert_eq!(command("-x"), "hali --dry-run concept add -- -x");
+        assert_eq!(
+            command("-1 rated"),
+            "hali --dry-run concept add -- '-1 rated'"
+        );
+        assert_eq!(command("a-x"), "hali --dry-run concept add a-x");
+    }
+
+    #[test]
+    fn empty_or_blank_reference_is_a_usage_error() {
+        let store = load("store");
+        for reference in ["", "  ", "\t"] {
+            let err = concept::resolve(&ctx(), &store, reference).unwrap_err();
+            assert_eq!(err.rule, "USAGE", "{reference:?}");
+            assert_eq!(err.exit_code(), 2, "{reference:?}");
+            assert!(err.message.contains("empty"), "{}", err.message);
+        }
+    }
+
+    #[test]
     fn ref_slug_wins_over_label() {
         // `rust` is the slug of one Concept and the label of another.
         let (store, _dir) = store_from(

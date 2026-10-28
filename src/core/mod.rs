@@ -418,8 +418,14 @@ impl Error {
             json!({"concept": reference, "suggestions": suggestions}),
         )
         .fix("Use the slug or a label of an existing Concept, or add the Concept first.");
+        // A leading `-` would be read as a flag, so such a reference follows `--`.
+        let separator = if reference.starts_with('-') {
+            "-- "
+        } else {
+            ""
+        };
         err.suggested_command = Some(format!(
-            "hali --dry-run concept add {}",
+            "hali --dry-run concept add {separator}{}",
             shell_quote(reference)
         ));
         err
