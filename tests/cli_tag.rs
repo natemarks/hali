@@ -6,8 +6,10 @@
 //! Every run sets HALI_DATA_DIR / XDG_CONFIG_HOME / HOME to temp dirs and clears the rest of
 //! the environment, so the real store and config are never read. The temp root is
 //! canonicalised and shown as `/TMP` in captured output. Files get a pinned mtime of
-//! 2026-10-20T14:02:11Z plus a sub-second part, as in tests/cli_find.rs. `concept add` mints
-//! no ids, so with `HALI_TEST_ID_SEED=1` the first Resource `add` mints is R1.
+//! 2026-10-20T14:02:11Z plus a sub-second part, as in tests/cli_find.rs. Runs default to
+//! `HALI_TEST_ID_SEED=1`, so the first Resource `add` mints is R1; a test that mints ids in
+//! several processes passes a distinct seed to each (`run_seeded`), since every process
+//! restarts the seeded sequence.
 //!
 //! Wording the contract leaves open and the golden fixes (change the golden, with the human,
 //! if the wording should differ): the UNKNOWN_CONCEPT message is
@@ -74,6 +76,16 @@ mod goal {
             I: IntoIterator<Item = S>,
             S: AsRef<OsStr>,
         {
+            self.run_seeded("1", now, args)
+        }
+
+        /// Each process restarts the seeded id sequence, so a test that mints ids in several
+        /// processes gives each its own seed (as tests/cli_find.rs does).
+        fn run_seeded<I, S>(&self, seed: &str, now: &str, args: I) -> Out
+        where
+            I: IntoIterator<Item = S>,
+            S: AsRef<OsStr>,
+        {
             let out = Command::cargo_bin("hali")
                 .unwrap()
                 .env_clear()
@@ -81,7 +93,7 @@ mod goal {
                 .env("HOME", self.root.join("home"))
                 .env("HALI_DATA_DIR", self.data())
                 .env("HALI_TEST_NOW", now)
-                .env("HALI_TEST_ID_SEED", "1")
+                .env("HALI_TEST_ID_SEED", seed)
                 .timeout(Duration::from_secs(30))
                 .args(args)
                 .output()
@@ -434,52 +446,72 @@ mod goal {
     #[test]
     fn find_tag_matches_narrower_concepts_end_to_end() {
         let env = Env::new();
-        ok(&env.run([
-            "--json",
-            "concept",
-            "add",
-            "deep learning",
-            "--broader",
-            "machine learning",
-        ]));
-        ok(&env.run([
-            "--json",
-            "concept",
-            "add",
-            "transformers",
-            "--broader",
-            "Deep Learning",
-        ]));
+        ok(&env.run_seeded(
+            "11",
+            NOW,
+            [
+                "--json",
+                "concept",
+                "add",
+                "deep learning",
+                "--broader",
+                "machine learning",
+            ],
+        ));
+        ok(&env.run_seeded(
+            "12",
+            NOW,
+            [
+                "--json",
+                "concept",
+                "add",
+                "transformers",
+                "--broader",
+                "Deep Learning",
+            ],
+        ));
         let notes = env.file("notes.txt");
         let ideas = env.file("ideas.txt");
         let other = env.file("other.txt");
-        ok(&env.run([
-            "--json",
-            "add",
-            &notes,
-            "--title",
-            "notes",
-            "--tag",
-            "transformers",
-        ]));
-        ok(&env.run([
-            "--json",
-            "add",
-            &ideas,
-            "--title",
-            "ideas",
-            "--tag",
-            "machine learning",
-        ]));
-        ok(&env.run([
-            "--json",
-            "add",
-            &other,
-            "--title",
-            "other",
-            "--tag",
-            "semantic web",
-        ]));
+        ok(&env.run_seeded(
+            "13",
+            NOW,
+            [
+                "--json",
+                "add",
+                &notes,
+                "--title",
+                "notes",
+                "--tag",
+                "transformers",
+            ],
+        ));
+        ok(&env.run_seeded(
+            "14",
+            NOW,
+            [
+                "--json",
+                "add",
+                &ideas,
+                "--title",
+                "ideas",
+                "--tag",
+                "machine learning",
+            ],
+        ));
+        ok(&env.run_seeded(
+            "15",
+            NOW,
+            [
+                "--json",
+                "add",
+                &other,
+                "--title",
+                "other",
+                "--tag",
+                "semantic web",
+            ],
+        ));
 
         let titles = |args: &[&str]| -> Vec<String> {
             let mut full = vec!["--json", "find", "--sort", "title"];
