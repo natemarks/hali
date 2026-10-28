@@ -83,6 +83,21 @@ mod goal {
         ("cli_tag__edit_add_remove_tag_json", "edit"),
     ];
 
+    /// Snapshots written by the active goal (#14): hidden from a build without the goal
+    /// feature (the `forget` schema and the `CONFIRMATION_REQUIRED` branch they name do not
+    /// exist until the goal is met).
+    const GOAL_SNAPS_14: &[&str] = &[
+        "cli_dry_run__forget_dry_run_json",
+        "cli_forget__confirmation_required_json_envelope",
+        "cli_forget__forget_json",
+    ];
+
+    #[cfg(feature = "goal")]
+    const GOAL_STDOUT_GOLDENS_14: &[(&str, &str)] = &[
+        ("cli_dry_run__forget_dry_run_json", "forget"),
+        ("cli_forget__forget_json", "forget"),
+    ];
+
     /// Every stdout snapshot's row.
     #[allow(unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
@@ -90,6 +105,8 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_12);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_16);
+        #[cfg(feature = "goal")]
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_14);
         rows
     }
 
@@ -117,6 +134,11 @@ mod goal {
         {
             pending_16 = &[];
         }
+        let mut pending_14: &[&str] = GOAL_SNAPS_14;
+        #[cfg(feature = "goal")]
+        {
+            pending_14 = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -127,6 +149,7 @@ mod goal {
             if hidden.contains(&stem.as_str())
                 || pending.contains(&stem.as_str())
                 || pending_16.contains(&stem.as_str())
+                || pending_14.contains(&stem.as_str())
             {
                 continue;
             }
@@ -230,6 +253,8 @@ mod goal {
         assert!(goldens.len() >= 14, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 23, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 29, "found only {} goldens", goldens.len());
+        #[cfg(feature = "goal")]
+        assert!(goldens.len() >= 32, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
                 .unwrap_or_else(|| panic!("golden `{}` is not mapped to a schema", g.stem));
@@ -709,6 +734,101 @@ mod goal {
                 errs.is_empty(),
                 valid,
                 "`hali schema find` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #14: what the `forget` schema accepts and refuses, and the `CONFIRMATION_REQUIRED`
+    /// branch of `error`.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn forget_schema_and_confirmation_branch() {
+        let real = json!({"schema_version": 1, "resource": record()});
+        let mut dry = real.clone();
+        dry["dry_run"] = json!(true);
+        dry["changes"] = json!([{"op": "remove", "triple": "<a:b> <a:c> <a:d> ."}]);
+        let mut cases: Vec<(&str, Value, bool)> = vec![
+            ("forget", real.clone(), true),
+            ("forget", dry.clone(), true),
+            // Another command's payload.
+            (
+                "forget",
+                json!({"schema_version": 1, "added": [record()], "existing": []}),
+                false,
+            ),
+            ("edit", real.clone(), true),
+        ];
+        let mut v = real.clone();
+        v.as_object_mut().unwrap().remove("resource");
+        cases.push(("forget", v, false));
+        let mut v = real.clone();
+        v["resource"]["missing"] = json!("no");
+        cases.push(("forget", v, false));
+        let mut v = real.clone();
+        v["resource"]["surprise"] = json!(1);
+        cases.push(("forget", v, false));
+        let mut v = real.clone();
+        v["schema_version"] = json!(2);
+        cases.push(("forget", v, false));
+        let mut v = real.clone();
+        v["dry_run"] = json!(true);
+        cases.push(("forget", v, false));
+        let mut v = real.clone();
+        v["changes"] = json!([]);
+        cases.push(("forget", v, false));
+        let mut v = dry.clone();
+        v["dry_run"] = json!(false);
+        cases.push(("forget", v, false));
+        let mut v = dry.clone();
+        v.as_object_mut().unwrap().remove("changes");
+        cases.push(("forget", v, false));
+        let mut v = dry.clone();
+        v["changes"] = json!([{"op": "replace", "triple": "<a:b> <a:c> <a:d> ."}]);
+        cases.push(("forget", v, false));
+        let mut v = real.clone();
+        v["extra"] = json!(1);
+        cases.push(("forget", v, false));
+
+        for (name, instance, valid) in cases {
+            let errs = problems(&validator(name), &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema {name}` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+
+        // The error branch: `command` (string) and `declined` (boolean) are required.
+        let confirmation = |details: Value| error("CONFIRMATION_REQUIRED", details);
+        let v = validator("error");
+        for (instance, valid) in [
+            (
+                confirmation(json!({"command": "forget", "declined": false})),
+                true,
+            ),
+            (
+                confirmation(json!({"command": "forget", "declined": true})),
+                true,
+            ),
+            (confirmation(json!({"command": "forget"})), false),
+            (confirmation(json!({"declined": false})), false),
+            (confirmation(json!({})), false),
+            (
+                confirmation(json!({"command": "forget", "declined": "no"})),
+                false,
+            ),
+            (
+                confirmation(json!({"command": 5, "declined": false})),
+                false,
+            ),
+        ] {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema error` should {} {instance}; errors: {errs:?}",
                 if valid { "accept" } else { "reject" }
             );
         }

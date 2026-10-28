@@ -1,0 +1,9 @@
+tests/core_forget.rs
+tests/cli_forget.rs
+tests/cli_dry_run.rs
+tests/schema_contract.rs
+tests/snapshots/cli_forget__forget_json.snap
+tests/snapshots/cli_forget__confirmation_required_json_envelope.snap
+tests/snapshots/cli_dry_run__forget_dry_run_json.snap
+tests/fixtures/forget/vocabulary.ttl
+tests/fixtures/forget/resources.ttl

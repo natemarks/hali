@@ -737,3 +737,62 @@ mod tags {
         assert_eq!(changes_with(&dry, "add", BROADER), 2, "{dry}");
     }
 }
+
+/// #14: `forget` under the dry-run equality helper (spec §9.5, §14.3), over tests/fixtures/forget
+/// (R1 IANA and tagged, R2 and R3 sharing a `hali` format, R3 `dcterms:relation` R2, the Person).
+/// The real run gets `--yes`, as it has no terminal; a dry run ignores it.
+#[cfg(feature = "goal")]
+mod forget {
+    use super::{fixture, support};
+    use serde_json::Value;
+
+    const R1: &str = "0192f0c4-0000-7000-8000-000000000201";
+    const R2: &str = "0192f0c4-0000-7000-8000-000000000202";
+    const R3: &str = "0192f0c4-0000-7000-8000-000000000203";
+
+    fn removes(dry: &Value) -> Vec<&str> {
+        dry["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| {
+                assert_eq!(c["op"], "remove", "forget only removes: {c}");
+                c["triple"].as_str().unwrap()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn forget_dry_run_matches() {
+        let store = fixture("forget");
+        for (id, title) in [(R1, "one doc"), (R2, "two doc"), (R3, "three doc")] {
+            let dry =
+                support::assert_dry_run_matches_real_run(Some(&store), &["forget", id, "--yes"]);
+            assert_eq!(dry["resource"]["id"], id);
+            assert_eq!(dry["resource"]["title"], title);
+            // Resource, checksum node and catalog record: 15 triples each (R2's include R3's
+            // inbound relation; R3's own relation is one of R3's).
+            assert_eq!(removes(&dry).len(), 15, "{id}: {dry}");
+            // The Person stays.
+            assert!(
+                removes(&dry)
+                    .iter()
+                    .all(|t| !t.starts_with("<urn:uuid:0192f0c4-0000-7000-8000-000000000001>")),
+                "{id}: {dry}"
+            );
+        }
+
+        // R2's inbound triple from R3 is listed, and the format node (R3 still uses it) is not.
+        let dry = support::assert_dry_run_matches_real_run(Some(&store), &["forget", R2, "--yes"]);
+        let removed = removes(&dry);
+        assert!(removed.iter().any(|t| t.starts_with(&format!(
+            "<urn:uuid:{R3}> <http://purl.org/dc/terms/relation> <urn:uuid:{R2}>"
+        ))));
+        assert!(
+            !removed
+                .iter()
+                .any(|t| t.contains("<http://purl.org/dc/terms/MediaType>")),
+            "{dry}"
+        );
+    }
+}
