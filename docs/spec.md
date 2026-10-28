@@ -350,6 +350,8 @@ hali generate completions <bash|zsh|fish>
 
 **Tags:** `add --tag C` tags the Resources it newly catalogs; for an already-cataloged path it is ignored, like `--title`. `edit` needs at least one change flag (else a usage error); naming one Concept in both `--add-tag` and `--remove-tag` is a usage error. Adding a present tag or removing an absent one is a silent no-op. An edit is one mutation with one SHACL check, and bumps the catalog record's `dcterms:modified` only when something changed. Its text summary is `edited|would edit|unchanged resource <id> "<title>"`. `concept add --broader C` writes a `skos:broader` link to each resolved Concept; the output's `broader` lists their ids, sorted. Every Concept reference is resolved before anything changes. `edit` resolves `--add-tag` references first, then `--remove-tag`, each list in argument order, and reports the first unknown one in that order. The CLI rejects an `edit` with no change flag before reading the store (exit 2); core keeps the same check.
 
+**Forget:** `forget <ref>` removes the Resource's triples from `resources.ttl`, its own checksum node (`<id>#sha256`; a `spdx:checksum` link to any other node leaves that node alone), every catalog record whose `foaf:primaryTopic` it is, and every triple that points at it, and the format node of a non-IANA media type when no other Resource uses it; it never touches the file, the user Person, `vocabulary.ttl` or `extensions.ttl`. A Resource whose file is gone can still be forgotten, by path or UUID. An id that is no longer cataloged is `UNKNOWN_RESOURCE`. It prints `{"schema_version":1,"resource":<the record as it was>}` (text: `forgot|would forget resource <id> "<title>" <path>`). It is destructive and confirms as §9.8 says. `--force` and `FORGET_BLOCKED_BY_RELATIONS` (§2.6) arrive with #18, so until then forget removes a Resource that other Resources relate to, together with those relations.
+
 **`hali schema`:** a name is the subcommand path as separate words (`hali schema concept add`), or `error` for the error envelope. With no name it lists the names, sorted: one per line in text mode, `{"schema_version":1,"schemas":[…]}` with `--json`. With a name it prints the bare JSON Schema document (draft 2020-12, no `$id`, no external `$ref`) on one line, in text and `--json` mode alike, not wrapped in the envelope (as with `hali query`, §9.9). An unknown name, or extra words, is a usage error (exit 2) that lists the valid names. It reads no config or store and writes nothing. Every command with a `--json` output has a schema, and the test suite checks every golden JSON snapshot against its schema (§14.6).
 
 ### 9.2 References
@@ -401,7 +403,7 @@ hali generate completions <bash|zsh|fish>
 - SHACL runs against the would-be graph, so violations are reported.
 - A dry run writes nothing: it creates no data dir, file, temp file or lock file, and changes no file. It does not check that the data dir is writable, so it can succeed where the real run would fail with `STORE_IO`.
 - A real run rewrites the whole tool-managed file in canonical form (§3.4), while `changes` lists only the triples that differ, so comments and formatting in a hand-edited file are lost on a real run.
-- **Errors:** a dry run reports the same errors as a real run, with identical stderr and exit code, and no `dry_run` or `changes` in the envelope. A successful dry run exits 0.
+- **Errors:** a dry run reports the same errors as a real run with `--yes`, with identical stderr and exit code, and no `dry_run` or `changes` in the envelope; it never fails with `CONFIRMATION_REQUIRED` (§9.8). A successful dry run exits 0.
 - **Read-only commands** (`concept list`, `validate`, `schema`, `find`, `show`, `query`) accept `--dry-run` and ignore it: their output is identical to a run without it.
 - **Text mode:** `concept add` prints `would add concept <id> "<label>"`. Each mutating command prints its own conditional summary line, followed by the shared `+ <triple>` or `- <triple>` line per change, and `note: dry run; nothing was written` on stderr.
 
@@ -419,9 +421,11 @@ hali generate completions <bash|zsh|fish>
 - **Default sort:** `modified` descending.
 
 ### 9.8 Destructive commands
-- `forget`, `scan --prune`, `concept|type|relation remove` and `relink --force` ask for confirmation **only on a TTY**.
-- **Without a TTY** they fail with `CONFIRMATION_REQUIRED`, suggesting `--yes`.
-- Nothing ever waits on stdin.
+- `forget`, `scan --prune`, `concept|type|relation remove` and `relink --force` ask for confirmation **only on a TTY**: when stdin **and** stderr are both terminals. The prompt goes to stderr, `forget resource <id> "<title>" <path>? [y/N] ` for forget (no trailing newline), and the answer is one line from stdin; stdout stays clean and `--json` changes none of this. `y` or `yes` (trimmed, any case) confirms; anything else, end of input or a read error declines, with the same rule as below and `"declined": true`, and nothing is written.
+- **Without both terminals** they fail with `CONFIRMATION_REQUIRED` (exit 1, `details {"command": …, "declined": false}`), suggesting `--yes`: its `suggested_command` is the command again with full references and `--yes`.
+- `--yes` is a global flag (§9.1), accepted before or after the subcommand. It confirms; commands that are not destructive ignore it.
+- **Order:** usage, store, domain and SHACL errors come before the confirmation. `--dry-run` (§9.5) never asks and never fails with `CONFIRMATION_REQUIRED`. A command that would change nothing never asks.
+- Nothing ever waits on stdin: without both terminals it is never read, and `--yes` and `--dry-run` never read it.
 
 ### 9.9 `hali query`
 - **Read-only:** SPARQL 1.1 over all named graphs. UPDATE is rejected with `READ_ONLY_QUERY`.
@@ -642,6 +646,7 @@ Source: [Testing strategy for hali v1](https://github.com/natemarks/mcp-local-no
 ### 14.2 Determinism
 - `core` takes a `Clock` and an `IdGen`.
 - Binary-level tests set `HALI_TEST_NOW` and `HALI_TEST_ID_SEED`, which are **compiled in only under the `test-hooks` cargo feature**, so release binaries cannot be steered.
+- `HALI_TEST_TTY=1|0` makes the CLI treat stdin and stderr as terminals (`1`) or not (`0`) when it decides whether to ask for confirmation (§9.8). Like the two above, it is compiled in only under `test-hooks`; without it, or unset, the real terminal check applies.
 - `insta` redactions cover any remaining UUIDs and timestamps.
 
 ### 14.3 RDF tests

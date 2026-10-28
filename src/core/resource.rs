@@ -162,7 +162,7 @@ fn catalog(
         Some(person) => (person, false),
         None => (urn(&ctx.next_id()), true),
     };
-    let checksum = NamedNode::new_unchecked(format!("{}#sha256", resource.as_str()));
+    let checksum = checksum_node(&resource);
     let title = title.unwrap_or_else(|| default_title(&facts.path));
     let url = NamedNode::new(file_url(&facts.path))
         .map_err(|_| Error::usage("the path does not make a valid file URL"))?;
@@ -415,6 +415,68 @@ pub fn edit(
     let changes = apply(store, &added, &removed);
     Ok(Mutation {
         value: record(ctx, store, &resource),
+        changes,
+    })
+}
+
+/// Forgets a Resource in one mutation, in resources.ttl only: removes the Resource, its checksum
+/// node (`<id>#sha256`), every catalog record and every triple that points at it, and the `a dcterms:MediaType`
+/// triple of its non-IANA format if no other Resource uses that format. The user Person and
+/// the Concepts stay. The value is the record as it was. Needs no clock and no id, and never
+/// looks at the file. Refused, with the store unchanged, if the store would not conform.
+pub fn forget(ctx: &Context, store: &mut Store, id: &str) -> Result<Mutation<Record>, Error> {
+    let resource = known(store, id)?;
+    let was = record(ctx, store, &resource);
+    let graph = File::Resources.graph();
+    let quads_of = |s: Option<&NamedNode>, o: Option<TermRef<'_>>| -> Vec<Quad> {
+        store
+            .quads_for_pattern(
+                s.map(|s| s.as_ref().into()),
+                None,
+                o,
+                Some(graph.as_ref().into()),
+            )
+            .map(|q| q.expect("reading the in-memory store"))
+            .collect()
+    };
+
+    let mut removed = quads_of(Some(&resource), None);
+    // Only the Resource's own checksum node goes; a link to any other node is just a triple of
+    // the Resource.
+    let own_node = checksum_node(&resource);
+    if has(store, &resource, spdx::CHECKSUM, own_node.as_ref().into()) {
+        removed.extend(quads_of(Some(&own_node), None));
+    }
+    for c in catalog_records_of(store, &resource) {
+        removed.extend(quads_of(Some(&c), None));
+    }
+    removed.extend(quads_of(None, Some(resource.as_ref().into())));
+    let format = first_iri(store, &resource, dcterms::FORMAT)
+        .filter(|f| f.as_str().starts_with(HALI_MEDIA_TYPES));
+    if let Some(format) = format {
+        let shared = subjects(store, dcterms::FORMAT, format.as_ref().into())
+            .into_iter()
+            .any(|r| r != resource && is_resource(store, &r));
+        if !shared {
+            removed.extend(
+                store
+                    .quads_for_pattern(
+                        Some(format.as_ref().into()),
+                        Some(rdf::TYPE),
+                        Some(iri(dcterms::MEDIA_TYPE).as_ref()),
+                        Some(graph.as_ref().into()),
+                    )
+                    .map(|q| q.expect("reading the in-memory store")),
+            );
+        }
+    }
+    removed.sort_by_cached_key(ToString::to_string);
+    removed.dedup();
+
+    validate::guard(store, &[], &removed)?;
+    let changes = apply(store, &[], &removed);
+    Ok(Mutation {
+        value: was,
         changes,
     })
 }
@@ -782,10 +844,15 @@ fn user(store: &Store) -> Option<NamedNode> {
         .next()
 }
 
-fn catalog_record_of(store: &Store, resource: &NamedNode) -> Option<NamedNode> {
+/// The checksum node `add` mints for a Resource.
+fn checksum_node(resource: &NamedNode) -> NamedNode {
+    NamedNode::new_unchecked(format!("{}#sha256", resource.as_str()))
+}
+
+fn catalog_records_of(store: &Store, resource: &NamedNode) -> Vec<NamedNode> {
     subjects(store, foaf::PRIMARY_TOPIC, TermRef::from(resource.as_ref()))
         .into_iter()
-        .find(|c| {
+        .filter(|c| {
             has(
                 store,
                 c,
@@ -793,6 +860,11 @@ fn catalog_record_of(store: &Store, resource: &NamedNode) -> Option<NamedNode> {
                 iri(dcat::CATALOG_RECORD).as_ref(),
             )
         })
+        .collect()
+}
+
+fn catalog_record_of(store: &Store, resource: &NamedNode) -> Option<NamedNode> {
+    catalog_records_of(store, resource).into_iter().next()
 }
 
 /// The record of a Resource, as the store has it; `missing` and `stale` are left false.

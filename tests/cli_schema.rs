@@ -133,7 +133,7 @@ mod goal {
         assert_eq!(out.stderr, "");
         assert_eq!(
             out.stdout,
-            "add\nconcept add\nconcept list\nedit\nerror\nfind\nschema\nshow\nvalidate\n"
+            "add\nconcept add\nconcept list\nedit\nerror\nfind\nforget\nschema\nshow\nvalidate\n"
         );
     }
 

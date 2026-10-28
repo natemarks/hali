@@ -33,6 +33,18 @@
           }
         },
         {
+          "if": {"properties": {"rule": {"const": "CONFIRMATION_REQUIRED"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {"command": {"type": "string"}, "declined": {"type": "boolean"}},
+                "required": ["command", "declined"]
+              }
+            }
+          }
+        },
+        {
           "if": {"properties": {"rule": {"const": "SHAPES_INVALID"}}, "required": ["rule"]},
           "then": {
             "properties": {

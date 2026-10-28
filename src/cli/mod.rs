@@ -6,6 +6,10 @@ use crate::{media_type, ontology, paths, storage};
 use clap::{CommandFactory, Parser, Subcommand};
 use serde::Serialize;
 use std::ffi::OsString;
+use std::io::{BufRead, IsTerminal, Read, Write};
+
+/// The most bytes read from the confirmation prompt, newline included.
+const MAX_ANSWER: u64 = 64;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -21,6 +25,9 @@ struct Cli {
     /// Show the triple changes a mutating command would make, and write nothing
     #[arg(long, global = true)]
     dry_run: bool,
+    /// Confirm a destructive command without asking
+    #[arg(long, global = true)]
+    yes: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -62,6 +69,12 @@ enum Command {
         /// Untag the Resource from this Concept (a slug or a label; repeatable)
         #[arg(long = "remove-tag", value_name = "CONCEPT")]
         remove_tags: Vec<String>,
+    },
+    /// Remove a Resource and its catalog record from the ontology; the file is left alone
+    Forget {
+        /// A path or a full UUID
+        #[arg(value_name = "REF")]
+        reference: String,
     },
     /// Print the JSON Schema of a command's --json output, or of the error envelope
     Schema {
@@ -332,7 +345,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                     println!("existing resource {}", describe(r));
                 }
             };
-            mutated(cli, &dir, &store, output, &added.changes, text)?;
+            mutated(cli, &dir, &store, output, &added.changes, text, None)?;
         }
         Command::Edit {
             reference,
@@ -365,7 +378,39 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                     printable(&record.title)
                 );
             };
-            mutated(cli, &dir, &store, output, &edited.changes, text)?;
+            mutated(cli, &dir, &store, output, &edited.changes, text, None)?;
+        }
+        Command::Forget { reference } => {
+            let id = resource::resolve_ref(&store, reference, paths::ref_path)?;
+            let mut forgotten = resource::forget(&ctx, &mut store, &id)?;
+            observe(&mut forgotten.value);
+            let output = ResourceOutput {
+                schema_version: SCHEMA_VERSION,
+                resource: &forgotten.value,
+            };
+            let record = &forgotten.value;
+            let text = || {
+                let verb = if cli.dry_run {
+                    "would forget"
+                } else {
+                    "forgot"
+                };
+                println!("{verb} resource {}", describe(record));
+            };
+            let confirmation = Confirmation {
+                command: "forget",
+                question: format!("forget resource {}", describe(record)),
+                retry: format!("hali forget {} --yes", core::shell_quote(&record.id)),
+            };
+            mutated(
+                cli,
+                &dir,
+                &store,
+                output,
+                &forgotten.changes,
+                text,
+                Some(&confirmation),
+            )?;
         }
         Command::Find {
             title,
@@ -600,9 +645,72 @@ fn describe(record: &Record) -> String {
     )
 }
 
+/// What a destructive command asks before it writes (spec §9.8).
+struct Confirmation {
+    /// The command name, as `CONFIRMATION_REQUIRED` reports it.
+    command: &'static str,
+    /// The prompt, without the `? [y/N] `; already safe to print.
+    question: String,
+    /// The command that confirms it, for `suggested_command`.
+    retry: String,
+}
+
+/// Whether to ask: stdin and stderr are both terminals. A test-hooks build can be steered by
+/// `HALI_TEST_TTY=1|0`; a release build cannot.
+fn interactive() -> bool {
+    #[cfg(feature = "test-hooks")]
+    if let Some(forced) = env("HALI_TEST_TTY") {
+        return forced == "1";
+    }
+    std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
+}
+
+/// Passes if `--yes` was given or the user answers `y`/`yes` at the prompt. Without a terminal
+/// nothing is read from stdin; anything but a yes, end of input or a read error declines.
+fn confirm(cli: &Cli, what: &Confirmation) -> Result<(), Error> {
+    if cli.yes {
+        return Ok(());
+    }
+    if !interactive() {
+        return Err(Error::confirmation_required(
+            what.command,
+            &what.retry,
+            false,
+        ));
+    }
+    let mut stderr = std::io::stderr();
+    let _ = write!(stderr, "{}? [y/N] ", what.question);
+    let _ = stderr.flush();
+    let mut line = Vec::new();
+    // An answer is a few characters: read at most a bounded line, and decline longer input.
+    let read = std::io::stdin()
+        .lock()
+        .take(MAX_ANSWER)
+        .read_until(b'\n', &mut line);
+    if !matches!(read, Ok(n) if n > 0) {
+        // No newline was typed, so end the prompt line.
+        let _ = writeln!(stderr);
+    }
+    if line.last() != Some(&b'\n') && line.len() as u64 >= MAX_ANSWER {
+        line.clear();
+    }
+    let answer = String::from_utf8(line).unwrap_or_default();
+    let answer = answer.trim();
+    if answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes") {
+        Ok(())
+    } else {
+        Err(Error::confirmation_required(
+            what.command,
+            &what.retry,
+            true,
+        ))
+    }
+}
+
 /// The end of a mutating command on resources.ttl: under `--dry-run`, the payload with the
-/// changes (or the `text` summary and the change lines); otherwise, if anything changed, the
-/// file is saved, then the payload (or the `text` summary) is printed.
+/// changes (or the `text` summary and the change lines); otherwise, if anything changed, it is
+/// confirmed (when the command asks), the file is saved, then the payload (or the `text`
+/// summary) is printed.
 fn mutated(
     cli: &Cli,
     dir: &Path,
@@ -610,6 +718,7 @@ fn mutated(
     output: impl Serialize,
     changes: &[Change],
     text: impl Fn(),
+    confirmation: Option<&Confirmation>,
 ) -> Result<(), Error> {
     if cli.dry_run {
         if cli.json {
@@ -625,6 +734,9 @@ fn mutated(
         return Ok(());
     }
     if !changes.is_empty() {
+        if let Some(what) = confirmation {
+            confirm(cli, what)?;
+        }
         storage::save(dir, store, storage::File::Resources)?;
     }
     if cli.json {

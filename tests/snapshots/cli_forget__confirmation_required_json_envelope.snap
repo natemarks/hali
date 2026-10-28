@@ -1,0 +1,5 @@
+---
+source: tests/cli_forget.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"CONFIRMATION_REQUIRED","message":"forget needs confirmation, but stdin or stderr is not a terminal; nothing was written","details":{"command":"forget","declined":false},"suggested_fix":"Run it again with --yes to confirm, or with --dry-run to see what it would change.","suggested_command":"hali forget 0192f0c4-0000-7000-8000-000000000201 --yes"}}
