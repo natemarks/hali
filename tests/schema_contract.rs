@@ -92,7 +92,6 @@ mod goal {
         "cli_forget__forget_json",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_14: &[(&str, &str)] = &[
         ("cli_dry_run__forget_dry_run_json", "forget"),
         ("cli_forget__forget_json", "forget"),
@@ -105,7 +104,6 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_12);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_16);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_14);
         rows
     }
@@ -135,7 +133,6 @@ mod goal {
             pending_16 = &[];
         }
         let mut pending_14: &[&str] = GOAL_SNAPS_14;
-        #[cfg(feature = "goal")]
         {
             pending_14 = &[];
         }
@@ -253,7 +250,6 @@ mod goal {
         assert!(goldens.len() >= 14, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 23, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 29, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 32, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
@@ -741,7 +737,6 @@ mod goal {
 
     /// #14: what the `forget` schema accepts and refuses, and the `CONFIRMATION_REQUIRED`
     /// branch of `error`.
-    #[cfg(feature = "goal")]
     #[test]
     fn forget_schema_and_confirmation_branch() {
         let real = json!({"schema_version": 1, "resource": record()});

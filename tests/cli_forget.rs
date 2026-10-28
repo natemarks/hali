@@ -16,7 +16,6 @@
 //! prompt is fixed in spec §9.8: `forget resource <id> "<title>" <path>? [y/N] ` on stderr,
 //! no trailing newline.
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::Value;

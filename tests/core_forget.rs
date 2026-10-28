@@ -17,7 +17,6 @@
 //! one catalog record each (ids 0211, 0212, 0213). All three files have six bytes and `modified`
 //! 2026-10-20T14:02:11Z.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::resource;
     use hali::core::{Clock, Context, Error, FixedClock, IdGen, Op, SeededIdGen};

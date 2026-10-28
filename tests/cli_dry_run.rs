@@ -741,7 +741,6 @@ mod tags {
 /// #14: `forget` under the dry-run equality helper (spec §9.5, §14.3), over tests/fixtures/forget
 /// (R1 IANA and tagged, R2 and R3 sharing a `hali` format, R3 `dcterms:relation` R2, the Person).
 /// The real run gets `--yes`, as it has no terminal; a dry run ignores it.
-#[cfg(feature = "goal")]
 mod forget {
     use super::{fixture, support};
     use serde_json::Value;
