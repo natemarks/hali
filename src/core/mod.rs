@@ -456,7 +456,7 @@ impl Error {
 
 /// A word as a POSIX shell reads it back: as is when it is made of `[A-Za-z0-9._-]` only,
 /// otherwise single-quoted, with each `'` written as `'\''`.
-fn shell_quote(word: &str) -> String {
+pub fn shell_quote(word: &str) -> String {
     let safe = !word.is_empty()
         && word
             .chars()

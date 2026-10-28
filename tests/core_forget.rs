@@ -309,6 +309,89 @@ mod goal {
         assert_eq!(resources_ttl(&store), before, "nothing was removed");
     }
 
+    /// The fixture with `edit` applied to its resources.ttl, loaded from a temp dir.
+    fn load_edited(edit: impl Fn(String) -> String) -> Store {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::copy(
+            fixture("forget").join("vocabulary.ttl"),
+            dir.path().join("vocabulary.ttl"),
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(fixture("forget").join("resources.ttl")).unwrap();
+        std::fs::write(dir.path().join("resources.ttl"), edit(text)).unwrap();
+        hali::storage::load(dir.path()).unwrap()
+    }
+
+    fn about(ts: &BTreeSet<String>, subject: &str) -> BTreeSet<String> {
+        let prefix = format!("<{subject}>");
+        ts.iter()
+            .filter(|t| t.starts_with(&prefix))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn forget_keeps_a_shared_checksum_node() {
+        // R1 also links R2's checksum node: forgetting R1 removes its own node only.
+        let link = format!(
+            "<{}> <http://spdx.org/rdf/terms#checksum> <{}#sha256> .\n",
+            urn(R1),
+            urn(R2)
+        );
+        let mut store = load_edited(|t| t + &link);
+        let r2_node = format!("{}#sha256", urn(R2));
+        let before = triples(&resources_ttl(&store));
+        assert_eq!(about(&before, &r2_node).len(), 2);
+        let m = resource::forget(&ctx(), &mut store, R1).unwrap();
+        let after = triples(&resources_ttl(&store));
+        assert_eq!(about(&after, &r2_node), about(&before, &r2_node));
+        assert!(about(&after, &format!("{}#sha256", urn(R1))).is_empty());
+        assert!(m.changes.iter().all(|c| c.op == Op::Remove));
+        assert_eq!(after.len() + m.changes.len(), before.len());
+    }
+
+    #[test]
+    fn forget_leaves_a_checksum_pointing_at_another_resource() {
+        // R1's only checksum link points at R2 itself: R2 stays completely intact.
+        let own = format!("spdx:checksum <{}#sha256>", urn(R1));
+        let mut store = load_edited(|t| {
+            let edited = t.replacen(&own, &format!("spdx:checksum <{}>", urn(R2)), 1);
+            assert_ne!(edited, t);
+            edited
+        });
+        let before = triples(&resources_ttl(&store));
+        let m = resource::forget(&ctx(), &mut store, R1).unwrap();
+        let after = triples(&resources_ttl(&store));
+        for s in [urn(R2), format!("{}#sha256", urn(R2))] {
+            assert_eq!(about(&after, &s), about(&before, &s), "{s}");
+        }
+        // R1's own node is no longer linked from R1, so it is left too; the guard is happy.
+        assert!(!about(&after, &format!("{}#sha256", urn(R1))).is_empty());
+        let removed: BTreeSet<String> = m.changes.iter().map(|c| c.triple.clone()).collect();
+        let expected: BTreeSet<String> = about(&before, &urn(R1))
+            .union(&about(&before, &urn(C1)))
+            .cloned()
+            .collect();
+        assert_eq!(removed, expected, "nothing else is removed");
+    }
+
+    #[test]
+    fn forget_removes_every_catalog_record_of_the_resource() {
+        let c1b = "0192f0c4-0000-7000-8000-0000000002ff";
+        let extra = format!(
+            "<{}> a dcat:CatalogRecord ;\n\tdcterms:issued \"2026-10-22T08:00:00Z\"^^xsd:dateTime ;\n\tdcterms:modified \"2026-10-22T08:00:00Z\"^^xsd:dateTime ;\n\tprov:wasAttributedTo <{P}> ;\n\tfoaf:primaryTopic <{}> .\n",
+            urn(c1b),
+            urn(R1)
+        );
+        let mut store = load_edited(|t| t + &extra);
+        resource::forget(&ctx(), &mut store, R1).unwrap();
+        let text = resources_ttl(&store);
+        for id in [C1, c1b, R1] {
+            assert!(!text.contains(&urn(id)), "{id} remains:\n{text}");
+        }
+        assert!(text.contains(&urn(C2)) && text.contains(&urn(R2)));
+    }
+
     #[test]
     fn forget_needs_no_clock_or_ids() {
         struct NoClock;

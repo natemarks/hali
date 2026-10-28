@@ -162,7 +162,7 @@ fn catalog(
         Some(person) => (person, false),
         None => (urn(&ctx.next_id()), true),
     };
-    let checksum = NamedNode::new_unchecked(format!("{}#sha256", resource.as_str()));
+    let checksum = checksum_node(&resource);
     let title = title.unwrap_or_else(|| default_title(&facts.path));
     let url = NamedNode::new(file_url(&facts.path))
         .map_err(|_| Error::usage("the path does not make a valid file URL"))?;
@@ -420,7 +420,7 @@ pub fn edit(
 }
 
 /// Forgets a Resource in one mutation, in resources.ttl only: removes the Resource, its checksum
-/// node, its catalog record and every triple that points at it, and the `a dcterms:MediaType`
+/// node (`<id>#sha256`), every catalog record and every triple that points at it, and the `a dcterms:MediaType`
 /// triple of its non-IANA format if no other Resource uses that format. The user Person and
 /// the Concepts stay. The value is the record as it was. Needs no clock and no id, and never
 /// looks at the file. Refused, with the store unchanged, if the store would not conform.
@@ -441,10 +441,13 @@ pub fn forget(ctx: &Context, store: &mut Store, id: &str) -> Result<Mutation<Rec
     };
 
     let mut removed = quads_of(Some(&resource), None);
-    if let Some(node) = first_iri(store, &resource, spdx::CHECKSUM) {
-        removed.extend(quads_of(Some(&node), None));
+    // Only the Resource's own checksum node goes; a link to any other node is just a triple of
+    // the Resource.
+    let own_node = checksum_node(&resource);
+    if has(store, &resource, spdx::CHECKSUM, own_node.as_ref().into()) {
+        removed.extend(quads_of(Some(&own_node), None));
     }
-    if let Some(c) = catalog_record_of(store, &resource) {
+    for c in catalog_records_of(store, &resource) {
         removed.extend(quads_of(Some(&c), None));
     }
     removed.extend(quads_of(None, Some(resource.as_ref().into())));
@@ -841,10 +844,15 @@ fn user(store: &Store) -> Option<NamedNode> {
         .next()
 }
 
-fn catalog_record_of(store: &Store, resource: &NamedNode) -> Option<NamedNode> {
+/// The checksum node `add` mints for a Resource.
+fn checksum_node(resource: &NamedNode) -> NamedNode {
+    NamedNode::new_unchecked(format!("{}#sha256", resource.as_str()))
+}
+
+fn catalog_records_of(store: &Store, resource: &NamedNode) -> Vec<NamedNode> {
     subjects(store, foaf::PRIMARY_TOPIC, TermRef::from(resource.as_ref()))
         .into_iter()
-        .find(|c| {
+        .filter(|c| {
             has(
                 store,
                 c,
@@ -852,6 +860,11 @@ fn catalog_record_of(store: &Store, resource: &NamedNode) -> Option<NamedNode> {
                 iri(dcat::CATALOG_RECORD).as_ref(),
             )
         })
+        .collect()
+}
+
+fn catalog_record_of(store: &Store, resource: &NamedNode) -> Option<NamedNode> {
+    catalog_records_of(store, resource).into_iter().next()
 }
 
 /// The record of a Resource, as the store has it; `missing` and `stale` are left false.

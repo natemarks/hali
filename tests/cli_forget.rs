@@ -225,6 +225,20 @@ mod goal {
     }
 
     #[test]
+    fn an_overlong_answer_declines() {
+        let env = Env::new();
+        let before = env.state();
+        // Trimmed it would read `y`, but an answer is capped at 64 bytes.
+        let answer = format!("y{}\n", " ".repeat(100));
+        let out = env.tty(answer.as_bytes(), ["--json", "forget", R1]);
+        assert_eq!(out.code, Some(1), "{}", out.stderr);
+        assert!(out.stderr.contains(DECLINED), "{}", out.stderr);
+        assert_eq!(env.state(), before);
+        let out = env.tty(b"y\n", ["--json", "forget", R1]);
+        assert_eq!(out.code, Some(0), "{}", out.stderr);
+    }
+
+    #[test]
     fn confirmation_required_json_envelope() {
         let env = Env::new();
         let before = env.state();
@@ -814,5 +828,53 @@ mod goal {
                 assert!(text.contains("forgot resource"), "{text}");
             }
         }
+    }
+}
+
+mod hand_edited_iri {
+    use assert_cmd::Command;
+
+    /// A Resource whose IRI is not a UUID, found by path: the retry command is shell-safe.
+    #[test]
+    fn suggested_command_quotes_a_non_uuid_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        for d in ["cfg", "home", "files", "data"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        let fixture =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/forget");
+        for name in ["resources.ttl", "vocabulary.ttl"] {
+            let text = std::fs::read_to_string(fixture.join(name))
+                .unwrap()
+                .replace(
+                    "file:///fixtures/forget/",
+                    &format!("file://{}/files/", root.display()),
+                )
+                .replace("0192f0c4-0000-7000-8000-000000000201", "x;id");
+            std::fs::write(root.join("data").join(name), text).unwrap();
+        }
+        let file = root.join("files/one.txt");
+        std::fs::write(&file, b"hello\n").unwrap();
+        let out = Command::cargo_bin("hali")
+            .unwrap()
+            .env_clear()
+            .env("XDG_CONFIG_HOME", root.join("cfg"))
+            .env("HOME", root.join("home"))
+            .env("HALI_DATA_DIR", root.join("data"))
+            .env("HALI_TEST_ID_SEED", "1")
+            .args(["--json", "forget"])
+            .arg(&file)
+            .write_stdin("y\n")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8(out.stderr).unwrap();
+        assert_eq!(out.status.code(), Some(1), "{stderr}");
+        let v: serde_json::Value = serde_json::from_str(&stderr).unwrap();
+        assert_eq!(v["error"]["rule"], "CONFIRMATION_REQUIRED", "{stderr}");
+        assert_eq!(
+            v["error"]["suggested_command"], "hali forget 'x;id' --yes",
+            "{stderr}"
+        );
     }
 }

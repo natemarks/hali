@@ -6,7 +6,10 @@ use crate::{media_type, ontology, paths, storage};
 use clap::{CommandFactory, Parser, Subcommand};
 use serde::Serialize;
 use std::ffi::OsString;
-use std::io::{BufRead, IsTerminal, Write};
+use std::io::{BufRead, IsTerminal, Read, Write};
+
+/// The most bytes read from the confirmation prompt, newline included.
+const MAX_ANSWER: u64 = 64;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -397,7 +400,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             let confirmation = Confirmation {
                 command: "forget",
                 question: format!("forget resource {}", describe(record)),
-                retry: format!("hali forget {} --yes", record.id),
+                retry: format!("hali forget {} --yes", core::shell_quote(&record.id)),
             };
             mutated(
                 cli,
@@ -679,10 +682,17 @@ fn confirm(cli: &Cli, what: &Confirmation) -> Result<(), Error> {
     let _ = write!(stderr, "{}? [y/N] ", what.question);
     let _ = stderr.flush();
     let mut line = Vec::new();
-    let read = std::io::stdin().lock().read_until(b'\n', &mut line);
+    // An answer is a few characters: read at most a bounded line, and decline longer input.
+    let read = std::io::stdin()
+        .lock()
+        .take(MAX_ANSWER)
+        .read_until(b'\n', &mut line);
     if !matches!(read, Ok(n) if n > 0) {
         // No newline was typed, so end the prompt line.
         let _ = writeln!(stderr);
+    }
+    if line.last() != Some(&b'\n') && line.len() as u64 >= MAX_ANSWER {
+        line.clear();
     }
     let answer = String::from_utf8(line).unwrap_or_default();
     let answer = answer.trim();
