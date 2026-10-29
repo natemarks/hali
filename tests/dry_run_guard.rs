@@ -29,6 +29,9 @@ const CASES: &[(&str, &[&str])] = &[
     ("forget", &["forget", STORED]),
     ("schema", &["schema"]),
     ("show", &["show", STORED]),
+    ("type add", &["type", "add", "GuardProbe"]),
+    ("type list", &["type", "list"]),
+    ("type remove", &["type", "remove", "Paper"]),
     ("validate", &["validate"]),
 ];
 

@@ -2,7 +2,7 @@
 //! `edit` and `find`, with tags (§2.3). What hali knows of a file comes in as `FileFacts`;
 //! `core` never reads it.
 
-use super::{Context, Error, Mutation, apply, concept, rfc3339, validate};
+use super::{Context, Error, Mutation, apply, concept, rfc3339, types, validate};
 use crate::ontology::{
     HALI, HALI_MEDIA_TYPES, IANA_MEDIA_TYPES, RESOURCE, dcat, dcterms, foaf, prov, skos, spdx,
 };
@@ -133,15 +133,17 @@ pub fn add(
     title: Option<&str>,
     user_name: &str,
 ) -> Result<Mutation<Added>, Error> {
-    catalog(ctx, store, facts, title, &[], user_name)
+    catalog(ctx, store, facts, title, &[], &[], user_name)
 }
 
-/// As `add`, tagging a newly cataloged Resource with the Concepts `tags`.
+/// As `add`, typing a newly cataloged Resource with the Types `types` and tagging it with the
+/// Concepts `tags`.
 fn catalog(
     ctx: &Context,
     store: &mut Store,
     facts: &FileFacts,
     title: Option<&str>,
+    types: &[NamedNode],
     tags: &[NamedNode],
     user_name: &str,
 ) -> Result<Mutation<Added>, Error> {
@@ -211,6 +213,9 @@ fn catalog(
             person.clone().into(),
         ),
     ];
+    for class in types {
+        triples.push((&resource, named(rdf::TYPE.as_str()), class.clone().into()));
+    }
     for tag in tags {
         triples.push((&resource, named(dcterms::SUBJECT), tag.clone().into()));
     }
@@ -248,18 +253,20 @@ fn catalog(
     })
 }
 
-/// Catalogs several files, tagging the newly cataloged ones with the Concepts `tags` references,
-/// all or nothing: every reference is resolved first, and on a later error the store may hold
-/// some of the files, and must not be saved. A path given twice counts once. The changes are
-/// sorted, without duplicates.
+/// Catalogs several files, typing the newly cataloged ones with the Types `types` references and
+/// tagging them with the Concepts `tags` references, all or nothing: every reference is resolved
+/// first (Types, then tags), and on a later error the store may hold some of the files, and must
+/// not be saved. A path given twice counts once. The changes are sorted, without duplicates.
 pub fn add_all(
     ctx: &Context,
     store: &mut Store,
     files: &[FileFacts],
     title: Option<&str>,
+    types: &[String],
     tags: &[String],
     user_name: &str,
 ) -> Result<Mutation<AddedAll>, Error> {
+    let types = resolve_types(ctx, store, types)?;
     let tags = resolve_tags(ctx, store, tags)?;
     let mut seen = BTreeSet::new();
     let mut out = AddedAll {
@@ -271,7 +278,7 @@ pub fn add_all(
         if !seen.insert(facts.path.as_str()) {
             continue;
         }
-        let one = catalog(ctx, store, facts, title, &tags, user_name)?;
+        let one = catalog(ctx, store, facts, title, &types, &tags, user_name)?;
         changes.extend(one.changes);
         if one.value.existing {
             out.existing.push(one.value.record);
@@ -325,34 +332,48 @@ pub fn show(ctx: &Context, store: &Store, id: &str) -> Result<Shown, Error> {
     })
 }
 
-/// What `edit` changes: a new title, and Concept references to tag with or to untag.
+/// What `edit` changes: a new title, Type references to assert or retract, and Concept
+/// references to tag with or to untag.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Edit {
     pub title: Option<String>,
+    pub add_types: Vec<String>,
+    pub remove_types: Vec<String>,
     pub add_tags: Vec<String>,
     pub remove_tags: Vec<String>,
 }
 
-/// Edits a Resource in one mutation: replaces its title, adds and removes tags, and, if that
-/// changes anything, sets its catalog record's `dcterms:modified` to now. The same title, a
-/// present tag added or an absent one removed changes nothing. A usage error if nothing is
-/// asked for, or one Concept is both added and removed. Refused, with the store unchanged, on an
-/// unknown Concept reference or if the store would not conform to the SHACL shapes.
+/// Edits a Resource in one mutation: replaces its title, adds and removes Types and tags, and,
+/// if that changes anything, sets its catalog record's `dcterms:modified` to now. The same
+/// title, a present Type or tag added or an absent one removed changes nothing; `hali:Resource`
+/// is never removed. A usage error if nothing is asked for, or one Type or Concept is both added
+/// and removed. Refused, with the store unchanged, on an unknown reference or if the store would
+/// not conform to the SHACL shapes.
 pub fn edit(
     ctx: &Context,
     store: &mut Store,
     id: &str,
     edit: &Edit,
 ) -> Result<Mutation<Record>, Error> {
-    if edit.title.is_none() && edit.add_tags.is_empty() && edit.remove_tags.is_empty() {
+    if edit.title.is_none()
+        && edit.add_types.is_empty()
+        && edit.remove_types.is_empty()
+        && edit.add_tags.is_empty()
+        && edit.remove_tags.is_empty()
+    {
         return Err(Error::usage(
-            "edit needs --title, --add-tag or --remove-tag",
+            "edit needs --title, --add-type, --remove-type, --add-tag or --remove-tag",
         ));
     }
     let resource = known(store, id)?;
     let title = edit.title.as_deref().map(normalise_title).transpose()?;
+    let add_types = resolve_types(ctx, store, &edit.add_types)?;
+    let remove_types = resolve_types(ctx, store, &edit.remove_types)?;
     let add_tags = resolve_tags(ctx, store, &edit.add_tags)?;
     let remove_tags = resolve_tags(ctx, store, &edit.remove_tags)?;
+    if add_types.iter().any(|t| remove_types.contains(t)) {
+        return Err(Error::usage("a Type cannot be both added and removed"));
+    }
     if add_tags.iter().any(|t| remove_tags.contains(t)) {
         return Err(Error::usage("a Concept cannot be both added and removed"));
     }
@@ -379,8 +400,17 @@ pub fn edit(
         )
     };
 
-    let mut removed: Vec<Quad> = remove_tags.iter().map(subject).filter(held).collect();
-    let mut added: Vec<Quad> = add_tags.iter().map(subject).filter(|q| !held(q)).collect();
+    let type_quad =
+        |class: &NamedNode| Quad::new(resource.clone(), rdf::TYPE, class.clone(), graph.clone());
+
+    let mut removed: Vec<Quad> = remove_types.iter().map(type_quad).filter(held).collect();
+    removed.extend(remove_tags.iter().map(subject).filter(held));
+    let mut added: Vec<Quad> = add_types
+        .iter()
+        .map(type_quad)
+        .filter(|q| !held(q))
+        .collect();
+    added.extend(add_tags.iter().map(subject).filter(|q| !held(q)));
     if let Some(title) = title {
         let titles = quads_of(&resource, dcterms::TITLE);
         let same = matches!(titles.as_slice(),
@@ -552,6 +582,8 @@ pub struct Query {
     pub tags: Vec<String>,
     /// Only the asserted tags count, not narrower Concepts.
     pub exact: bool,
+    /// Type references: only Resources typed with each, or with a subclass of it.
+    pub types: Vec<String>,
     pub sort: Sort,
     pub offset: usize,
     pub limit: usize,
@@ -566,6 +598,7 @@ impl Default for Query {
             stale: false,
             tags: Vec::new(),
             exact: false,
+            types: Vec::new(),
             sort: Sort::Modified,
             offset: 0,
             limit: 50,
@@ -591,15 +624,33 @@ const TAGGED_NARROWER: &str = "SELECT DISTINCT ?r ?c WHERE { \
 const TAGGED_EXACT: &str =
     "SELECT DISTINCT ?r ?c WHERE { ?r <http://purl.org/dc/terms/subject> ?c }";
 
+/// The subjects whose `rdf:type` reaches `?c` through `rdfs:subClassOf*`. `?c` is bound with
+/// `substitute_variable`; the query text is fixed.
+const TYPED: &str = "SELECT DISTINCT ?r ?c WHERE { \
+    ?r <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>/<http://www.w3.org/2000/01/rdf-schema#subClassOf>* ?c }";
+
 /// The Resources tagged with `concept` (or, unless `exact`, a narrower Concept), with the
 /// `skos:broader` triples of every graph.
 fn tagged(store: &Store, concept: &NamedNode, exact: bool) -> BTreeSet<NamedNode> {
-    let text = if exact { TAGGED_EXACT } else { TAGGED_NARROWER };
+    matching(
+        store,
+        if exact { TAGGED_EXACT } else { TAGGED_NARROWER },
+        concept,
+    )
+}
+
+/// The subjects typed with `class` or a subclass of it, with the triples of every graph.
+fn typed(store: &Store, class: &NamedNode) -> BTreeSet<NamedNode> {
+    matching(store, TYPED, class)
+}
+
+/// The named `?r` of a fixed query with `?c` bound to `bound`, over the union of the graphs.
+fn matching(store: &Store, text: &str, bound: &NamedNode) -> BTreeSet<NamedNode> {
     let mut query = SparqlEvaluator::new()
         .without_default_http_service_handler()
         .parse_query(text)
         .expect("the fixed query parses")
-        .substitute_variable(Variable::new_unchecked("c"), concept.clone());
+        .substitute_variable(Variable::new_unchecked("c"), bound.clone());
     query.dataset_mut().set_default_graph_as_union();
     let QueryResults::Solutions(solutions) = query
         .on_store(store)
@@ -624,7 +675,7 @@ fn tagged(store: &Store, concept: &NamedNode, exact: bool) -> BTreeSet<NamedNode
 /// Lists Resources (spec §6). `stat` gives the size and mtime of the regular file at a path, or
 /// `None`; it is called for every candidate when `missing` or `stale` filters, else only for the
 /// returned page. Nothing is hashed. An unknown Concept reference in `tags` is
-/// `UNKNOWN_CONCEPT`.
+/// `UNKNOWN_CONCEPT`, then an unknown Type reference in `types` is `UNKNOWN_TYPE`.
 pub fn find(
     ctx: &Context,
     store: &Store,
@@ -632,10 +683,14 @@ pub fn find(
     stat: impl Fn(&str) -> Option<(u64, i64)>,
 ) -> Result<Found, Error> {
     let tags = resolve_tags(ctx, store, &query.tags)?;
-    let mut tagged_all: Option<BTreeSet<NamedNode>> = None;
-    for tag in &tags {
-        let these = tagged(store, tag, query.exact);
-        tagged_all = Some(match tagged_all {
+    let types = resolve_types(ctx, store, &query.types)?;
+    let mut matched: Option<BTreeSet<NamedNode>> = None;
+    let sets = tags
+        .iter()
+        .map(|tag| tagged(store, tag, query.exact))
+        .chain(types.iter().map(|class| typed(store, class)));
+    for these in sets {
+        matched = Some(match matched {
             None => these,
             Some(before) => before.intersection(&these).cloned().collect(),
         });
@@ -646,7 +701,7 @@ pub fn find(
     let mut candidates: Vec<(Record, Option<String>)> =
         subjects(store, rdf::TYPE.as_str(), iri(RESOURCE).as_ref())
             .iter()
-            .filter(|r| tagged_all.as_ref().is_none_or(|t| t.contains(*r)))
+            .filter(|r| matched.as_ref().is_none_or(|t| t.contains(*r)))
             .map(|r| (record(ctx, store, r), r))
             .filter(|(rec, _)| {
                 title
@@ -725,6 +780,23 @@ fn resolve_tags(
         let concept = concept::resolve_iri(ctx, store, reference)?;
         if !out.contains(&concept) {
             out.push(concept);
+        }
+    }
+    Ok(out)
+}
+
+/// The Types that `references` name, in order and without repeats; the first unknown one is
+/// `UNKNOWN_TYPE`.
+fn resolve_types(
+    ctx: &Context,
+    store: &Store,
+    references: &[String],
+) -> Result<Vec<NamedNode>, Error> {
+    let mut out: Vec<NamedNode> = Vec::new();
+    for reference in references {
+        let class = types::resolve_iri(ctx, store, reference)?;
+        if !out.contains(&class) {
+            out.push(class);
         }
     }
     Ok(out)

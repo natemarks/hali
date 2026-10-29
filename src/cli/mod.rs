@@ -1,7 +1,9 @@
 //! The CLI adapter: clap definitions, wiring of the seams, text/JSON rendering, exit codes.
 
 use crate::core::resource::{self, FileFacts, Record};
-use crate::core::{self, Change, Clock, Context, Error, IdGen, Op, concept, schema, validate};
+use crate::core::{
+    self, Change, Clock, Context, Error, IdGen, Op, concept, schema, types, validate,
+};
 use crate::{media_type, ontology, paths, storage};
 use clap::{CommandFactory, Parser, Subcommand};
 use serde::Serialize;
@@ -42,6 +44,9 @@ enum Command {
         /// The title, for one path only (default: the file name without extension)
         #[arg(long, value_parser = parse_title)]
         title: Option<String>,
+        /// Type new Resources with this Type (a name or a label; repeatable)
+        #[arg(long = "type", value_name = "TYPE")]
+        types: Vec<String>,
         /// Tag new Resources with this Concept (a slug or a label; repeatable)
         #[arg(long = "tag", value_name = "CONCEPT")]
         tags: Vec<String>,
@@ -49,12 +54,12 @@ enum Command {
     /// Manage the Concepts of the topics scheme
     #[command(subcommand)]
     Concept(ConceptCommand),
-    /// Edit a Resource: its title and its tags
+    /// Edit a Resource: its title, its Types and its tags
     #[command(group(
         clap::ArgGroup::new("change")
             .required(true)
             .multiple(true)
-            .args(["title", "add_tags", "remove_tags"])
+            .args(["title", "add_types", "remove_types", "add_tags", "remove_tags"])
     ))]
     Edit {
         /// A path or a full UUID
@@ -63,6 +68,12 @@ enum Command {
         /// The new title
         #[arg(long, value_parser = parse_title)]
         title: Option<String>,
+        /// Type the Resource with this Type (a name or a label; repeatable)
+        #[arg(long = "add-type", value_name = "TYPE")]
+        add_types: Vec<String>,
+        /// Remove this Type from the Resource (a name or a label; repeatable)
+        #[arg(long = "remove-type", value_name = "TYPE")]
+        remove_types: Vec<String>,
         /// Tag the Resource with this Concept (a slug or a label; repeatable)
         #[arg(long = "add-tag", value_name = "CONCEPT")]
         add_tags: Vec<String>,
@@ -101,6 +112,9 @@ enum Command {
         /// With --tag, match only the Concept itself, not narrower ones
         #[arg(long)]
         exact: bool,
+        /// Only Resources of this Type or a subtype of it (repeatable: all must match)
+        #[arg(long = "type", value_name = "TYPE")]
+        types: Vec<String>,
         /// The order: modified and added are newest first
         #[arg(long, value_enum, default_value_t = SortArg::Modified)]
         sort: SortArg,
@@ -117,6 +131,9 @@ enum Command {
         #[arg(long)]
         path_only: bool,
     },
+    /// Manage the Types: the classes under hali:Resource
+    #[command(subcommand)]
+    Type(TypeCommand),
     /// Show one Resource with its catalog record
     Show {
         /// A path or a full UUID
@@ -213,6 +230,41 @@ enum ConceptCommand {
         #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
         offset: usize,
     },
+}
+
+#[derive(Subcommand)]
+enum TypeCommand {
+    /// Add a Type
+    Add {
+        /// Its name: the IRI local name and the label
+        #[arg(value_parser = parse_type_name)]
+        name: String,
+        /// The parent Type (a name or a label; default: hali:Resource)
+        #[arg(long, value_name = "TYPE")]
+        parent: Option<String>,
+    },
+    /// List Types, sorted by label
+    List {
+        /// Maximum number of results
+        #[arg(long, default_value_t = 50, allow_hyphen_values = true, value_parser = parse_limit)]
+        limit: usize,
+        /// Results to skip
+        #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
+        offset: usize,
+    },
+    /// Remove a Type that no Resource has and no other Type is under
+    Remove {
+        /// A name or a label
+        #[arg(value_name = "TYPE")]
+        reference: String,
+    },
+}
+
+/// Rejects bad Type names at parse time, so they are usage errors in clap's format.
+fn parse_type_name(name: &str) -> Result<String, String> {
+    core::types::check_name(name)
+        .map(|()| name.to_string())
+        .map_err(|e| e.message)
 }
 
 /// Rejects bad labels at parse time, so they are usage errors in clap's format.
@@ -370,14 +422,26 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
     let mut store = storage::load(&dir)?;
 
     match &cli.command {
-        Command::Add { paths, title, tags } => {
+        Command::Add {
+            paths,
+            title,
+            types,
+            tags,
+        } => {
             if title.is_some() && paths.len() > 1 {
                 return Err(Error::usage("--title takes exactly one path"));
             }
             let files = inspect_all(paths)?;
             let user = core::config::user_name(&config, env);
-            let mut added =
-                resource::add_all(&ctx, &mut store, &files, title.as_deref(), tags, &user)?;
+            let mut added = resource::add_all(
+                &ctx,
+                &mut store,
+                &files,
+                title.as_deref(),
+                types,
+                tags,
+                &user,
+            )?;
             for record in added
                 .value
                 .added
@@ -413,12 +477,16 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
         Command::Edit {
             reference,
             title,
+            add_types,
+            remove_types,
             add_tags,
             remove_tags,
         } => {
             let id = resource::resolve_ref(&store, reference, paths::ref_path)?;
             let edit = resource::Edit {
                 title: title.clone(),
+                add_types: add_types.clone(),
+                remove_types: remove_types.clone(),
                 add_tags: add_tags.clone(),
                 remove_tags: remove_tags.clone(),
             };
@@ -492,6 +560,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             stale,
             tags,
             exact,
+            types,
             sort,
             limit,
             offset,
@@ -505,6 +574,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 stale: *stale,
                 tags: tags.clone(),
                 exact: *exact,
+                types: types.clone(),
                 sort: match sort {
                     SortArg::Modified => resource::Sort::Modified,
                     SortArg::Added => resource::Sort::Added,
@@ -663,11 +733,6 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
         Command::Concept(ConceptCommand::Remove { reference }) => {
             let removed = concept::remove(&ctx, &mut store, reference)?;
             let c = &removed.value;
-            let retry = if c.id.starts_with('-') {
-                format!("hali --yes concept remove -- {}", core::shell_quote(&c.id))
-            } else {
-                format!("hali concept remove {} --yes", core::shell_quote(&c.id))
-            };
             let confirmation = Confirmation {
                 command: "concept remove",
                 question: format!(
@@ -675,7 +740,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                     printable(&c.id),
                     printable(&c.label)
                 ),
-                retry,
+                retry: remove_retry("concept remove", &c.id),
             };
             concept_mutated(
                 cli,
@@ -705,6 +770,56 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                     );
                 }
             }
+        }
+        Command::Type(TypeCommand::Add { name, parent }) => {
+            let added = types::add(&ctx, &mut store, name, parent.as_deref())?;
+            type_mutated(cli, &dir, &store, &added, ["added", "would add"], None)?;
+        }
+        Command::Type(TypeCommand::List { limit, offset }) => {
+            let page = types::list(&ctx, &store, *offset, *limit);
+            if cli.json {
+                print_json(&TypeListOutput {
+                    schema_version: SCHEMA_VERSION,
+                    page: &page,
+                });
+            } else {
+                for t in &page.results {
+                    println!(
+                        "{}\t{}\t{}",
+                        printable(&t.id),
+                        printable(&t.label),
+                        printable(&t.parents.join(", "))
+                    );
+                }
+                if let Some(next) = page.next_offset {
+                    eprintln!(
+                        "note: showing {} of {}; next: --offset {next}",
+                        page.results.len(),
+                        page.total
+                    );
+                }
+            }
+        }
+        Command::Type(TypeCommand::Remove { reference }) => {
+            let removed = types::remove(&ctx, &mut store, reference)?;
+            let t = &removed.value;
+            let confirmation = Confirmation {
+                command: "type remove",
+                question: format!(
+                    "remove type {} \"{}\"",
+                    printable(&t.id),
+                    printable(&t.label)
+                ),
+                retry: remove_retry("type remove", &t.id),
+            };
+            type_mutated(
+                cli,
+                &dir,
+                &store,
+                &removed,
+                ["removed", "would remove"],
+                Some(&confirmation),
+            )?;
         }
         Command::Schema { .. } => unreachable!("handled before the store is loaded"),
         Command::Validate { limit, offset } => {
@@ -854,8 +969,60 @@ fn confirm(cli: &Cli, what: &Confirmation) -> Result<(), Error> {
     }
 }
 
-/// The end of `concept rename|edit|remove`: `verbs` are the past and the dry-run verb; an
-/// unchanged Concept reads `unchanged`.
+/// The command that confirms removing `id` with `command` (`concept remove`, `type remove`).
+fn remove_retry(command: &str, id: &str) -> String {
+    if id.starts_with('-') {
+        format!("hali --yes {command} {}", core::positional(id))
+    } else {
+        format!("hali {command} {} --yes", core::shell_quote(id))
+    }
+}
+
+/// What a vocabulary command's text summary names: `<verb> <noun> <id> "<label>"`. `verbs` are
+/// the past and the dry-run verb; an unchanged one reads `unchanged`.
+struct Summary<'a> {
+    noun: &'static str,
+    id: &'a str,
+    label: &'a str,
+    verbs: [&'a str; 2],
+}
+
+/// The end of a mutating command on `vocabulary.ttl`.
+fn vocabulary_mutated(
+    cli: &Cli,
+    dir: &Path,
+    store: &storage::Store,
+    output: impl Serialize,
+    summary: &Summary<'_>,
+    changes: &[Change],
+    confirmation: Option<&Confirmation>,
+) -> Result<(), Error> {
+    let text = || {
+        let verb = match (cli.dry_run, changes.is_empty()) {
+            (true, _) => summary.verbs[1],
+            (false, false) => summary.verbs[0],
+            (false, true) => "unchanged",
+        };
+        println!(
+            "{verb} {} {} \"{}\"",
+            summary.noun,
+            printable(summary.id),
+            printable(summary.label)
+        );
+    };
+    mutated(
+        cli,
+        dir,
+        store,
+        storage::File::Vocabulary,
+        output,
+        changes,
+        text,
+        confirmation,
+    )
+}
+
+/// The end of `concept rename|edit|remove`.
 fn concept_mutated(
     cli: &Cli,
     dir: &Path,
@@ -869,26 +1036,50 @@ fn concept_mutated(
         schema_version: SCHEMA_VERSION,
         concept: c,
     };
-    let text = || {
-        let verb = match (cli.dry_run, done.changes.is_empty()) {
-            (true, _) => verbs[1],
-            (false, false) => verbs[0],
-            (false, true) => "unchanged",
-        };
-        println!(
-            "{verb} concept {} \"{}\"",
-            printable(&c.id),
-            printable(&c.label)
-        );
+    let summary = Summary {
+        noun: "concept",
+        id: &c.id,
+        label: &c.label,
+        verbs,
     };
-    mutated(
+    vocabulary_mutated(
         cli,
         dir,
         store,
-        storage::File::Vocabulary,
         output,
+        &summary,
         &done.changes,
-        text,
+        confirmation,
+    )
+}
+
+/// The end of `type add|remove`.
+fn type_mutated(
+    cli: &Cli,
+    dir: &Path,
+    store: &storage::Store,
+    done: &core::Mutation<types::Type>,
+    verbs: [&str; 2],
+    confirmation: Option<&Confirmation>,
+) -> Result<(), Error> {
+    let t = &done.value;
+    let output = TypeOutput {
+        schema_version: SCHEMA_VERSION,
+        type_: t,
+    };
+    let summary = Summary {
+        noun: "type",
+        id: &t.id,
+        label: &t.label,
+        verbs,
+    };
+    vocabulary_mutated(
+        cli,
+        dir,
+        store,
+        output,
+        &summary,
+        &done.changes,
         confirmation,
     )
 }
@@ -1021,6 +1212,20 @@ struct ListOutput<'a> {
     schema_version: u32,
     #[serde(flatten)]
     page: &'a concept::Page,
+}
+
+#[derive(Serialize)]
+struct TypeOutput<'a> {
+    schema_version: u32,
+    #[serde(rename = "type")]
+    type_: &'a types::Type,
+}
+
+#[derive(Serialize)]
+struct TypeListOutput<'a> {
+    schema_version: u32,
+    #[serde(flatten)]
+    page: &'a types::Page,
 }
 
 #[derive(Serialize)]

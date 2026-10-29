@@ -11,7 +11,7 @@
 //!       `broader` are Concept references, resolved as above; `Concept::broader` lists the
 //!       sorted ids; an unknown reference is `UNKNOWN_CONCEPT` and the store is unchanged.
 //!   `resource::add_all(&Context, &mut Store, &[FileFacts], title: Option<&str>,
-//!        tags: &[String], user_name: &str) -> Result<Mutation<AddedAll>, Error>`
+//!        types: &[String], tags: &[String], user_name: &str) -> Result<Mutation<AddedAll>, Error>`
 //!       `tags` apply to newly cataloged Resources only; every reference is resolved before
 //!       anything changes.
 //!   `resource::Edit { title: Option<String>, add_tags: Vec<String>, remove_tags: Vec<String> }`
@@ -126,6 +126,7 @@ mod goal {
             &mut store,
             &[facts("/a/new.txt")],
             Some("new"),
+            &[],
             &strings(&["ml", "Linked  DATA"]),
             "nate",
         )
@@ -162,6 +163,7 @@ mod goal {
             &mut store,
             &[facts(EXISTING_PATH)],
             None,
+            &[],
             &strings(&["semantic-web"]),
             "nate",
         )
@@ -182,6 +184,7 @@ mod goal {
             &mut store,
             &[facts("/a/one.txt"), facts("/a/two.txt")],
             None,
+            &[],
             &strings(&["ml", "nope"]),
             "nate",
         )
@@ -687,6 +690,7 @@ mod goal {
             &mut store,
             &[facts("/a/new.txt")],
             None,
+            &[],
             &strings(&["alpha", "zeta"]),
             "nate",
         )

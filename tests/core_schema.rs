@@ -43,6 +43,9 @@ mod goal {
                 "forget",
                 "schema",
                 "show",
+                "type add",
+                "type list",
+                "type remove",
                 "validate"
             ]
         );

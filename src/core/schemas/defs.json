@@ -89,6 +89,16 @@
     "required": ["id", "label"],
     "additionalProperties": false
   },
+  "type": {
+    "type": "object",
+    "properties": {
+      "id": {"type": "string"},
+      "label": {"type": "string"},
+      "parents": {"type": "array", "items": {"type": "string"}}
+    },
+    "required": ["id", "label", "parents"],
+    "additionalProperties": false
+  },
   "violation": {
     "type": "object",
     "properties": {
