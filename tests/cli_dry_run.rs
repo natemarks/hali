@@ -1007,9 +1007,10 @@ mod types {
             ],
         );
         assert_eq!(dry["added"][0]["types"], json!(["Memo", "Paper"]));
+        let subject = format!("<urn:uuid:{}>", dry["added"][0]["id"].as_str().unwrap());
         let type_adds = ops(&dry)
             .iter()
-            .filter(|(op, t)| *op == "add" && t.contains(RDF_TYPE))
+            .filter(|(op, t)| *op == "add" && t.starts_with(&subject) && t.contains(RDF_TYPE))
             .count();
         assert_eq!(type_adds, 3, "Resource, Memo, Paper: {dry}");
     }

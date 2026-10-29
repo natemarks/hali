@@ -76,6 +76,15 @@ mod goal {
         ctx_in("en")
     }
 
+    /// A Context with its own IdGen seed, for a second call against the same store.
+    fn ctx_seeded(seed: u64) -> Context {
+        Context::new(
+            "en",
+            Box::new(FixedClock::new(NOW)),
+            Box::new(SeededIdGen::new(seed)),
+        )
+    }
+
     fn load() -> Store {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/types");
         hali::storage::load(&dir).unwrap()
@@ -271,7 +280,10 @@ mod goal {
         assert_eq!(m.value, ty("Minute", "Minute", &["Memo"]));
         assert!(changes(&m).contains(&(Op::Add, tr("Minute", SUBCLASS, &format!("{H}Memo")))));
         assert_eq!(extensions(&store), ext, "extensions.ttl is never written");
-        assert!(!vocabulary_ttl(&store).contains("hali:Memo "));
+        assert!(
+            !vocabulary_ttl(&store).contains("\nhali:Memo "),
+            "Memo is not defined in vocabulary.ttl"
+        );
     }
 
     #[test]
@@ -593,7 +605,7 @@ mod goal {
         assert!(resources_ttl(&store).contains(&subject));
         // Untyped when no Type is given: just hali:Resource.
         let added = resource::add_all(
-            &ctx(),
+            &ctx_seeded(2),
             &mut store,
             &[facts("/a/plain.txt")],
             Some("plain"),
