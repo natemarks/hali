@@ -914,7 +914,6 @@ mod concept_manage {
 /// dry-run equality helper (spec §9.5, §14.3), over tests/fixtures/types, and the hand-written
 /// dry-run goldens tests/snapshots/cli_dry_run__type_{add,remove}_dry_run_json.snap. The real
 /// run of `type remove` gets `--yes`, as it has no terminal; a dry run ignores it.
-#[cfg(feature = "goal")]
 mod types {
     use super::{Env, fixture, json, support};
     use serde_json::{Value, json};

@@ -36,7 +36,6 @@
 //! r3 Note and tagged ml, r4 untyped, r5 Memo, r6 Loop2); extensions.ttl: Memo ⊑ Note (a Type
 //! only there), Draft (a Type only there, unused), a blank node ⊑ Ticket, `r4 a hali:Invoice`.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::resource::{self, Edit, FileFacts, Query};
     use hali::core::types::{self, Type};

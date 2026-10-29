@@ -141,7 +141,6 @@ mod goal {
         "cli_type__unknown_type_json_envelope",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_15: &[(&str, &str)] = &[
         ("cli_dry_run__type_add_dry_run_json", "type add"),
         ("cli_dry_run__type_remove_dry_run_json", "type remove"),
@@ -162,7 +161,6 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_16);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_14);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_17);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_15);
         rows
     }
@@ -200,7 +198,6 @@ mod goal {
             pending_17 = &[];
         }
         let mut pending_15: &[&str] = GOAL_SNAPS_15;
-        #[cfg(feature = "goal")]
         {
             pending_15 = &[];
         }
@@ -322,7 +319,6 @@ mod goal {
         assert!(goldens.len() >= 29, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 32, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 41, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 53, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
@@ -1084,7 +1080,6 @@ mod goal {
     }
 
     /// #15: what the `type add`, `type remove` and `type list` schemas accept and refuse.
-    #[cfg(feature = "goal")]
     #[test]
     fn type_schemas_accept_and_reject() {
         let record = || json!({"id": "Report", "label": "Report", "parents": ["Document"]});
@@ -1207,7 +1202,6 @@ mod goal {
     }
 
     /// #15: the `UNKNOWN_TYPE` branch of `error`.
-    #[cfg(feature = "goal")]
     #[test]
     fn unknown_type_branch() {
         let unknown = |details: Value| error("UNKNOWN_TYPE", details);
@@ -1259,7 +1253,6 @@ mod goal {
     }
 
     /// #15: `IN_USE` is either the Concept shape or the Type shape, each with every key.
-    #[cfg(feature = "goal")]
     #[test]
     fn in_use_type_branch() {
         let in_use = |details: Value| error("IN_USE", details);
@@ -1322,7 +1315,6 @@ mod goal {
     }
 
     /// #15: `LABEL_TAKEN` is either the Concept shape or the Type shape, each with every key.
-    #[cfg(feature = "goal")]
     #[test]
     fn label_taken_type_branch() {
         let taken = |details: Value| error("LABEL_TAKEN", details);

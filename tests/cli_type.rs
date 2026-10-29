@@ -25,7 +25,6 @@
 //! - the `CONFIRMATION_REQUIRED` message names the command as `type remove`; a declined
 //!   confirmation says `type remove was not confirmed; nothing was written`.
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::Value;
