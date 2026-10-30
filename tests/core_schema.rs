@@ -37,6 +37,7 @@ mod goal {
                 "concept remove",
                 "concept rename",
                 "concept show",
+                "describe",
                 "edit",
                 "error",
                 "find",

@@ -2,4 +2,4 @@
 source: tests/cli_schema.rs
 expression: out.stdout
 ---
-{"schema_version":1,"schemas":["add","concept add","concept edit","concept list","concept remove","concept rename","concept show","edit","error","find","forget","relate","relation add","relation list","relation remove","schema","show","type add","type list","type remove","unrelate","validate"]}
+{"schema_version":1,"schemas":["add","concept add","concept edit","concept list","concept remove","concept rename","concept show","describe","edit","error","find","forget","relate","relation add","relation list","relation remove","schema","show","type add","type list","type remove","unrelate","validate"]}

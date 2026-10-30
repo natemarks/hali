@@ -3,6 +3,7 @@
 
 pub mod concept;
 pub mod config;
+pub mod describe;
 pub mod relation;
 pub mod resource;
 pub mod schema;

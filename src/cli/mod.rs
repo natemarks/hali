@@ -2,7 +2,8 @@
 
 use crate::core::resource::{self, FileFacts, Record};
 use crate::core::{
-    self, Change, Clock, Context, Error, IdGen, Op, concept, relation, schema, types, validate,
+    self, Change, Clock, Context, Error, IdGen, Op, concept, describe, relation, schema, types,
+    validate,
 };
 use crate::{media_type, ontology, paths, storage};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -101,6 +102,12 @@ enum Command {
         /// A path or a full UUID
         #[arg(value_name = "B")]
         to: String,
+    },
+    /// Print the core ontology version, the store path, the counts and the vocabulary
+    Describe {
+        /// Only the version, the store path and the counts
+        #[arg(long)]
+        brief: bool,
     },
     /// Manage the relation kinds: the standard relations and their sub-properties
     #[command(subcommand)]
@@ -528,10 +535,10 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             let verb = if cli.dry_run { "would add" } else { "added" };
             let text = || {
                 for r in &added.value.added {
-                    println!("{verb} resource {}", describe(r));
+                    println!("{verb} resource {}", describe_record(r));
                 }
                 for r in &added.value.existing {
-                    println!("existing resource {}", describe(r));
+                    println!("existing resource {}", describe_record(r));
                 }
             };
             mutated(
@@ -606,11 +613,11 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 } else {
                     "forgot"
                 };
-                println!("{verb} resource {}", describe(record));
+                println!("{verb} resource {}", describe_record(record));
             };
             let confirmation = Confirmation {
                 command: "forget",
-                question: format!("forget resource {}", describe(record)),
+                question: format!("forget resource {}", describe_record(record)),
                 retry: format!(
                     "hali forget {}{} --yes",
                     core::shell_quote(&record.id),
@@ -1007,6 +1014,48 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             )?;
         }
         Command::Schema { .. } => unreachable!("handled before the store is loaded"),
+        Command::Describe { brief } => {
+            let described = describe::describe(&ctx, &store, &dir.to_string_lossy(), *brief);
+            if cli.json {
+                print_json(&DescribeOutput {
+                    schema_version: SCHEMA_VERSION,
+                    description: &described,
+                });
+            } else {
+                let c = &described.counts;
+                let lines = [
+                    ("core_version", described.core_version.clone()),
+                    ("store", described.store.clone()),
+                    ("resources", c.resources.to_string()),
+                    ("concepts", c.concepts.to_string()),
+                    ("types", c.types.to_string()),
+                    ("relation_kinds", c.relation_kinds.to_string()),
+                    ("relations", c.relations.to_string()),
+                ];
+                for (name, value) in lines {
+                    println!("{name}\t{}", printable(&value));
+                }
+                for c in described.concepts.iter().flatten() {
+                    println!("concept\t{}\t{}", printable(&c.id), printable(&c.label));
+                }
+                for t in described.types.iter().flatten() {
+                    println!(
+                        "type\t{}\t{}\t{}",
+                        printable(&t.id),
+                        printable(&t.label),
+                        printable(&t.parents.join(", "))
+                    );
+                }
+                for k in described.relation_kinds.iter().flatten() {
+                    println!(
+                        "relation_kind\t{}\t{}\t{}",
+                        printable(&k.id),
+                        printable(&k.label),
+                        printable(&k.parents.join(", "))
+                    );
+                }
+            }
+        }
         Command::Validate { limit, offset } => {
             let report = validate::validate(&store, *offset, *limit)?;
             if cli.json {
@@ -1083,7 +1132,7 @@ fn observe(record: &mut Record) {
 }
 
 /// `<id> "<title>" <path>`, safe to print.
-fn describe(record: &Record) -> String {
+fn describe_record(record: &Record) -> String {
     format!(
         "{} \"{}\" {}",
         printable(&record.id),
@@ -1468,6 +1517,13 @@ struct RelateOutput<'a> {
 struct RelationKindOutput<'a> {
     schema_version: u32,
     relation_kind: &'a relation::RelationKind,
+}
+
+#[derive(Serialize)]
+struct DescribeOutput<'a> {
+    schema_version: u32,
+    #[serde(flatten)]
+    description: &'a describe::Description,
 }
 
 #[derive(Serialize)]

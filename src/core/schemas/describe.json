@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hali describe --json",
+  "type": "object",
+  "anyOf": [
+    {
+      "properties": {
+        "schema_version": {"const": 1},
+        "core_version": {"type": "string"},
+        "store": {"type": "string"},
+        "counts": {
+          "type": "object",
+          "properties": {
+            "resources": {"type": "integer", "minimum": 0},
+            "concepts": {"type": "integer", "minimum": 0},
+            "types": {"type": "integer", "minimum": 0},
+            "relation_kinds": {"type": "integer", "minimum": 0},
+            "relations": {"type": "integer", "minimum": 0}
+          },
+          "required": ["resources", "concepts", "types", "relation_kinds", "relations"],
+          "additionalProperties": false
+        },
+        "concepts": {"type": "array", "items": {"$ref": "#/$defs/concept"}},
+        "types": {"type": "array", "items": {"$ref": "#/$defs/type"}},
+        "relation_kinds": {"type": "array", "items": {"$ref": "#/$defs/relation_kind"}}
+      },
+      "required": ["schema_version", "core_version", "store", "counts", "concepts", "types", "relation_kinds"],
+      "additionalProperties": false
+    },
+    {
+      "properties": {
+        "schema_version": {"const": 1},
+        "core_version": {"type": "string"},
+        "store": {"type": "string"},
+        "counts": {
+          "type": "object",
+          "properties": {
+            "resources": {"type": "integer", "minimum": 0},
+            "concepts": {"type": "integer", "minimum": 0},
+            "types": {"type": "integer", "minimum": 0},
+            "relation_kinds": {"type": "integer", "minimum": 0},
+            "relations": {"type": "integer", "minimum": 0}
+          },
+          "required": ["resources", "concepts", "types", "relation_kinds", "relations"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["schema_version", "core_version", "store", "counts"],
+      "additionalProperties": false
+    }
+  ]
+}

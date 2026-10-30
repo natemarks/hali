@@ -396,6 +396,19 @@ pub(crate) fn kinds(store: &Store) -> BTreeSet<NamedNode> {
     out
 }
 
+/// How many distinct triples (subject, predicate, object), in any graph, have a relation kind
+/// as predicate; a triple held in two graphs counts once.
+pub(crate) fn relation_count(store: &Store) -> usize {
+    let mut triples = HashSet::new();
+    for kind in kinds(store) {
+        for q in store.quads_for_pattern(None, Some(kind.as_ref()), None, None) {
+            let q = q.expect("reading the in-memory store");
+            triples.insert((q.subject, kind.clone(), q.object));
+        }
+    }
+    triples.len()
+}
+
 /// The subjects and objects `?r` that are linked to `?c`, in either direction, by a predicate
 /// that reaches `?v` through `rdfs:subPropertyOf*`, over every graph. `?c` and `?v` are bound
 /// with `substitute_variable`; the text is fixed.
