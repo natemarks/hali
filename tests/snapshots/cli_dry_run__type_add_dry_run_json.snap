@@ -1,0 +1,5 @@
+---
+source: tests/cli_dry_run.rs
+expression: out.stdout
+---
+{"schema_version":1,"type":{"id":"Report","label":"Report","parents":["Document"]},"dry_run":true,"changes":[{"op":"add","triple":"<https://w3id.org/hali#Report> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2002/07/owl#Class> ."},{"op":"add","triple":"<https://w3id.org/hali#Report> <http://www.w3.org/2000/01/rdf-schema#label> \"Report\"@en ."},{"op":"add","triple":"<https://w3id.org/hali#Report> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <https://w3id.org/hali#Document> ."}]}

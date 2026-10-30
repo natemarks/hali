@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hali type remove --json",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "type": {"$ref": "#/$defs/type"}
+      },
+      "required": ["schema_version", "type"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "type": {"$ref": "#/$defs/type"},
+        "dry_run": {"const": true},
+        "changes": {"type": "array", "items": {"$ref": "#/$defs/change"}}
+      },
+      "required": ["schema_version", "type", "dry_run", "changes"],
+      "additionalProperties": false
+    }
+  ]
+}

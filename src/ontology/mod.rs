@@ -77,6 +77,17 @@ pub mod foaf {
     pub const PRIMARY_TOPIC: &str = "http://xmlns.com/foaf/0.1/primaryTopic";
 }
 
+/// OWL terms.
+pub mod owl {
+    pub const CLASS: &str = "http://www.w3.org/2002/07/owl#Class";
+}
+
+/// RDF Schema terms.
+pub mod rdfs {
+    pub const SUB_CLASS_OF: &str = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
+    pub const LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
+}
+
 /// SKOS terms.
 pub mod skos {
     pub const CONCEPT: &str = "http://www.w3.org/2004/02/skos/core#Concept";

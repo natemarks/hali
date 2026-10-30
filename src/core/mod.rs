@@ -5,6 +5,7 @@ pub mod concept;
 pub mod config;
 pub mod resource;
 pub mod schema;
+pub mod types;
 pub mod validate;
 
 use crate::storage;
@@ -335,14 +336,47 @@ impl Error {
             "Untag the Resources (hali edit <ref> --remove-tag {id}) and unlink the narrower Concepts (hali concept edit <C> --remove-broader {id}), then retry.",
             id = shell_quote(concept)
         ));
-        let id = shell_quote(concept);
         err.suggested_command = Some(if tagged > 0 {
-            // A leading `-` would be read as a flag, so the value is attached with `=`.
-            let sep = if concept.starts_with('-') { '=' } else { ' ' };
-            format!("hali find --exact --tag{sep}{id}")
+            format!("hali find --exact {}", flag_value("--tag", concept))
         } else {
-            format!("hali concept show {id}")
+            format!("hali concept show {}", shell_quote(concept))
         });
+        err
+    }
+
+    /// A Type cannot be removed: `typed` subjects have it as `rdf:type` and `subtypes` other
+    /// subjects are `rdfs:subClassOf` it, in any graph.
+    pub fn type_in_use(id: &str, typed: usize, subtypes: usize) -> Error {
+        let mut err = Error::new(
+            "IN_USE",
+            1,
+            format!(
+                "Type {id} is in use: {typed} typed, parent of {subtypes} Types; nothing was written"
+            ),
+            json!({"type": id, "typed": typed, "subtypes": subtypes}),
+        )
+        .fix(&format!(
+            "Remove the Type from the Resources (hali edit <ref> {}) and remove its subtypes first (hali type remove <S>), then retry.",
+            flag_value("--remove-type", id)
+        ));
+        err.suggested_command = Some(if typed > 0 {
+            format!("hali find {}", flag_value("--type", id))
+        } else {
+            "hali type list".to_string()
+        });
+        err
+    }
+
+    /// A Type name is already a Type's id, or its label in the configured language.
+    pub fn type_label_taken(label: &str, language: &str, holder: &str) -> Error {
+        let mut err = Error::new(
+            "LABEL_TAKEN",
+            1,
+            format!("label \"{label}\"@{language} is already used by Type {holder}"),
+            json!({"label": label, "language": language, "type": holder}),
+        )
+        .fix("Use the existing Type, or choose a different name.");
+        err.suggested_command = Some("hali type list".to_string());
         err
     }
 
@@ -466,18 +500,43 @@ impl Error {
             json!({"concept": reference, "suggestions": suggestions}),
         )
         .fix("Use the slug or a label of an existing Concept, or add the Concept first.");
-        // A leading `-` would be read as a flag, so such a reference follows `--`.
-        let separator = if reference.starts_with('-') {
-            "-- "
-        } else {
-            ""
-        };
         err.suggested_command = Some(format!(
-            "hali --dry-run concept add {separator}{}",
-            shell_quote(reference)
+            "hali --dry-run concept add {}",
+            positional(reference)
         ));
         err
     }
+
+    /// A Type reference matches no Type. `suggestions` are the closest Types.
+    pub fn unknown_type(reference: &str, suggestions: &[resource::Tag]) -> Error {
+        let mut err = Error::new(
+            "UNKNOWN_TYPE",
+            1,
+            format!("no Type matches {reference}"),
+            json!({"type": reference, "suggestions": suggestions}),
+        )
+        .fix("Use the name of an existing Type, or add the Type first.");
+        err.suggested_command = Some(if types::valid_name(reference) {
+            format!("hali --dry-run type add {}", shell_quote(reference))
+        } else {
+            "hali type list".to_string()
+        });
+        err
+    }
+}
+
+/// `<flag> <value>` as a shell reads it back. A value that starts with `-` would be read as a
+/// flag, so it is attached with `=`.
+pub fn flag_value(flag: &str, value: &str) -> String {
+    let sep = if value.starts_with('-') { '=' } else { ' ' };
+    format!("{flag}{sep}{}", shell_quote(value))
+}
+
+/// A positional argument as a shell reads it back. One that starts with `-` would be read as a
+/// flag, so it follows `--`.
+pub fn positional(value: &str) -> String {
+    let separator = if value.starts_with('-') { "-- " } else { "" };
+    format!("{separator}{}", shell_quote(value))
 }
 
 /// A word as a POSIX shell reads it back: as is when it is made of `[A-Za-z0-9._-]` only,
@@ -538,4 +597,74 @@ pub fn normalise_label(label: &str) -> Result<String, Error> {
         return Err(Error::usage("a label needs at least one letter or digit"));
     }
     Ok(label)
+}
+
+/// How labels compare for uniqueness: whitespace-normalised and case-insensitive.
+pub(crate) fn fold(label: &str) -> String {
+    label
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// At most this many suggestions go into an unknown-reference error.
+const MAX_SUGGESTIONS: usize = 3;
+
+/// A Concept or Type an unknown reference could have meant: its id, every name it answers to
+/// (its id among them), and the label it is shown with.
+pub(crate) struct Candidate {
+    pub id: String,
+    pub names: Vec<String>,
+    pub label: String,
+}
+
+/// The candidates closest to the folded reference `key`: those with a folded name that contains
+/// it, or is within edit distance max(2, len/3) of it, by distance, label, then id.
+pub(crate) fn suggest(
+    candidates: impl IntoIterator<Item = Candidate>,
+    key: &str,
+) -> Vec<resource::Tag> {
+    let limit = (key.chars().count() / 3).max(2);
+    let mut found: Vec<(usize, resource::Tag)> = candidates
+        .into_iter()
+        .filter_map(|c| {
+            let names: Vec<String> = c.names.iter().map(|n| fold(n)).collect();
+            let distance = names.iter().map(|n| levenshtein(n, key)).min()?;
+            let close = distance <= limit || names.iter().any(|n| n.contains(key));
+            close.then_some((
+                distance,
+                resource::Tag {
+                    id: c.id,
+                    label: c.label,
+                },
+            ))
+        })
+        .collect();
+    found.sort_by(|(da, a), (db, b)| (da, &a.label, &a.id).cmp(&(db, &b.label, &b.id)));
+    found
+        .into_iter()
+        .take(MAX_SUGGESTIONS)
+        .map(|(_, t)| t)
+        .collect()
+}
+
+/// The edit distance between two strings, in characters.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = if ca == *cb {
+                diagonal
+            } else {
+                1 + diagonal.min(above).min(row[j])
+            };
+            diagonal = above;
+        }
+    }
+    row[b.len()]
 }

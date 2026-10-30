@@ -1,0 +1,5 @@
+---
+source: tests/cli_type.rs
+expression: out.stdout
+---
+{"schema_version":1,"results":[{"id":"Document","label":"Document","parents":[]},{"id":"Draft","label":"Draft","parents":[]},{"id":"Invoice","label":"Invoice","parents":[]},{"id":"Loop1","label":"Loop1","parents":["Loop2"]},{"id":"Loop2","label":"Loop2","parents":["Loop1"]},{"id":"Memo","label":"Memo","parents":["Note"]},{"id":"Note","label":"Note","parents":[]},{"id":"Paper","label":"Paper","parents":["Document"]},{"id":"Receipt","label":"Receipt","parents":[]},{"id":"Ticket","label":"Ticket","parents":[]}],"total":10,"truncated":false,"next_offset":null}

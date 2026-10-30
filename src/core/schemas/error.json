@@ -61,13 +61,26 @@
           "then": {
             "properties": {
               "details": {
-                "type": "object",
-                "properties": {
-                  "label": {"type": "string"},
-                  "language": {"type": "string"},
-                  "concept": {"type": "string"}
-                },
-                "required": ["label", "language", "concept"]
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "label": {"type": "string"},
+                      "language": {"type": "string"},
+                      "concept": {"type": "string"}
+                    },
+                    "required": ["label", "language", "concept"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "label": {"type": "string"},
+                      "language": {"type": "string"},
+                      "type": {"type": "string"}
+                    },
+                    "required": ["label", "language", "type"]
+                  }
+                ]
               }
             }
           }
@@ -77,13 +90,26 @@
           "then": {
             "properties": {
               "details": {
-                "type": "object",
-                "properties": {
-                  "concept": {"type": "string"},
-                  "tagged": {"type": "integer", "minimum": 0},
-                  "narrower": {"type": "integer", "minimum": 0}
-                },
-                "required": ["concept", "tagged", "narrower"]
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "concept": {"type": "string"},
+                      "tagged": {"type": "integer", "minimum": 0},
+                      "narrower": {"type": "integer", "minimum": 0}
+                    },
+                    "required": ["concept", "tagged", "narrower"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {"type": "string"},
+                      "typed": {"type": "integer", "minimum": 0},
+                      "subtypes": {"type": "integer", "minimum": 0}
+                    },
+                    "required": ["type", "typed", "subtypes"]
+                  }
+                ]
               }
             }
           }
@@ -162,6 +188,33 @@
                   }
                 },
                 "required": ["concept", "suggestions"]
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"rule": {"const": "UNKNOWN_TYPE"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "type": {"type": "string"},
+                  "suggestions": {
+                    "type": "array",
+                    "maxItems": 3,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {"type": "string"},
+                        "label": {"type": "string"}
+                      },
+                      "required": ["id", "label"],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": ["type", "suggestions"]
               }
             }
           }

@@ -1,0 +1,5 @@
+---
+source: tests/cli_type.rs
+expression: out.stdout
+---
+{"schema_version":1,"added":[{"id":"018bcfe5-6801-710a-adec-89025cc1beeb","path":"/TMP/files/notes.txt","title":"notes","media_type":"text/plain","editable":true,"missing":false,"stale":false,"types":["Memo","Paper"],"tags":[{"id":"ml","label":"ml"}],"byte_size":6,"modified":"2026-10-20T14:02:11Z"}],"existing":[]}

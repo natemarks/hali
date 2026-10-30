@@ -909,3 +909,185 @@ mod concept_manage {
         assert_eq!(dry["changes"], json!([]));
     }
 }
+
+/// #15: the new Type commands and `add --type` / `edit --add-type|--remove-type` under the
+/// dry-run equality helper (spec §9.5, §14.3), over tests/fixtures/types, and the hand-written
+/// dry-run goldens tests/snapshots/cli_dry_run__type_{add,remove}_dry_run_json.snap. The real
+/// run of `type remove` gets `--yes`, as it has no terminal; a dry run ignores it.
+mod types {
+    use super::{Env, fixture, json, support};
+    use serde_json::{Value, json};
+
+    const R1: &str = "0192f0c4-0000-7000-8000-000000000501";
+    const RDF_TYPE: &str = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>";
+
+    fn ops(dry: &Value) -> Vec<(&str, &str)> {
+        dry["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| (c["op"].as_str().unwrap(), c["triple"].as_str().unwrap()))
+            .collect()
+    }
+
+    /// The dry run through the real binary, as stdout bytes, for the golden.
+    fn dry_stdout(args: &[&str]) -> String {
+        let env = Env::with_fixture("types");
+        let before = env.state();
+        let mut argv = vec!["--json", "--dry-run"];
+        argv.extend_from_slice(args);
+        let out = env.run(argv);
+        assert_eq!(out.code, Some(0), "{}", out.stderr);
+        assert_eq!(out.stderr, "");
+        assert_eq!(env.state(), before, "a dry run writes nothing");
+        out.stdout
+    }
+
+    #[test]
+    fn type_add_dry_run_matches() {
+        let store = fixture("types");
+        let args = ["type", "add", "Report", "--parent", "Document"];
+        let dry = support::assert_dry_run_matches_real_run(Some(&store), &args);
+        assert_eq!(dry["type"]["id"], "Report");
+        assert_eq!(dry["type"]["parents"], json!(["Document"]));
+        assert_eq!(ops(&dry).len(), 3, "{dry}");
+        assert!(ops(&dry).iter().all(|(op, _)| *op == "add"), "{dry}");
+        insta::with_settings!({prepend_module_to_snapshot => false}, {
+            insta::assert_snapshot!("cli_dry_run__type_add_dry_run_json", dry_stdout(&args));
+        });
+
+        // Without a parent: the link goes to hali:Resource.
+        let dry =
+            support::assert_dry_run_matches_real_run(Some(&store), &["type", "add", "Report"]);
+        assert!(
+            ops(&dry)
+                .iter()
+                .any(|(_, t)| t.ends_with("<https://w3id.org/hali#Resource> .")),
+            "{dry}"
+        );
+    }
+
+    #[test]
+    fn type_remove_dry_run_matches() {
+        let store = fixture("types");
+        let args = ["type", "remove", "Receipt"];
+        let mut real_args = args.to_vec();
+        real_args.push("--yes");
+        let dry = support::assert_dry_run_matches_real_run(Some(&store), &real_args);
+        assert_eq!(dry["type"]["id"], "Receipt");
+        let listed = ops(&dry);
+        assert_eq!(listed.len(), 4, "{dry}");
+        assert!(listed.iter().all(|(op, _)| *op == "remove"), "{dry}");
+        insta::with_settings!({prepend_module_to_snapshot => false}, {
+            insta::assert_snapshot!("cli_dry_run__type_remove_dry_run_json", dry_stdout(&args));
+        });
+
+        // A Type that exists only in extensions.ttl: `changes` is `[]`.
+        let dry = support::assert_dry_run_matches_real_run(
+            Some(&store),
+            &["type", "remove", "Draft", "--yes"],
+        );
+        assert_eq!(dry["changes"], json!([]));
+    }
+
+    #[test]
+    fn add_type_dry_run_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = std::fs::canonicalize(dir.path()).unwrap().join("a.txt");
+        std::fs::write(&path, b"hello\n").unwrap();
+        let path = path.to_str().unwrap();
+        let store = fixture("types");
+
+        // By id and by label, with a tag: one `rdf:type` per Type, and hali:Resource too.
+        let dry = support::assert_dry_run_matches_real_run(
+            Some(&store),
+            &[
+                "add", path, "--type", "Paper", "--type", "memo", "--tag", "ml",
+            ],
+        );
+        assert_eq!(dry["added"][0]["types"], json!(["Memo", "Paper"]));
+        let subject = format!("<urn:uuid:{}>", dry["added"][0]["id"].as_str().unwrap());
+        let type_adds = ops(&dry)
+            .iter()
+            .filter(|(op, t)| *op == "add" && t.starts_with(&subject) && t.contains(RDF_TYPE))
+            .count();
+        assert_eq!(type_adds, 3, "Resource, Memo, Paper: {dry}");
+    }
+
+    #[test]
+    fn edit_types_dry_run_matches() {
+        let store = fixture("types");
+
+        // One Type out, one in: type remove, type add, modified remove and add.
+        let dry = support::assert_dry_run_matches_real_run(
+            Some(&store),
+            &["edit", R1, "--add-type", "Note", "--remove-type", "paper"],
+        );
+        assert_eq!(dry["resource"]["types"], json!(["Note"]));
+        assert_eq!(ops(&dry).len(), 4, "{dry}");
+        assert_eq!(
+            ops(&dry)
+                .iter()
+                .filter(|(_, t)| t.contains(RDF_TYPE))
+                .count(),
+            2,
+            "{dry}"
+        );
+
+        // No-ops: an asserted Type added, an unasserted one removed, one held only through a
+        // subclass, one asserted only in extensions.ttl: nothing to list.
+        for noop in [
+            vec!["edit", R1, "--add-type", "Paper"],
+            vec!["edit", R1, "--remove-type", "Note"],
+            vec!["edit", R1, "--remove-type", "Document"],
+            vec![
+                "edit",
+                "0192f0c4-0000-7000-8000-000000000504",
+                "--remove-type",
+                "Invoice",
+            ],
+        ] {
+            let dry = support::assert_dry_run_matches_real_run(Some(&store), &noop);
+            assert_eq!(dry["changes"], json!([]), "{noop:?}");
+        }
+    }
+
+    #[test]
+    fn type_list_dry_run_changes_nothing() {
+        for with_store in [true, false] {
+            let env = if with_store {
+                Env::with_fixture("types")
+            } else {
+                Env::new()
+            };
+            for args in [vec!["type", "list", "--json"], vec!["type", "list"]] {
+                let before = env.state();
+                let plain = env.run(&args);
+                let mut with_flag = args.clone();
+                with_flag.push("--dry-run");
+                let dry = env.run(&with_flag);
+                let mut flag_first = vec!["--dry-run"];
+                flag_first.extend(&args);
+                let dry_first = env.run(&flag_first);
+                let what = format!("{with_store} {args:?}");
+                // Usage (2) would mean the command does not exist.
+                assert!(
+                    matches!(plain.code, Some(0) | Some(1) | Some(3)),
+                    "{what}: {}",
+                    plain.stderr
+                );
+                if with_store {
+                    assert_eq!(plain.code, Some(0), "{what}: {}", plain.stderr);
+                }
+                assert_eq!(dry, plain, "{what}");
+                assert_eq!(dry_first, plain, "{what}");
+                if args.contains(&"--json") && plain.code == Some(0) {
+                    let value = json(&dry.stdout);
+                    assert!(value.get("dry_run").is_none(), "{what}");
+                    assert!(value.get("changes").is_none(), "{what}");
+                }
+                assert_eq!(env.state(), before, "{what}");
+            }
+        }
+    }
+}

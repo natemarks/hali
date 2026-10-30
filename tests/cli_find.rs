@@ -715,12 +715,13 @@ mod goal {
         assert_eq!(
             out.stdout,
             "{\"schema_version\":1,\"schemas\":[\"add\",\"concept add\",\"concept edit\",\
-             \"concept list\",\"concept remove\",\"concept rename\",\"concept show\",\"edit\",\"error\",\"find\",\"forget\",\"schema\",\"show\",\"validate\"]}\n"
+             \"concept list\",\"concept remove\",\"concept rename\",\"concept show\",\"edit\",\"error\",\"find\",\"forget\",\"schema\",\"show\",\
+             \"type add\",\"type list\",\"type remove\",\"validate\"]}\n"
         );
         let out = env.run(["schema"]);
         assert_eq!(
             out.stdout,
-            "add\nconcept add\nconcept edit\nconcept list\nconcept remove\nconcept rename\nconcept show\nedit\nerror\nfind\nforget\nschema\nshow\nvalidate\n"
+            "add\nconcept add\nconcept edit\nconcept list\nconcept remove\nconcept rename\nconcept show\nedit\nerror\nfind\nforget\nschema\nshow\ntype add\ntype list\ntype remove\nvalidate\n"
         );
     }
 

@@ -1,0 +1,5 @@
+---
+source: tests/cli_type.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"IN_USE","message":"Type Paper is in use: 1 typed, parent of 0 Types; nothing was written","details":{"type":"Paper","typed":1,"subtypes":0},"suggested_fix":"Remove the Type from the Resources (hali edit <ref> --remove-type Paper) and remove its subtypes first (hali type remove <S>), then retry.","suggested_command":"hali find --type Paper"}}

@@ -1,0 +1,5 @@
+---
+source: tests/cli_dry_run.rs
+expression: out.stdout
+---
+{"schema_version":1,"type":{"id":"Receipt","label":"Receipt","parents":[]},"dry_run":true,"changes":[{"op":"remove","triple":"<https://w3id.org/hali#Receipt> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2002/07/owl#Class> ."},{"op":"remove","triple":"<https://w3id.org/hali#Receipt> <http://www.w3.org/2000/01/rdf-schema#label> \"Receipt\"@en ."},{"op":"remove","triple":"<https://w3id.org/hali#Receipt> <http://www.w3.org/2000/01/rdf-schema#label> \"Reçu\"@fr ."},{"op":"remove","triple":"<https://w3id.org/hali#Receipt> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <https://w3id.org/hali#Resource> ."}]}
