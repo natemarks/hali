@@ -11,28 +11,39 @@ use std::time::SystemTime;
 /// The Resource of tests/fixtures/store.
 const STORED: &str = "0192f0c4-7b1e-7cc3-9a43-6c1d2e8f4b10";
 
-/// Valid argv (after the global flags) for every leaf subcommand, keyed by its path.
-/// Add a row here when you add a subcommand.
+/// Resources of tests/fixtures/relations: r3 annotates r1; nothing relates r5 to r2.
+const REL_R1: &str = "0192f0c4-0000-7000-8000-000000000701";
+const REL_R2: &str = "0192f0c4-0000-7000-8000-000000000702";
+const REL_R3: &str = "0192f0c4-0000-7000-8000-000000000703";
+const REL_R5: &str = "0192f0c4-0000-7000-8000-000000000705";
+
+/// Valid argv (after the global flags) for every leaf subcommand, keyed by its path, with the
+/// tests/fixtures directory the store is copied from. Add a row here when you add a subcommand.
 // One row per line: .goal/checks reads them by line.
 #[rustfmt::skip]
-const CASES: &[(&str, &[&str])] = &[
+const CASES: &[(&str, &str, &[&str])] = &[
     // Cargo.toml: a real file, relative to the package root the tests run in.
-    ("add", &["add", "Cargo.toml"]),
-    ("concept add", &["concept", "add", "guard probe"]),
-    ("concept edit", &["concept", "edit", "ml", "--add-alt", "guard probe"]),
-    ("concept list", &["concept", "list"]),
-    ("concept remove", &["concept", "remove", "a-first"]),
-    ("concept rename", &["concept", "rename", "ml", "guard probe"]),
-    ("concept show", &["concept", "show", "ml"]),
-    ("edit", &["edit", STORED, "--title", "guard probe"]),
-    ("find", &["find", "--limit", "1"]),
-    ("forget", &["forget", STORED]),
-    ("schema", &["schema"]),
-    ("show", &["show", STORED]),
-    ("type add", &["type", "add", "GuardProbe"]),
-    ("type list", &["type", "list"]),
-    ("type remove", &["type", "remove", "Paper"]),
-    ("validate", &["validate"]),
+    ("add", "store", &["add", "Cargo.toml"]),
+    ("concept add", "store", &["concept", "add", "guard probe"]),
+    ("concept edit", "store", &["concept", "edit", "ml", "--add-alt", "guard probe"]),
+    ("concept list", "store", &["concept", "list"]),
+    ("concept remove", "store", &["concept", "remove", "a-first"]),
+    ("concept rename", "store", &["concept", "rename", "ml", "guard probe"]),
+    ("concept show", "store", &["concept", "show", "ml"]),
+    ("edit", "store", &["edit", STORED, "--title", "guard probe"]),
+    ("find", "store", &["find", "--limit", "1"]),
+    ("forget", "store", &["forget", STORED]),
+    ("relate", "relations", &["relate", REL_R5, "annotates", REL_R2]),
+    ("relation add", "relations", &["relation", "add", "guard-probe", "--parent", "dcterms:relation"]),
+    ("relation list", "relations", &["relation", "list"]),
+    ("relation remove", "relations", &["relation", "remove", "excerptOf"]),
+    ("schema", "store", &["schema"]),
+    ("show", "store", &["show", STORED]),
+    ("type add", "store", &["type", "add", "GuardProbe"]),
+    ("type list", "store", &["type", "list"]),
+    ("type remove", "store", &["type", "remove", "Paper"]),
+    ("unrelate", "relations", &["unrelate", REL_R3, "annotates", REL_R1]),
+    ("validate", "store", &["validate"]),
 ];
 
 fn leaf_paths(cmd: &clap::Command, prefix: &str, out: &mut Vec<String>) {
@@ -77,7 +88,7 @@ fn snapshot(root: &Path) -> BTreeMap<String, Entry> {
     out
 }
 
-fn run_case(name: &str, argv: &[&str], with_store: bool, json: bool) {
+fn run_case(name: &str, fixture: &str, argv: &[&str], with_store: bool, json: bool) {
     let root = tempfile::tempdir().unwrap();
     let data = root.path().join("data");
     let cfg = root.path().join("cfg");
@@ -88,7 +99,7 @@ fn run_case(name: &str, argv: &[&str], with_store: bool, json: bool) {
     }
     if with_store {
         std::fs::create_dir_all(&data).unwrap();
-        for entry in std::fs::read_dir("tests/fixtures/store").unwrap() {
+        for entry in std::fs::read_dir(Path::new("tests/fixtures").join(fixture)).unwrap() {
             let entry = entry.unwrap();
             std::fs::copy(entry.path(), data.join(entry.file_name())).unwrap();
         }
@@ -128,12 +139,12 @@ fn every_subcommand_has_a_guard_case() {
     assert!(!leaves.is_empty());
     for leaf in &leaves {
         assert!(
-            CASES.iter().any(|(name, _)| name == leaf),
+            CASES.iter().any(|(name, _, _)| name == leaf),
             "subcommand `{leaf}` exists in the clap tree but has no entry in CASES in \
              tests/dry_run_guard.rs; add valid argv for it so the dry-run guard covers it"
         );
     }
-    for (name, _) in CASES {
+    for (name, _, _) in CASES {
         assert!(
             leaves.iter().any(|l| l == name),
             "CASES entry `{name}` is not a subcommand of the clap tree"
@@ -143,10 +154,10 @@ fn every_subcommand_has_a_guard_case() {
 
 #[test]
 fn dry_run_writes_nothing_for_every_subcommand() {
-    for (name, argv) in CASES {
+    for (name, fixture, argv) in CASES {
         for with_store in [false, true] {
             for json in [false, true] {
-                run_case(name, argv, with_store, json);
+                run_case(name, fixture, argv, with_store, json);
             }
         }
     }

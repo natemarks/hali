@@ -1,0 +1,5 @@
+---
+source: tests/cli_relation.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"IN_USE","message":"relation kind annotates is in use: 1 relations, parent of 1 relation kinds; nothing was written","details":{"relation":"annotates","used":1,"subproperties":1},"suggested_fix":"Remove the relations (hali unrelate <ref> annotates <ref>) and remove its sub-relations first (hali relation remove <S>), then retry.","suggested_command":"hali relation list"}}

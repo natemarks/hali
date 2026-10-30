@@ -1,0 +1,21 @@
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix hali: <https://w3id.org/hali#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# Hand-written extensions for the relation tests (#18). What the relation commands must read in
+# any graph, and never write, lives here:
+#   quotes: a relation kind that exists only here (a sub-property of dcterms:references);
+#   sketch: a relation kind that exists only here and that nothing uses (removing it is a no-op);
+#   a blank node that is a sub-property of hali:digestOf (it counts when removing digestOf);
+#   a comment on hali:excerptOf, which removing excerptOf from vocabulary.ttl must leave alone;
+#   r5 quotes r3: an inbound relation of r3 that only this file holds.
+hali:quotes a owl:ObjectProperty ;
+    rdfs:label "quotes"@en ;
+    rdfs:subPropertyOf dcterms:references .
+hali:sketch a owl:ObjectProperty ;
+    rdfs:label "sketch"@en ;
+    rdfs:subPropertyOf dcterms:isPartOf .
+[] rdfs:subPropertyOf hali:digestOf .
+hali:excerptOf rdfs:comment "kept in extensions"@en .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000705> hali:quotes <urn:uuid:0192f0c4-0000-7000-8000-000000000703> .

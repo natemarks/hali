@@ -1,0 +1,5 @@
+---
+source: tests/cli_relation.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"CONFIRMATION_REQUIRED","message":"relation remove needs confirmation, but stdin or stderr is not a terminal; nothing was written","details":{"command":"relation remove","declined":false},"suggested_fix":"Run it again with --yes to confirm, or with --dry-run to see what it would change.","suggested_command":"hali relation remove excerptOf --yes"}}

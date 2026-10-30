@@ -43,6 +43,37 @@
     "required": ["id", "label", "alt_labels", "broader"],
     "additionalProperties": false
   },
+  "related": {
+    "type": "object",
+    "properties": {
+      "direction": {"enum": ["out", "in"]},
+      "relation": {"type": "string"},
+      "resource": {"$ref": "#/$defs/resource"}
+    },
+    "required": ["direction", "relation", "resource"],
+    "additionalProperties": false
+  },
+  "relation": {
+    "type": "object",
+    "properties": {
+      "from": {"type": "string"},
+      "relation": {"type": "string"},
+      "to": {"type": "string"}
+    },
+    "required": ["from", "relation", "to"],
+    "additionalProperties": false
+  },
+  "relation_kind": {
+    "type": "object",
+    "properties": {
+      "id": {"type": "string"},
+      "label": {"type": "string"},
+      "parents": {"type": "array", "items": {"type": "string"}},
+      "standard": {"type": "boolean"}
+    },
+    "required": ["id", "label", "parents", "standard"],
+    "additionalProperties": false
+  },
   "resource": {
     "type": "object",
     "properties": {

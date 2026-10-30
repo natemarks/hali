@@ -1,0 +1,5 @@
+---
+source: tests/cli_relation.rs
+expression: out.stdout
+---
+{"schema_version":1,"relation_kind":{"id":"excerptOf","label":"excerpt of","parents":["prov:wasDerivedFrom"],"standard":false},"dry_run":true,"changes":[{"op":"remove","triple":"<https://w3id.org/hali#excerptOf> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2002/07/owl#ObjectProperty> ."},{"op":"remove","triple":"<https://w3id.org/hali#excerptOf> <http://www.w3.org/2000/01/rdf-schema#label> \"excerpt of\"@en ."},{"op":"remove","triple":"<https://w3id.org/hali#excerptOf> <http://www.w3.org/2000/01/rdf-schema#subPropertyOf> <http://www.w3.org/ns/prov#wasDerivedFrom> ."}]}

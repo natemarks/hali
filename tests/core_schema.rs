@@ -41,11 +41,16 @@ mod goal {
                 "error",
                 "find",
                 "forget",
+                "relate",
+                "relation add",
+                "relation list",
+                "relation remove",
                 "schema",
                 "show",
                 "type add",
                 "type list",
                 "type remove",
+                "unrelate",
                 "validate"
             ]
         );

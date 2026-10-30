@@ -215,7 +215,7 @@ mod goal {
         // R2: a format node R3 still uses, an inbound relation from R3, and a catalog record.
         let env = Env::new();
         let before = env.state();
-        let out = env.run(["--json", "--dry-run", "forget", R2]);
+        let out = env.run(["--json", "--dry-run", "forget", R2, "--force"]);
         assert_eq!(out.code, Some(0), "{}", out.stderr);
         assert_eq!(out.stderr, "");
         insta::with_settings!({prepend_module_to_snapshot => false}, {
@@ -515,7 +515,7 @@ mod goal {
     #[test]
     fn forget_text_summaries() {
         let env = Env::new();
-        let out = env.run(["--dry-run", "forget", R2]);
+        let out = env.run(["--dry-run", "forget", R2, "--force"]);
         assert_eq!(out.code, Some(0), "{}", out.stderr);
         assert_eq!(out.stderr, "note: dry run; nothing was written\n");
         let lines: Vec<&str> = out.stdout.lines().collect();
@@ -528,7 +528,7 @@ mod goal {
         assert!(lines[1..].iter().all(|l| l.starts_with("- <")), "{lines:?}");
         assert!(lines[1..].windows(2).all(|w| w[0] < w[1]), "{lines:?}");
 
-        let out = env.run(["forget", R2, "--yes"]);
+        let out = env.run(["forget", R2, "--force", "--yes"]);
         assert_eq!(out.code, Some(0), "{}", out.stderr);
         assert_eq!(
             out.stdout,
@@ -606,7 +606,7 @@ mod goal {
     #[test]
     fn last_user_of_a_format_drops_its_node() {
         let env = Env::new();
-        ok(&env.run(["--json", "forget", R2, "--yes"]));
+        ok(&env.run(["--json", "forget", R2, "--force", "--yes"]));
         assert!(
             env.resources_ttl().contains("x-forget"),
             "R3 still uses the format"
@@ -707,7 +707,7 @@ mod goal {
         let env = Env::new();
         let before = snapshot_files(&env);
         for id in [R1, R2, R3] {
-            ok(&env.run(["--json", "forget", id, "--yes"]));
+            ok(&env.run(["--json", "forget", id, "--force", "--yes"]));
         }
         assert_eq!(snapshot_files(&env), before);
         // Four entries: the directory and the three files (bytes, size, mtime to the
@@ -727,7 +727,7 @@ mod goal {
         let _restore = Restore(dir.clone());
         let before = snapshot_files(&env);
         for id in [R1, R2, R3] {
-            let v = ok(&env.run(["--json", "forget", id, "--yes"]));
+            let v = ok(&env.run(["--json", "forget", id, "--force", "--yes"]));
             assert_eq!(v["resource"]["id"], id);
         }
         assert_eq!(snapshot_files(&env), before);
@@ -747,7 +747,7 @@ mod goal {
         assert_eq!(v["resource"]["stale"], false);
 
         // By path, though nothing exists there any more.
-        let v = ok(&env.run(["--json", "forget", &env.file("two.txt"), "--yes"]));
+        let v = ok(&env.run(["--json", "forget", &env.file("two.txt"), "--force", "--yes"]));
         assert_eq!(v["resource"]["id"], R2);
         assert_eq!(v["resource"]["missing"], true);
 

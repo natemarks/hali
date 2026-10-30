@@ -1,6 +1,7 @@
 @prefix dcat: <http://www.w3.org/ns/dcat#> .
 @prefix dcterms: <http://purl.org/dc/terms/> .
 @prefix hali: <https://w3id.org/hali#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
 @prefix spdx: <http://spdx.org/rdf/terms#> .
@@ -40,8 +41,12 @@ SELECT $this ?value ?label WHERE {
   FILTER (LCASE(REPLACE(REPLACE(STR(?label), "\\\\s+", " "), "^ | $", "")) = ?key && LCASE(LANG(?label)) = ?lg) }""" .
 
 # A Resource (spec §2.1, §2.7): exactly one title, downloadURL, media type, checksum and size.
+# A Resource is an IRI (a urn:uuid), never a blank node. A SHACL Core constraint, so it also
+# reports the blank-node Resources that the SHACL-SPARQL shapes skip (see ontology/shacl.rs).
 hali:ResourceShape a sh:NodeShape ;
     sh:targetClass hali:Resource ;
+    sh:nodeKind sh:IRI ;
+    sh:message "A Resource is an IRI, not a blank node"@en ;
     sh:property hali:ResourceTitleShape , hali:ResourceDownloadURLShape ,
         hali:ResourceChecksumShape , hali:ResourceByteSizeShape .
 
@@ -103,3 +108,34 @@ PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 SELECT $this ?value WHERE {
   $this dcterms:subject ?value .
   FILTER NOT EXISTS { ?value a skos:Concept ; skos:inScheme <https://w3id.org/hali#topics> } }""" .
+
+# The object of every relation (a triple whose predicate reaches a standard relation through
+# rdfs:subPropertyOf*) is a hali:Resource (spec §2.4, §2.7). The focus node holds the relation.
+hali:RelationTargetShape a sh:NodeShape ;
+    sh:targetClass hali:Resource ;
+    sh:sparql hali:RelationTargetConstraint .
+
+hali:RelationTargetConstraint a sh:SPARQLConstraint ;
+    sh:message "A relation must point at a hali:Resource"@en ;
+    sh:select """PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+SELECT $this ?value WHERE {
+  $this ?p ?value .
+  FILTER EXISTS { ?p rdfs:subPropertyOf* ?std .
+    VALUES ?std { <http://purl.org/dc/terms/relation> <http://purl.org/dc/terms/isPartOf>
+      <http://purl.org/dc/terms/references> <http://www.w3.org/ns/prov#wasDerivedFrom> } }
+  FILTER NOT EXISTS { ?value a <https://w3id.org/hali#Resource> } }""" .
+
+# A relation kind in the hali: namespace reaches a standard relation through
+# rdfs:subPropertyOf+ (spec §2.4, §2.7). Alignment properties outside hali: are not constrained.
+hali:RelationParentShape a sh:NodeShape ;
+    sh:targetClass owl:ObjectProperty ;
+    sh:sparql hali:RelationParentConstraint .
+
+hali:RelationParentConstraint a sh:SPARQLConstraint ;
+    sh:message "A hali: relation kind must be a sub-property of a standard relation"@en ;
+    sh:select """PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+SELECT $this WHERE {
+  FILTER (STRSTARTS(STR($this), "https://w3id.org/hali#"))
+  FILTER NOT EXISTS { $this rdfs:subPropertyOf+ ?std .
+    VALUES ?std { <http://purl.org/dc/terms/relation> <http://purl.org/dc/terms/isPartOf>
+      <http://purl.org/dc/terms/references> <http://www.w3.org/ns/prov#wasDerivedFrom> } } }""" .

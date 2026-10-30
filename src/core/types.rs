@@ -1,7 +1,7 @@
 //! Types (spec §2.2): the `owl:Class`es under `hali:Resource`. `type add`, `type list`,
 //! `type remove`, and the resolution of Type references (§9.2).
 
-use super::{Candidate, Context, Error, Mutation, apply, fold, insert_all, validate};
+use super::{Candidate, Context, Error, Mutation, apply, fold, insert_all, is_used, validate};
 use crate::ontology::{HALI, RESOURCE, owl, rdfs};
 use crate::storage::{File, Store};
 use oxigraph::model::vocab::rdf;
@@ -325,22 +325,6 @@ fn subjects(
         )
         .map(|q| q.expect("reading the in-memory store").subject)
         .collect()
-}
-
-/// Whether an IRI already appears in any position of any graph.
-fn is_used(store: &Store, iri: &NamedNode) -> bool {
-    store
-        .quads_for_pattern(Some(iri.as_ref().into()), None, None, None)
-        .next()
-        .is_some()
-        || store
-            .quads_for_pattern(None, Some(iri.as_ref()), None, None)
-            .next()
-            .is_some()
-        || store
-            .quads_for_pattern(None, None, Some(TermRef::from(iri.as_ref())), None)
-            .next()
-            .is_some()
 }
 
 /// A Type's id: its local name in `hali:`, else its whole IRI.

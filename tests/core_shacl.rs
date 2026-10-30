@@ -374,10 +374,12 @@ fn conforming_fixtures_have_no_violations() {
 }
 
 /// The shapes that can appear in a result, with a fixture that violates each.
-const SHAPE_FIXTURES: [(&str, &str); 9] = [
+const SHAPE_FIXTURES: [(&str, &str); 11] = [
     ("ConceptInSchemeShape", "shacl/not-in-scheme"),
     ("ConceptPrefLabelShape", "shacl/no-pref-label"),
     ("LabelUniqueShape", "shacl/duplicate-label"),
+    ("RelationParentShape", "shacl/relation-kind-no-parent"),
+    ("RelationTargetShape", "shacl/relation-target-not-resource"),
     ("ResourceByteSizeShape", "shacl/resource-negative-byte-size"),
     ("ResourceChecksumShape", "shacl/resource-two-checksums"),
     (

@@ -1,0 +1,5 @@
+---
+source: tests/cli_relation.rs
+expression: out.stdout
+---
+{"schema_version":1,"relation_kind":{"id":"cites","label":"cites","parents":["dcterms:references"],"standard":false},"dry_run":true,"changes":[{"op":"add","triple":"<https://w3id.org/hali#cites> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2002/07/owl#ObjectProperty> ."},{"op":"add","triple":"<https://w3id.org/hali#cites> <http://www.w3.org/2000/01/rdf-schema#label> \"cites\"@en ."},{"op":"add","triple":"<https://w3id.org/hali#cites> <http://www.w3.org/2000/01/rdf-schema#subPropertyOf> <http://purl.org/dc/terms/references> ."}]}

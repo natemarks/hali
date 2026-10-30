@@ -1,4 +1,5 @@
 @prefix dcat: <http://www.w3.org/ns/dcat#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
 @prefix hali: <https://w3id.org/hali#> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
@@ -11,3 +12,18 @@
 hali:Resource a owl:Class ;
     rdfs:label "Resource"@en ;
     rdfs:subClassOf dcat:Distribution , prov:Entity .
+
+# The standard relations (spec §2.4). isPartOf and references are under relation, as DCMI states.
+dcterms:relation a owl:ObjectProperty ;
+    rdfs:label "relation"@en .
+
+dcterms:isPartOf a owl:ObjectProperty ;
+    rdfs:label "is part of"@en ;
+    rdfs:subPropertyOf dcterms:relation .
+
+dcterms:references a owl:ObjectProperty ;
+    rdfs:label "references"@en ;
+    rdfs:subPropertyOf dcterms:relation .
+
+prov:wasDerivedFrom a owl:ObjectProperty ;
+    rdfs:label "was derived from"@en .

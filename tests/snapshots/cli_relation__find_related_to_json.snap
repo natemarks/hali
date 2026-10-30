@@ -1,0 +1,5 @@
+---
+source: tests/cli_relation.rs
+expression: out.stdout
+---
+{"schema_version":1,"results":[{"id":"0192f0c4-0000-7000-8000-000000000702","path":"/fixtures/relations/r2.txt","title":"r2","media_type":"text/plain","editable":true,"missing":true,"stale":false,"types":[],"tags":[],"byte_size":6,"modified":"2026-10-20T14:02:11Z"},{"id":"0192f0c4-0000-7000-8000-000000000703","path":"/fixtures/relations/r3.txt","title":"r3","media_type":"text/plain","editable":true,"missing":true,"stale":false,"types":[],"tags":[{"id":"ml","label":"ml"}],"byte_size":6,"modified":"2026-10-20T14:02:11Z"},{"id":"0192f0c4-0000-7000-8000-000000000704","path":"/fixtures/relations/r4.txt","title":"r4","media_type":"text/plain","editable":true,"missing":true,"stale":false,"types":["Note"],"tags":[{"id":"ml","label":"ml"}],"byte_size":6,"modified":"2026-10-20T14:02:11Z"}],"total":3,"truncated":false,"next_offset":null}

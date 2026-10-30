@@ -1,0 +1,5 @@
+---
+source: tests/cli_relation.rs
+expression: out.stdout
+---
+{"schema_version":1,"relation":{"from":"0192f0c4-0000-7000-8000-000000000703","relation":"annotates","to":"0192f0c4-0000-7000-8000-000000000701"},"dry_run":true,"changes":[{"op":"add","triple":"<urn:uuid:0192f0c4-0000-7000-8000-000000000713> <http://purl.org/dc/terms/modified> \"2026-10-24T09:30:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."},{"op":"remove","triple":"<urn:uuid:0192f0c4-0000-7000-8000-000000000703> <https://w3id.org/hali#annotates> <urn:uuid:0192f0c4-0000-7000-8000-000000000701> ."},{"op":"remove","triple":"<urn:uuid:0192f0c4-0000-7000-8000-000000000713> <http://purl.org/dc/terms/modified> \"2026-10-21T08:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."}]}

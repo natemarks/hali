@@ -1,0 +1,6 @@
+@prefix hali: <https://w3id.org/hali#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# A cyclic subclass chain, only here: A ⊑ B ⊑ A ⊑ hali:Resource.
+<http://example.org/A> rdfs:subClassOf <http://example.org/B> , hali:Resource .
+<http://example.org/B> rdfs:subClassOf <http://example.org/A> .

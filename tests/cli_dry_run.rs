@@ -764,9 +764,17 @@ mod forget {
     #[test]
     fn forget_dry_run_matches() {
         let store = fixture("forget");
-        for (id, title) in [(R1, "one doc"), (R2, "two doc"), (R3, "three doc")] {
-            let dry =
-                support::assert_dry_run_matches_real_run(Some(&store), &["forget", id, "--yes"]);
+        // R3 relates to R2, so R2 is forgotten with --force.
+        for (id, title, force) in [
+            (R1, "one doc", false),
+            (R2, "two doc", true),
+            (R3, "three doc", false),
+        ] {
+            let mut args = vec!["forget", id, "--yes"];
+            if force {
+                args.push("--force");
+            }
+            let dry = support::assert_dry_run_matches_real_run(Some(&store), &args);
             assert_eq!(dry["resource"]["id"], id);
             assert_eq!(dry["resource"]["title"], title);
             // Resource, checksum node and catalog record: 15 triples each (R2's include R3's
@@ -782,7 +790,10 @@ mod forget {
         }
 
         // R2's inbound triple from R3 is listed, and the format node (R3 still uses it) is not.
-        let dry = support::assert_dry_run_matches_real_run(Some(&store), &["forget", R2, "--yes"]);
+        let dry = support::assert_dry_run_matches_real_run(
+            Some(&store),
+            &["forget", R2, "--force", "--yes"],
+        );
         let removed = removes(&dry);
         assert!(removed.iter().any(|t| t.starts_with(&format!(
             "<urn:uuid:{R3}> <http://purl.org/dc/terms/relation> <urn:uuid:{R2}>"

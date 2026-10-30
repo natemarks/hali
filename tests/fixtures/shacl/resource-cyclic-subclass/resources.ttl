@@ -1,0 +1,14 @@
+@prefix dcat: <http://www.w3.org/ns/dcat#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix spdx: <http://spdx.org/rdf/terms#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# W is a Resource only through the cyclic chain in extensions.ttl, and has no media type.
+<urn:uuid:0192f0c4-0000-7000-8000-000000000a04> a <http://example.org/B> ;
+    dcterms:title "w" ;
+    dcat:downloadURL <file:///fixtures/shacl/w.txt> ;
+    dcat:byteSize 6 ;
+    dcterms:modified "2026-10-20T14:02:11Z"^^xsd:dateTime ;
+    spdx:checksum <urn:uuid:0192f0c4-0000-7000-8000-000000000a04#sha256> .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000a04#sha256> spdx:algorithm spdx:checksumAlgorithm_sha256 ;
+    spdx:checksumValue "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"^^xsd:hexBinary .

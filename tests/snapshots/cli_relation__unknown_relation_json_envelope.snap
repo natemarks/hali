@@ -1,0 +1,5 @@
+---
+source: tests/cli_relation.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"UNKNOWN_RELATION","message":"no relation kind matches annotate","details":{"relation":"annotate","suggestions":[{"id":"annotates","label":"annotates"}]},"suggested_fix":"Use an existing relation kind (hali relation list), or add one first.","suggested_command":"hali --dry-run relation add annotate --parent dcterms:relation"}}
