@@ -176,7 +176,6 @@ mod goal {
         "cli_relation__unrelate_json",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_18: &[(&str, &str)] = &[
         ("cli_dry_run__relate_dry_run_json", "relate"),
         ("cli_dry_run__relation_add_dry_run_json", "relation add"),
@@ -205,7 +204,6 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_14);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_17);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_15);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_18);
         rows
     }
@@ -247,7 +245,6 @@ mod goal {
             pending_15 = &[];
         }
         let mut pending_18: &[&str] = GOAL_SNAPS_18;
-        #[cfg(feature = "goal")]
         {
             pending_18 = &[];
         }
@@ -371,7 +368,6 @@ mod goal {
         assert!(goldens.len() >= 32, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 41, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 53, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 70, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
@@ -1407,7 +1403,6 @@ mod goal {
 
     /// #18: what the `relate`, `unrelate` and `relation add|list|remove` schemas accept and
     /// refuse.
-    #[cfg(feature = "goal")]
     #[test]
     fn relation_schemas_accept_and_reject() {
         let change = json!({"op": "add", "triple": "<a:b> <a:c> <a:d> ."});
@@ -1596,7 +1591,6 @@ mod goal {
     }
 
     /// #18: the `relations` of `show` are `{direction, relation, resource}` entries, strictly.
-    #[cfg(feature = "goal")]
     #[test]
     fn show_relations_items_strict() {
         let entry = |direction: &str| json!({"direction": direction, "relation": "dcterms:isPartOf", "resource": record()});
@@ -1671,7 +1665,6 @@ mod goal {
     }
 
     /// #18: the `UNKNOWN_RELATION` branch of `error`.
-    #[cfg(feature = "goal")]
     #[test]
     fn unknown_relation_branch() {
         let unknown = |details: Value| error("UNKNOWN_RELATION", details);
@@ -1730,7 +1723,6 @@ mod goal {
     }
 
     /// #18: the `FORGET_BLOCKED_BY_RELATIONS` branch of `error`.
-    #[cfg(feature = "goal")]
     #[test]
     fn forget_blocked_branch() {
         let blocked = |details: Value| error("FORGET_BLOCKED_BY_RELATIONS", details);
@@ -1783,7 +1775,6 @@ mod goal {
     }
 
     /// #18: `IN_USE` is the Concept, the Type or the relation shape, each with every key.
-    #[cfg(feature = "goal")]
     #[test]
     fn in_use_relation_branch() {
         let in_use = |details: Value| error("IN_USE", details);
@@ -1864,7 +1855,6 @@ mod goal {
     }
 
     /// #18: `LABEL_TAKEN` is the Concept, the Type or the relation shape, each with every key.
-    #[cfg(feature = "goal")]
     #[test]
     fn label_taken_relation_branch() {
         let taken = |details: Value| error("LABEL_TAKEN", details);

@@ -16,7 +16,6 @@
 //! Fixtures sit in tests/fixtures/shacl/relation-*. X is `urn:uuid:…0a01` and Y `…0a02`, both
 //! complete Resources; the node `…0a99` is no Resource at all.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::validate::validate;
     use std::path::Path;

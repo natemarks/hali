@@ -37,10 +37,8 @@
 //! - text summaries: `related|would relate|unchanged <A> <relation id> <B>` and
 //!   `unrelated|would unrelate|unchanged …`, ids in full.
 
-#[cfg(feature = "goal")]
 mod support;
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::Value;

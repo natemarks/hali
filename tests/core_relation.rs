@@ -65,7 +65,6 @@
 //! `hali:digestOf`; a comment on `hali:excerptOf`.
 //! The context's ids are not used by any operation here, so one `ctx()` per call is enough.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::relation::{self, Link, RelationKind};
     use hali::core::resource::{self, Query};
