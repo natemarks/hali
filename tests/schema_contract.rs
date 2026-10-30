@@ -202,7 +202,6 @@ mod goal {
         "cli_describe__describe_json_empty",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_19: &[(&str, &str)] = &[
         ("cli_describe__describe_brief_json", "describe"),
         ("cli_describe__describe_json", "describe"),
@@ -220,7 +219,6 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_17);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_15);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_18);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_19);
         rows
     }
@@ -266,7 +264,6 @@ mod goal {
             pending_18 = &[];
         }
         let mut pending_19: &[&str] = GOAL_SNAPS_19;
-        #[cfg(feature = "goal")]
         {
             pending_19 = &[];
         }
@@ -392,7 +389,6 @@ mod goal {
         assert!(goldens.len() >= 41, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 53, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 70, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 73, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
@@ -1428,7 +1424,6 @@ mod goal {
 
     /// #19: what the `describe` schema accepts and refuses: a full and a brief branch, every
     /// key required, nothing else allowed.
-    #[cfg(feature = "goal")]
     #[test]
     fn describe_schema_accepts_and_rejects() {
         let counts = || json!({"resources": 1, "concepts": 1, "types": 1, "relation_kinds": 1, "relations": 0});

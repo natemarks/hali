@@ -27,7 +27,6 @@
 //! list of tests/core_schema.rs and the snapshot tests/snapshots/cli_schema__schema_list_json.snap
 //! to include `describe`; the test `schema_lists_describe` below covers the new list exactly.
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::{Value, json};

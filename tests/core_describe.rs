@@ -24,7 +24,6 @@
 //! `ml`, Type `Note`, 10 relation kinds (2 only in extensions.ttl) and 6 relation triples (1
 //! only in extensions.ttl). No operation here mints an id.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::describe::{Counts, Description, describe};
     use hali::core::relation::{self, RelationKind};
