@@ -41,8 +41,12 @@ SELECT $this ?value ?label WHERE {
   FILTER (LCASE(REPLACE(REPLACE(STR(?label), "\\\\s+", " "), "^ | $", "")) = ?key && LCASE(LANG(?label)) = ?lg) }""" .
 
 # A Resource (spec §2.1, §2.7): exactly one title, downloadURL, media type, checksum and size.
+# A Resource is an IRI (a urn:uuid), never a blank node. A SHACL Core constraint, so it also
+# reports the blank-node Resources that the SHACL-SPARQL shapes skip (see ontology/shacl.rs).
 hali:ResourceShape a sh:NodeShape ;
     sh:targetClass hali:Resource ;
+    sh:nodeKind sh:IRI ;
+    sh:message "A Resource is an IRI, not a blank node"@en ;
     sh:property hali:ResourceTitleShape , hali:ResourceDownloadURLShape ,
         hali:ResourceChecksumShape , hali:ResourceByteSizeShape .
 

@@ -134,10 +134,43 @@ mod goal {
         assert!(report.conforms, "{:?}", report.results);
     }
 
+    // A blank-node Resource has no urn:uuid IRI (spec §2.1): the SHACL-SPARQL shapes skip it, and
+    // hali:ResourceShape's sh:nodeKind sh:IRI (SHACL Core) reports it instead of SHAPES_INVALID.
     #[test]
-    fn a_blank_node_resource_does_not_break_validation() {
+    fn a_blank_node_resource_is_reported_not_skipped() {
         let report = report("relation-blank-resource");
-        assert!(report.conforms, "{:?}", report.results);
+        assert!(!report.conforms);
+        assert_eq!(report.total, 1, "{:?}", report.results);
+        let v = &report.results[0];
+        assert!(v.focus_node.starts_with("_:"), "{}", v.focus_node);
+        assert_eq!(
+            v.shape.as_deref(),
+            Some("https://w3id.org/hali#ResourceShape")
+        );
+        assert_eq!(v.path, None);
+        assert_eq!(
+            v.constraint,
+            "http://www.w3.org/ns/shacl#NodeKindConstraintComponent"
+        );
+        assert_eq!(v.severity, "Violation");
+    }
+
+    // A cyclic subclass chain, in extensions.ttl only (A ⊑ B ⊑ A ⊑ hali:Resource): validation
+    // terminates, and an IRI Resource typed B with no media type is reported once.
+    #[test]
+    fn a_cyclic_subclass_chain_in_extensions_terminates() {
+        let report = report("resource-cyclic-subclass");
+        assert_eq!(report.total, 1, "{:?}", report.results);
+        let v = &report.results[0];
+        assert_eq!(
+            v.focus_node,
+            "<urn:uuid:0192f0c4-0000-7000-8000-000000000a04>"
+        );
+        assert_eq!(
+            v.shape.as_deref(),
+            Some("https://w3id.org/hali#ResourceMediaTypeShape")
+        );
+        assert_eq!(v.severity, "Violation");
     }
 
     #[test]

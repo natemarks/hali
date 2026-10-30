@@ -170,6 +170,15 @@ fn refuse(store: &Store) -> Result<(), ShapesInvalid> {
 /// invalid SPARQL. So each `sh:targetClass C` of a core shape with `sh:sparql` is handed to rudof
 /// as one `sh:targetNode` per IRI instance of `C` in the data: blank nodes are never its focus
 /// nodes. (`refuse` keeps `sh:sparql` out of the extensions, so only core shapes have it.)
+///
+/// Only `sh:targetClass` is rewritten, because it is the only target the core `sh:sparql` shapes
+/// use. A future core `sh:sparql` shape with `sh:targetSubjectsOf`, `sh:targetObjectsOf` or an
+/// implicit class target (a shape that is itself an `rdfs:Class`) would hit the same rudof 0.3.35
+/// bug on a blank focus node, and needs the same rewrite.
+///
+/// Blank-node instances are deliberately left unchecked by the SPARQL shapes. A blank-node
+/// `hali:Resource` is still reported, by `hali:ResourceShape`'s `sh:nodeKind sh:IRI` (SHACL Core,
+/// which rudof evaluates without SPARQL).
 fn shapes(store: &Store, classes: &Classes) -> Result<IRSchema, ShapesInvalid> {
     let target_class = format!("{SH}targetClass");
     let target_node = format!("{SH}targetNode");
