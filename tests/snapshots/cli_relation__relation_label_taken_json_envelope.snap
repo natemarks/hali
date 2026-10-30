@@ -1,0 +1,5 @@
+---
+source: tests/cli_relation.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"LABEL_TAKEN","message":"label \"references\"@en is already used by relation kind dcterms:references","details":{"label":"references","language":"en","relation":"dcterms:references"},"suggested_fix":"Use the existing relation kind, or choose a different name.","suggested_command":"hali relation list"}}

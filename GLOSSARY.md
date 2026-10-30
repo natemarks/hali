@@ -44,6 +44,10 @@ _Avoid_: parent tag, category
 A named, directed link between two Resources. It is always a standard relation or a specialisation of one.
 _Avoid_: link type, edge, association
 
+**Relation**:
+One directed link of a Relation kind from one Resource to another. Only the stored direction exists; the other is derived.
+_Avoid_: link, edge
+
 ### Recording changes
 
 **Catalog record**:

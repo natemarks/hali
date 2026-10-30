@@ -1,0 +1,5 @@
+---
+source: tests/cli_relation.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"FORGET_BLOCKED_BY_RELATIONS","message":"Resource 0192f0c4-0000-7000-8000-000000000701 has 3 inbound relations from 2 other Resources; nothing was written","details":{"resource":"0192f0c4-0000-7000-8000-000000000701","relations":3,"from":2},"suggested_fix":"Remove them (hali unrelate <ref> <relation> 0192f0c4-0000-7000-8000-000000000701), or forget with --force to remove them too, then retry.","suggested_command":"hali show 0192f0c4-0000-7000-8000-000000000701"}}

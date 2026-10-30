@@ -1,0 +1,5 @@
+---
+source: tests/cli_relation.rs
+expression: out.stdout
+---
+{"schema_version":1,"relation_kind":{"id":"excerptOf","label":"excerpt of","parents":["prov:wasDerivedFrom"],"standard":false}}

@@ -152,6 +152,49 @@ mod goal {
         ("cli_type__type_remove_json", "type remove"),
     ];
 
+    /// Snapshots written by the active goal (#18): hidden from a build without the goal
+    /// feature (the `relate`, `unrelate` and `relation add|list|remove` schemas, the
+    /// `UNKNOWN_RELATION` and `FORGET_BLOCKED_BY_RELATIONS` branches and the relation shapes of
+    /// `IN_USE` and `LABEL_TAKEN` they name do not exist until the goal is met).
+    const GOAL_SNAPS_18: &[&str] = &[
+        "cli_dry_run__relate_dry_run_json",
+        "cli_dry_run__relation_add_dry_run_json",
+        "cli_dry_run__relation_remove_dry_run_json",
+        "cli_dry_run__unrelate_dry_run_json",
+        "cli_relation__find_related_to_json",
+        "cli_relation__find_related_via_json",
+        "cli_relation__forget_blocked_json_envelope",
+        "cli_relation__relate_json",
+        "cli_relation__relation_add_json",
+        "cli_relation__relation_in_use_json_envelope",
+        "cli_relation__relation_label_taken_json_envelope",
+        "cli_relation__relation_list_json",
+        "cli_relation__relation_remove_confirmation_required_json_envelope",
+        "cli_relation__relation_remove_json",
+        "cli_relation__show_relations_json",
+        "cli_relation__unknown_relation_json_envelope",
+        "cli_relation__unrelate_json",
+    ];
+
+    #[cfg(feature = "goal")]
+    const GOAL_STDOUT_GOLDENS_18: &[(&str, &str)] = &[
+        ("cli_dry_run__relate_dry_run_json", "relate"),
+        ("cli_dry_run__relation_add_dry_run_json", "relation add"),
+        (
+            "cli_dry_run__relation_remove_dry_run_json",
+            "relation remove",
+        ),
+        ("cli_dry_run__unrelate_dry_run_json", "unrelate"),
+        ("cli_relation__find_related_to_json", "find"),
+        ("cli_relation__find_related_via_json", "find"),
+        ("cli_relation__relate_json", "relate"),
+        ("cli_relation__relation_add_json", "relation add"),
+        ("cli_relation__relation_list_json", "relation list"),
+        ("cli_relation__relation_remove_json", "relation remove"),
+        ("cli_relation__show_relations_json", "show"),
+        ("cli_relation__unrelate_json", "unrelate"),
+    ];
+
     /// Every stdout snapshot's row.
     #[allow(unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
@@ -162,6 +205,8 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_14);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_17);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_15);
+        #[cfg(feature = "goal")]
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_18);
         rows
     }
 
@@ -201,6 +246,11 @@ mod goal {
         {
             pending_15 = &[];
         }
+        let mut pending_18: &[&str] = GOAL_SNAPS_18;
+        #[cfg(feature = "goal")]
+        {
+            pending_18 = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -214,6 +264,7 @@ mod goal {
                 || pending_14.contains(&stem.as_str())
                 || pending_17.contains(&stem.as_str())
                 || pending_15.contains(&stem.as_str())
+                || pending_18.contains(&stem.as_str())
             {
                 continue;
             }
@@ -320,6 +371,8 @@ mod goal {
         assert!(goldens.len() >= 32, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 41, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 53, "found only {} goldens", goldens.len());
+        #[cfg(feature = "goal")]
+        assert!(goldens.len() >= 70, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
                 .unwrap_or_else(|| panic!("golden `{}` is not mapped to a schema", g.stem));
@@ -1338,6 +1391,514 @@ mod goal {
             ),
             (
                 taken(json!({"label": 1, "language": "en", "type": "Paper"})),
+                false,
+            ),
+            (taken(json!({})), false),
+        ] {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema error` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #18: what the `relate`, `unrelate` and `relation add|list|remove` schemas accept and
+    /// refuse.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn relation_schemas_accept_and_reject() {
+        let change = json!({"op": "add", "triple": "<a:b> <a:c> <a:d> ."});
+        let link = || json!({"from": "a", "relation": "annotates", "to": "b"});
+        let linked = json!({"schema_version": 1, "relation": link()});
+        let mut linked_dry = linked.clone();
+        linked_dry["dry_run"] = json!(true);
+        linked_dry["changes"] = json!([change]);
+        let kind = || {
+            json!({"id": "cites", "label": "cites", "parents": ["dcterms:references"],
+                "standard": false})
+        };
+        let real = json!({"schema_version": 1, "relation_kind": kind()});
+        let mut dry = real.clone();
+        dry["dry_run"] = json!(true);
+        dry["changes"] = json!([change]);
+        let page = json!({"schema_version": 1, "results": [kind()], "total": 1,
+            "truncated": false, "next_offset": null});
+
+        let mut cases: Vec<(&str, Value, bool)> = Vec::new();
+        for name in ["relate", "unrelate"] {
+            cases.push((name, linked.clone(), true));
+            cases.push((name, linked_dry.clone(), true));
+            let mut v = linked_dry.clone();
+            v["changes"] = json!([]);
+            cases.push((name, v, true));
+            // Another command's payload.
+            cases.push((name, real.clone(), false));
+            cases.push((name, page.clone(), false));
+            cases.push((
+                name,
+                json!({"schema_version": 1, "resource": {"id": "a"}}),
+                false,
+            ));
+            // A missing or an extra key, in the payload and in the link.
+            let mut v = linked.clone();
+            v.as_object_mut().unwrap().remove("relation");
+            cases.push((name, v, false));
+            for key in ["from", "relation", "to"] {
+                let mut v = linked.clone();
+                v["relation"].as_object_mut().unwrap().remove(key);
+                cases.push((name, v, false));
+                let mut v = linked.clone();
+                v["relation"][key] = json!(5);
+                cases.push((name, v, false));
+            }
+            let mut v = linked.clone();
+            v["relation"]["surprise"] = json!(1);
+            cases.push((name, v, false));
+            let mut v = linked.clone();
+            v["extra"] = json!(1);
+            cases.push((name, v, false));
+            // The version, and the dry-run keys.
+            let mut v = linked.clone();
+            v["schema_version"] = json!(2);
+            cases.push((name, v, false));
+            let mut v = linked.clone();
+            v["dry_run"] = json!(true);
+            cases.push((name, v, false));
+            let mut v = linked.clone();
+            v["changes"] = json!([]);
+            cases.push((name, v, false));
+            let mut v = linked_dry.clone();
+            v["dry_run"] = json!(false);
+            cases.push((name, v, false));
+            let mut v = linked_dry.clone();
+            v.as_object_mut().unwrap().remove("changes");
+            cases.push((name, v, false));
+            let mut v = linked_dry.clone();
+            v["changes"] = json!([{"op": "replace", "triple": "<a:b> <a:c> <a:d> ."}]);
+            cases.push((name, v, false));
+        }
+
+        for name in ["relation add", "relation remove"] {
+            cases.push((name, real.clone(), true));
+            cases.push((name, dry.clone(), true));
+            let mut v = dry.clone();
+            v["changes"] = json!([]);
+            cases.push((name, v, true));
+            let mut v = real.clone();
+            v["relation_kind"]["parents"] = json!([]);
+            v["relation_kind"]["standard"] = json!(true);
+            cases.push((name, v, true));
+            // Another command's payload.
+            cases.push((name, linked.clone(), false));
+            cases.push((name, page.clone(), false));
+            cases.push((
+                name,
+                json!({"schema_version": 1, "type": {"id": "Report", "label": "Report",
+                    "parents": []}}),
+                false,
+            ));
+            // A missing or an extra key, in the payload and in the record.
+            let mut v = real.clone();
+            v.as_object_mut().unwrap().remove("relation_kind");
+            cases.push((name, v, false));
+            for key in ["id", "label", "parents", "standard"] {
+                let mut v = real.clone();
+                v["relation_kind"].as_object_mut().unwrap().remove(key);
+                cases.push((name, v, false));
+            }
+            let mut v = real.clone();
+            v["relation_kind"]["surprise"] = json!(1);
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["extra"] = json!(1);
+            cases.push((name, v, false));
+            // Types of the values.
+            let mut v = real.clone();
+            v["relation_kind"]["parents"] = json!("dcterms:relation");
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["relation_kind"]["parents"] = json!([1]);
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["relation_kind"]["label"] = json!(null);
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["relation_kind"]["standard"] = json!("no");
+            cases.push((name, v, false));
+            // The version, and the dry-run keys.
+            let mut v = real.clone();
+            v["schema_version"] = json!(2);
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["dry_run"] = json!(true);
+            cases.push((name, v, false));
+            let mut v = real.clone();
+            v["changes"] = json!([]);
+            cases.push((name, v, false));
+            let mut v = dry.clone();
+            v["dry_run"] = json!(false);
+            cases.push((name, v, false));
+            let mut v = dry.clone();
+            v.as_object_mut().unwrap().remove("changes");
+            cases.push((name, v, false));
+        }
+
+        // `relation list` is read-only: the list envelope, and no dry-run keys.
+        cases.push(("relation list", page.clone(), true));
+        let mut v = page.clone();
+        v["results"] = json!([]);
+        v["total"] = json!(0);
+        cases.push(("relation list", v, true));
+        let mut v = page.clone();
+        v["truncated"] = json!(true);
+        v["next_offset"] = json!(1);
+        cases.push(("relation list", v, true));
+        cases.push(("relation list", real.clone(), false));
+        for key in ["results", "total", "truncated", "next_offset"] {
+            let mut v = page.clone();
+            v.as_object_mut().unwrap().remove(key);
+            cases.push(("relation list", v, false));
+        }
+        for key in ["id", "label", "parents", "standard"] {
+            let mut v = page.clone();
+            v["results"][0].as_object_mut().unwrap().remove(key);
+            cases.push(("relation list", v, false));
+        }
+        let mut v = page.clone();
+        v["results"][0]["surprise"] = json!(1);
+        cases.push(("relation list", v, false));
+        let mut v = page.clone();
+        v["results"] = json!([{"id": "Report", "label": "Report", "parents": []}]);
+        cases.push(("relation list", v, false));
+        let mut v = page.clone();
+        v["dry_run"] = json!(true);
+        v["changes"] = json!([]);
+        cases.push(("relation list", v, false));
+        let mut v = page.clone();
+        v["total"] = json!(-1);
+        cases.push(("relation list", v, false));
+        let mut v = page.clone();
+        v["schema_version"] = json!(2);
+        cases.push(("relation list", v, false));
+
+        for (name, instance, valid) in cases {
+            let errs = problems(&validator(name), &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema {name}` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #18: the `relations` of `show` are `{direction, relation, resource}` entries, strictly.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn show_relations_items_strict() {
+        let entry = |direction: &str| json!({"direction": direction, "relation": "dcterms:isPartOf", "resource": record()});
+        let with = |relations: Value| {
+            let mut r = shown();
+            r["relations"] = relations;
+            json!({"schema_version": 1, "resource": r})
+        };
+        let mut cases: Vec<(Value, bool)> = vec![
+            (with(json!([])), true),
+            (with(json!([entry("out")])), true),
+            (with(json!([entry("out"), entry("in")])), true),
+            (with(json!([entry("sideways")])), false),
+            (with(json!([entry("OUT")])), false),
+            (with(json!("none")), false),
+            (with(json!({})), false),
+            (with(json!(["out"])), false),
+            (with(json!([null])), false),
+        ];
+        for key in ["direction", "relation", "resource"] {
+            let mut e = entry("in");
+            e.as_object_mut().unwrap().remove(key);
+            cases.push((with(json!([e])), false));
+        }
+        let mut e = entry("in");
+        e["surprise"] = json!(1);
+        cases.push((with(json!([e])), false));
+        let mut e = entry("in");
+        e["relation"] = json!(5);
+        cases.push((with(json!([e])), false));
+        let mut e = entry("in");
+        e["direction"] = json!(null);
+        cases.push((with(json!([e])), false));
+        // The Resource is a full record: nothing missing, nothing extra, the right types.
+        for key in [
+            "id",
+            "path",
+            "title",
+            "media_type",
+            "editable",
+            "missing",
+            "stale",
+            "types",
+            "tags",
+            "byte_size",
+            "modified",
+        ] {
+            let mut e = entry("in");
+            e["resource"].as_object_mut().unwrap().remove(key);
+            cases.push((with(json!([e])), false));
+        }
+        let mut e = entry("in");
+        e["resource"]["surprise"] = json!(1);
+        cases.push((with(json!([e])), false));
+        let mut e = entry("in");
+        e["resource"]["editable"] = json!("yes");
+        cases.push((with(json!([e])), false));
+        let mut e = entry("in");
+        e["resource"] = json!({"id": "a"});
+        cases.push((with(json!([e])), false));
+
+        let v = validator("show");
+        for (instance, valid) in cases {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema show` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #18: the `UNKNOWN_RELATION` branch of `error`.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn unknown_relation_branch() {
+        let unknown = |details: Value| error("UNKNOWN_RELATION", details);
+        let suggestion = |id: &str| json!({"id": id, "label": id});
+        let v = validator("error");
+        for (instance, valid) in [
+            (
+                unknown(json!({"relation": "annotate", "suggestions": []})),
+                true,
+            ),
+            (
+                unknown(json!({"relation": "annotate", "suggestions": [suggestion("annotates")]})),
+                true,
+            ),
+            (
+                unknown(json!({"relation": "e", "suggestions": [
+                    suggestion("quotes"), suggestion("sketch"), suggestion("annotates")]})),
+                true,
+            ),
+            (
+                unknown(json!({"relation": "e", "suggestions": [
+                    suggestion("A"), suggestion("B"), suggestion("C"), suggestion("D")]})),
+                false,
+            ),
+            (unknown(json!({"suggestions": []})), false),
+            (unknown(json!({"relation": "annotate"})), false),
+            (unknown(json!({})), false),
+            (unknown(json!({"relation": 5, "suggestions": []})), false),
+            (
+                unknown(json!({"relation": "annotate", "suggestions": [{"id": "annotates"}]})),
+                false,
+            ),
+            (
+                unknown(json!({"relation": "annotate", "suggestions": [
+                    {"id": "annotates", "label": "annotates", "extra": 1}]})),
+                false,
+            ),
+            // The Type and Concept keys do not satisfy the relation rule.
+            (
+                unknown(json!({"type": "annotate", "suggestions": []})),
+                false,
+            ),
+            (
+                unknown(json!({"concept": "annotate", "suggestions": []})),
+                false,
+            ),
+        ] {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema error` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #18: the `FORGET_BLOCKED_BY_RELATIONS` branch of `error`.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn forget_blocked_branch() {
+        let blocked = |details: Value| error("FORGET_BLOCKED_BY_RELATIONS", details);
+        let v = validator("error");
+        for (instance, valid) in [
+            (
+                blocked(json!({"resource": "0192f0c4", "relations": 3, "from": 2})),
+                true,
+            ),
+            (
+                blocked(json!({"resource": "0192f0c4", "relations": 1, "from": 1})),
+                true,
+            ),
+            (blocked(json!({"relations": 3, "from": 2})), false),
+            (blocked(json!({"resource": "0192f0c4", "from": 2})), false),
+            (
+                blocked(json!({"resource": "0192f0c4", "relations": 3})),
+                false,
+            ),
+            (blocked(json!({})), false),
+            (
+                blocked(json!({"resource": 5, "relations": 3, "from": 2})),
+                false,
+            ),
+            (
+                blocked(json!({"resource": "0192f0c4", "relations": -1, "from": 2})),
+                false,
+            ),
+            (
+                blocked(json!({"resource": "0192f0c4", "relations": 1.5, "from": 2})),
+                false,
+            ),
+            (
+                blocked(json!({"resource": "0192f0c4", "relations": "3", "from": 2})),
+                false,
+            ),
+            (
+                blocked(json!({"resource": "0192f0c4", "relations": 3, "from": null})),
+                false,
+            ),
+        ] {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema error` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #18: `IN_USE` is the Concept, the Type or the relation shape, each with every key.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn in_use_relation_branch() {
+        let in_use = |details: Value| error("IN_USE", details);
+        let v = validator("error");
+        for (instance, valid) in [
+            (
+                in_use(json!({"relation": "annotates", "used": 1, "subproperties": 0})),
+                true,
+            ),
+            (
+                in_use(json!({"relation": "skos:related", "used": 0, "subproperties": 3})),
+                true,
+            ),
+            // The Concept and Type shapes still hold.
+            (
+                in_use(json!({"concept": "fish", "tagged": 1, "narrower": 0})),
+                true,
+            ),
+            (
+                in_use(json!({"type": "Paper", "typed": 1, "subtypes": 0})),
+                true,
+            ),
+            // Partial and mixed shapes.
+            (in_use(json!({"used": 1, "subproperties": 0})), false),
+            (
+                in_use(json!({"relation": "annotates", "subproperties": 0})),
+                false,
+            ),
+            (in_use(json!({"relation": "annotates", "used": 1})), false),
+            (in_use(json!({"relation": "annotates"})), false),
+            (
+                in_use(json!({"relation": "annotates", "typed": 1, "subtypes": 0})),
+                false,
+            ),
+            (
+                in_use(json!({"relation": "annotates", "tagged": 1, "narrower": 0})),
+                false,
+            ),
+            (
+                in_use(json!({"concept": "fish", "used": 1, "subproperties": 0})),
+                false,
+            ),
+            (
+                in_use(json!({"type": "Paper", "used": 1, "subproperties": 0})),
+                false,
+            ),
+            (in_use(json!({})), false),
+            // Types of the values.
+            (
+                in_use(json!({"relation": 5, "used": 1, "subproperties": 0})),
+                false,
+            ),
+            (
+                in_use(json!({"relation": "annotates", "used": -1, "subproperties": 0})),
+                false,
+            ),
+            (
+                in_use(json!({"relation": "annotates", "used": 1.5, "subproperties": 0})),
+                false,
+            ),
+            (
+                in_use(json!({"relation": "annotates", "used": 1, "subproperties": null})),
+                false,
+            ),
+            (
+                in_use(json!({"relation": "annotates", "used": "1", "subproperties": 0})),
+                false,
+            ),
+        ] {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema error` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #18: `LABEL_TAKEN` is the Concept, the Type or the relation shape, each with every key.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn label_taken_relation_branch() {
+        let taken = |details: Value| error("LABEL_TAKEN", details);
+        let v = validator("error");
+        for (instance, valid) in [
+            (
+                taken(json!({"label": "references", "language": "en",
+                    "relation": "dcterms:references"})),
+                true,
+            ),
+            // The Concept and Type shapes still hold.
+            (
+                taken(json!({"label": "ml", "language": "en", "concept": "ml"})),
+                true,
+            ),
+            (
+                taken(json!({"label": "paper", "language": "en", "type": "Paper"})),
+                true,
+            ),
+            (taken(json!({"label": "x", "language": "en"})), false),
+            (
+                taken(json!({"language": "en", "relation": "dcterms:references"})),
+                false,
+            ),
+            (
+                taken(json!({"label": "x", "relation": "dcterms:references"})),
+                false,
+            ),
+            (
+                taken(json!({"label": "x", "language": "en", "relation": 5})),
+                false,
+            ),
+            (
+                taken(json!({"label": 1, "language": "en", "relation": "annotates"})),
                 false,
             ),
             (taken(json!({})), false),

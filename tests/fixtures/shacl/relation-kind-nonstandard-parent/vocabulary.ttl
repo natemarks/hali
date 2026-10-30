@@ -1,0 +1,6 @@
+@prefix hali: <https://w3id.org/hali#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# Its only parent is an alignment property, which is no standard relation.
+hali:stray a owl:ObjectProperty ; rdfs:subPropertyOf <http://example.org/prop> .
