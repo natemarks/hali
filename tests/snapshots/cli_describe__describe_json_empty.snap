@@ -1,0 +1,5 @@
+---
+source: tests/cli_describe.rs
+expression: out.stdout
+---
+{"schema_version":1,"core_version":"0.1.0","store":"/TMP/data","counts":{"resources":0,"concepts":0,"types":0,"relation_kinds":4,"relations":0},"concepts":[],"types":[],"relation_kinds":[{"id":"dcterms:isPartOf","label":"is part of","parents":["dcterms:relation"],"standard":true},{"id":"dcterms:references","label":"references","parents":["dcterms:relation"],"standard":true},{"id":"dcterms:relation","label":"relation","parents":[],"standard":true},{"id":"prov:wasDerivedFrom","label":"was derived from","parents":[],"standard":true}]}

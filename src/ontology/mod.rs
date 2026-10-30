@@ -27,6 +27,9 @@ pub const PREFIXES: [(&str, &str); 12] = [
     ("hali", HALI),
 ];
 
+/// The core ontology itself (the subject of its `owl:versionInfo`).
+pub const ONTOLOGY: &str = "https://w3id.org/hali";
+
 /// The one Concept scheme, `hali:topics`.
 pub const TOPICS: &str = "https://w3id.org/hali#topics";
 
@@ -94,6 +97,7 @@ pub mod foaf {
 pub mod owl {
     pub const CLASS: &str = "http://www.w3.org/2002/07/owl#Class";
     pub const OBJECT_PROPERTY: &str = "http://www.w3.org/2002/07/owl#ObjectProperty";
+    pub const VERSION_INFO: &str = "http://www.w3.org/2002/07/owl#versionInfo";
 }
 
 /// RDF Schema terms.

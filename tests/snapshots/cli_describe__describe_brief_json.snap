@@ -1,0 +1,5 @@
+---
+source: tests/cli_describe.rs
+expression: out.stdout
+---
+{"schema_version":1,"core_version":"0.1.0","store":"/TMP/data","counts":{"resources":5,"concepts":1,"types":1,"relation_kinds":10,"relations":6}}

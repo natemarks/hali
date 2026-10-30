@@ -194,6 +194,20 @@ mod goal {
         ("cli_relation__unrelate_json", "unrelate"),
     ];
 
+    /// Snapshots written by the active goal (#19): hidden from a build without the goal
+    /// feature (the `describe` schema they name does not exist until the goal is met).
+    const GOAL_SNAPS_19: &[&str] = &[
+        "cli_describe__describe_brief_json",
+        "cli_describe__describe_json",
+        "cli_describe__describe_json_empty",
+    ];
+
+    const GOAL_STDOUT_GOLDENS_19: &[(&str, &str)] = &[
+        ("cli_describe__describe_brief_json", "describe"),
+        ("cli_describe__describe_json", "describe"),
+        ("cli_describe__describe_json_empty", "describe"),
+    ];
+
     /// Every stdout snapshot's row.
     #[allow(unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
@@ -205,6 +219,7 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_17);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_15);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_18);
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_19);
         rows
     }
 
@@ -248,6 +263,10 @@ mod goal {
         {
             pending_18 = &[];
         }
+        let mut pending_19: &[&str] = GOAL_SNAPS_19;
+        {
+            pending_19 = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -262,6 +281,7 @@ mod goal {
                 || pending_17.contains(&stem.as_str())
                 || pending_15.contains(&stem.as_str())
                 || pending_18.contains(&stem.as_str())
+                || pending_19.contains(&stem.as_str())
             {
                 continue;
             }
@@ -369,6 +389,7 @@ mod goal {
         assert!(goldens.len() >= 41, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 53, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 70, "found only {} goldens", goldens.len());
+        assert!(goldens.len() >= 73, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
                 .unwrap_or_else(|| panic!("golden `{}` is not mapped to a schema", g.stem));
@@ -1396,6 +1417,175 @@ mod goal {
                 errs.is_empty(),
                 valid,
                 "`hali schema error` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #19: what the `describe` schema accepts and refuses: a full and a brief branch, every
+    /// key required, nothing else allowed.
+    #[test]
+    fn describe_schema_accepts_and_rejects() {
+        let counts = || json!({"resources": 1, "concepts": 1, "types": 1, "relation_kinds": 1, "relations": 0});
+        let brief = || {
+            json!({"schema_version": 1, "core_version": "0.1.0", "store": "/data/hali",
+                "counts": counts()})
+        };
+        let full = || {
+            let mut v = brief();
+            v["concepts"] = json!([{"id": "ml", "label": "ml", "alt_labels": [], "broader": []}]);
+            v["types"] = json!([{"id": "Note", "label": "Note", "parents": []}]);
+            v["relation_kinds"] = json!([{"id": "dcterms:relation", "label": "relation",
+                "parents": [], "standard": true}]);
+            v
+        };
+        let with = |base: Value, key: &str, value: Value| {
+            let mut v = base;
+            v[key] = value;
+            v
+        };
+        let without = |base: Value, key: &str| {
+            let mut v = base;
+            v.as_object_mut().unwrap().remove(key);
+            v
+        };
+        let v = validator("describe");
+        let mut cases: Vec<(String, Value, bool)> = vec![
+            ("full".into(), full(), true),
+            ("brief".into(), brief(), true),
+            (
+                "empty lists".into(),
+                with(
+                    with(with(full(), "concepts", json!([])), "types", json!([])),
+                    "relation_kinds",
+                    json!([]),
+                ),
+                true,
+            ),
+            // Partial lists: one or two of the three, in either direction.
+            ("full minus types".into(), without(full(), "types"), false),
+            (
+                "full minus concepts".into(),
+                without(full(), "concepts"),
+                false,
+            ),
+            (
+                "full minus relation_kinds".into(),
+                without(full(), "relation_kinds"),
+                false,
+            ),
+            (
+                "brief plus types".into(),
+                with(brief(), "types", json!([])),
+                false,
+            ),
+            (
+                "brief plus concepts".into(),
+                with(brief(), "concepts", json!([])),
+                false,
+            ),
+            // Missing or extra keys, wrong types.
+            (
+                "no schema_version".into(),
+                without(brief(), "schema_version"),
+                false,
+            ),
+            (
+                "version 2".into(),
+                with(brief(), "schema_version", json!(2)),
+                false,
+            ),
+            (
+                "no core_version".into(),
+                without(brief(), "core_version"),
+                false,
+            ),
+            ("no store".into(), without(brief(), "store"), false),
+            ("no counts".into(), without(brief(), "counts"), false),
+            (
+                "store null".into(),
+                with(brief(), "store", json!(null)),
+                false,
+            ),
+            (
+                "extra key".into(),
+                with(brief(), "exists", json!(true)),
+                false,
+            ),
+            (
+                "extra key in full".into(),
+                with(full(), "skill", json!({})),
+                false,
+            ),
+            (
+                "paging key".into(),
+                with(full(), "truncated", json!(false)),
+                false,
+            ),
+            (
+                "dry run".into(),
+                with(brief(), "dry_run", json!(true)),
+                false,
+            ),
+        ];
+        for key in [
+            "resources",
+            "concepts",
+            "types",
+            "relation_kinds",
+            "relations",
+        ] {
+            let mut c = counts();
+            c.as_object_mut().unwrap().remove(key);
+            cases.push((
+                format!("counts minus {key}"),
+                with(brief(), "counts", c),
+                false,
+            ));
+            let mut c = counts();
+            c[key] = json!(-1);
+            cases.push((
+                format!("counts {key} -1"),
+                with(brief(), "counts", c),
+                false,
+            ));
+            let mut c = counts();
+            c[key] = json!("1");
+            cases.push((
+                format!("counts {key} string"),
+                with(brief(), "counts", c),
+                false,
+            ));
+        }
+        let mut c = counts();
+        c["exists"] = json!(true);
+        cases.push(("counts extra key".into(), with(brief(), "counts", c), false));
+        // The records are the existing shapes, strictly.
+        let mut f = full();
+        f["concepts"][0]["extra"] = json!(1);
+        cases.push(("concept extra key".into(), f, false));
+        let mut f = full();
+        f["types"][0].as_object_mut().unwrap().remove("parents");
+        cases.push(("type minus parents".into(), f, false));
+        let mut f = full();
+        f["relation_kinds"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("standard");
+        cases.push(("kind minus standard".into(), f, false));
+        // Another command's payload.
+        cases.push((
+            "relation list".into(),
+            json!({"schema_version": 1, "results": [], "total": 0, "truncated": false,
+                "next_offset": null}),
+            false,
+        ));
+        for (name, instance, valid) in cases {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema describe` should {} `{name}`: {instance}; errors: {errs:?}",
                 if valid { "accept" } else { "reject" }
             );
         }

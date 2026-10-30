@@ -1231,6 +1231,12 @@ fn named(iri: &str) -> NamedNodeRef<'_> {
     NamedNodeRef::new_unchecked(iri)
 }
 
+/// How many Resources are cataloged: the named subjects with `rdf:type hali:Resource` in
+/// resources.ttl.
+pub(crate) fn cataloged_count(store: &Store) -> usize {
+    subjects(store, rdf::TYPE.as_str(), iri(RESOURCE).as_ref()).len()
+}
+
 fn iri(iri: &str) -> Term {
     NamedNode::new_unchecked(iri).into()
 }
