@@ -309,7 +309,7 @@ One `hali` binary (clap 4, derive).
 ```
 # orientation
 hali describe [--brief]                  # vocabulary, types, relation kinds, counts, core ontology version,
-                                         # store path, skill install state
+                                         # store path; skill install state arrives with #28
 hali schema [<command>]                  # JSON Schema of each command's --json output and of the error envelope
 hali help agents [--snippet]             # embedded agent usage guide; --snippet prints an AGENTS.md block
 hali skill install [--agents] [--print]
@@ -379,6 +379,8 @@ hali generate completions <bash|zsh|fish>
 - **`forget <ref> [--force]`:** order of checks: usage; store; `UNKNOWN_RESOURCE`; `FORGET_BLOCKED_BY_RELATIONS`, unless `--force`; SHACL; then the confirmation. It is blocked while any Resource other than this one has a triple with a relation kind as predicate pointing at it, in any graph. Message `Resource <id> has <n> inbound relations from <m> other Resources; nothing was written` (<n> counts the distinct triples, <m> the distinct subjects); `details {"resource","relations","from"}` (the id and the two counts); `suggested_fix` `Remove them (hali unrelate <ref> <relation> <id>), or forget with --force to remove them too, then retry.`; `suggested_command` `hali show <id>`. With `--force` the removals are as without it, the inbound relations of `resources.ttl` going with the Resource; an inbound relation that only `extensions.ttl` holds cannot be removed, so SHACL refuses the forget (`SHACL_VIOLATION`, nothing written). Relations the Resource itself holds go with it, and a relation of the Resource to itself does not block. The confirmation retry is `hali forget <id> --force --yes` when `--force` was given, else `hali forget <id> --yes`.
 - **`find --related-to REF [--via REL]`** is described in §9.7, and the relations of `show` in §9.3.
 
+**Describe:** `describe [--brief]` is the one-call orientation, read-only (§9.5) and needing no store: it reports the core ontology version, the store path, the counts and, unless `--brief`, every Concept, Type and relation kind. `--json` prints `{"schema_version":1,"core_version":"0.1.0","store":"<data dir>","counts":{"resources","concepts","types","relation_kinds","relations"},"concepts":[<Concept>…],"types":[<Type>…],"relation_kinds":[<relation kind>…]}`, the keys in that order. Each list equals the `results` of `concept list`, `type list` and `relation list` without paging (the records unchanged, labels in the configured language, sorted by label, then id), so there is no `--limit`, `--offset` or `truncated`. **`--brief`** prints the same object without `concepts`, `types` and `relation_kinds`; every other key is identical to the full form. `core_version` is the lexical value of `owl:versionInfo` of `<https://w3id.org/hali>` in the core graph only (a triple about that IRI in `extensions.ttl` never changes it); the binary version is not reported. `store` is the data dir exactly as §4 resolves it (`HALI_DATA_DIR` as given, else `$XDG_DATA_HOME/hali`, else `$HOME/.local/share/hali`), with non-UTF-8 bytes replaced, not canonicalised. The counts: `resources` is the named subjects with `rdf:type hali:Resource` in `resources.ttl` (the `total` of an unfiltered `find`); `concepts`, `types` and `relation_kinds` are the `total` of the three list commands (the four standard relations are included, so an empty store has 4); `relations` is the distinct triples (subject, predicate, object), in any graph (`extensions.ttl` included), whose predicate is a relation kind, dangling ones included, a triple held in two graphs counting once. **An absent or empty data dir** is an empty store: exit 0, empty stderr, counts `{"resources":0,"concepts":0,"types":0,"relation_kinds":4,"relations":0}`, `concepts` and `types` `[]`, `relation_kinds` the four standard relations, byte-identical stdout for both; `describe` never creates the data dir or any file, and there is no `exists` flag. A hand-edited but parseable store is described as it is, without validation. It adds no error rule: `CONFIG_INVALID`, `STORE_IO` (the data dir is unresolvable or not a directory) and `STORE_UNPARSEABLE` apply, all exit 3. **Text:** one `name<TAB>value` line each for `core_version`, `store`, `resources`, `concepts`, `types`, `relation_kinds` and `relations`; then, unless `--brief`, `concept<TAB><id><TAB><label>` per Concept, `type<TAB><id><TAB><label><TAB><parents joined with ", ">` per Type and `relation_kind<TAB><id><TAB><label><TAB><parents joined with ", ">` per kind, in that order; every value is escaped for the terminal.
+
 **`hali schema`:** a name is the subcommand path as separate words (`hali schema concept add`), or `error` for the error envelope. With no name it lists the names, sorted: one per line in text mode, `{"schema_version":1,"schemas":[…]}` with `--json`. With a name it prints the bare JSON Schema document (draft 2020-12, no `$id`, no external `$ref`) on one line, in text and `--json` mode alike, not wrapped in the envelope (as with `hali query`, §9.9). An unknown name, or extra words, is a usage error (exit 2) that lists the valid names. It reads no config or store and writes nothing. Every command with a `--json` output has a schema, and the test suite checks every golden JSON snapshot against its schema (§14.6).
 
 ### 9.2 References
@@ -408,7 +410,7 @@ hali generate completions <bash|zsh|fish>
 | 0 | success, **including empty results** (never 1 for "no matches") |
 | 1 | rule/domain error (a structured error was emitted) |
 | 2 | usage error (bad flags or arguments) |
-| 3 | store or environment problem (no store, `STORE_LOCKED`, unparseable file) |
+| 3 | store or environment problem (data dir unresolvable or unreadable, `STORE_LOCKED`, unparseable file) |
 
 - **Under `--json`**, the error goes to stderr:
   ```json
@@ -431,7 +433,7 @@ hali generate completions <bash|zsh|fish>
 - A dry run writes nothing: it creates no data dir, file, temp file or lock file, and changes no file. It does not check that the data dir is writable, so it can succeed where the real run would fail with `STORE_IO`.
 - A real run rewrites the whole tool-managed file in canonical form (§3.4), while `changes` lists only the triples that differ, so comments and formatting in a hand-edited file are lost on a real run.
 - **Errors:** a dry run reports the same errors as a real run with `--yes`, with identical stderr and exit code, and no `dry_run` or `changes` in the envelope; it never fails with `CONFIRMATION_REQUIRED` (§9.8). A successful dry run exits 0.
-- **Read-only commands** (`concept list`, `concept show`, `type list`, `relation list`, `validate`, `schema`, `find`, `show`, `query`) accept `--dry-run` and ignore it: their output is identical to a run without it.
+- **Read-only commands** (`describe`, `concept list`, `concept show`, `type list`, `relation list`, `validate`, `schema`, `find`, `show`, `query`) accept `--dry-run` and ignore it: their output is identical to a run without it. `describe` also accepts `--yes` and ignores it, writes nothing and runs no SHACL.
 - **Text mode:** `concept add` prints `would add concept <id> "<label>"`. Each mutating command prints its own conditional summary line, followed by the shared `+ <triple>` or `- <triple>` line per change, and `note: dry run; nothing was written` on stderr.
 
 ### 9.6 Agent identity
@@ -508,7 +510,7 @@ Sources:
   - **Calls:** `vim.system` runs `hali find --json --limit <max_results>` asynchronously, and the picker opens on completion. The plugin uses `finders.new_table`, not job finders, which drop stderr and the exit code.
   - **Truncation:** if `truncated` is true, the plugin warns.
   - **Errors:** CLI errors (stderr JSON) become notifications that include `suggested_command`.
-  - **Vocabulary:** `hali describe --json` supplies the Concept and Type lists, and `hali show <ref> --json` supplies relations.
+  - **Vocabulary:** `hali describe --json` supplies the Concept, Type and relation kind lists, and `hali show <ref> --json` supplies relations.
 - **Commands:** `:Hali find|concepts|types|related|info` and `:Telescope hali find|concepts|types|related`.
 - **Keymaps:** **none by default.** The README suggests:
 

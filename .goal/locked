@@ -1,0 +1,6 @@
+tests/core_describe.rs
+tests/cli_describe.rs
+tests/schema_contract.rs
+tests/snapshots/cli_describe__describe_json.snap
+tests/snapshots/cli_describe__describe_brief_json.snap
+tests/snapshots/cli_describe__describe_json_empty.snap
