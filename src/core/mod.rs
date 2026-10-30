@@ -3,13 +3,14 @@
 
 pub mod concept;
 pub mod config;
+pub mod relation;
 pub mod resource;
 pub mod schema;
 pub mod types;
 pub mod validate;
 
 use crate::storage;
-use oxigraph::model::{Quad, TripleRef};
+use oxigraph::model::{NamedNode, Quad, TermRef, TripleRef};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::cell::Cell;
@@ -380,6 +381,58 @@ impl Error {
         err
     }
 
+    /// A relation kind cannot be removed: `used` triples in any graph have it as predicate, and
+    /// `subproperties` other subjects are `rdfs:subPropertyOf` it.
+    pub fn relation_in_use(id: &str, used: usize, subproperties: usize) -> Error {
+        let mut err = Error::new(
+            "IN_USE",
+            1,
+            format!(
+                "relation kind {id} is in use: {used} relations, parent of {subproperties} relation kinds; nothing was written"
+            ),
+            json!({"relation": id, "used": used, "subproperties": subproperties}),
+        )
+        .fix(&format!(
+            "Remove the relations (hali unrelate <ref> {} <ref>) and remove its sub-relations first (hali relation remove <S>), then retry.",
+            shell_quote(id)
+        ));
+        err.suggested_command = Some("hali relation list".to_string());
+        err
+    }
+
+    /// A relation kind name is already a kind's id (its local part) or its label in the
+    /// configured language.
+    pub fn relation_label_taken(label: &str, language: &str, holder: &str) -> Error {
+        let mut err = Error::new(
+            "LABEL_TAKEN",
+            1,
+            format!("label \"{label}\"@{language} is already used by relation kind {holder}"),
+            json!({"label": label, "language": language, "relation": holder}),
+        )
+        .fix("Use the existing relation kind, or choose a different name.");
+        err.suggested_command = Some("hali relation list".to_string());
+        err
+    }
+
+    /// A Resource cannot be forgotten without `--force`: `relations` relation triples from
+    /// `from` other Resources point at it.
+    pub fn forget_blocked_by_relations(resource: &str, relations: usize, from: usize) -> Error {
+        let mut err = Error::new(
+            "FORGET_BLOCKED_BY_RELATIONS",
+            1,
+            format!(
+                "Resource {resource} has {relations} inbound relations from {from} other Resources; nothing was written"
+            ),
+            json!({"resource": resource, "relations": relations, "from": from}),
+        )
+        .fix(&format!(
+            "Remove them (hali unrelate <ref> <relation> {}), or forget with --force to remove them too, then retry.",
+            shell_quote(resource)
+        ));
+        err.suggested_command = Some(format!("hali show {}", shell_quote(resource)));
+        err
+    }
+
     /// The data dir cannot be resolved, read or created; `path` is `None` when unresolvable.
     pub fn store_io(path: Option<&Path>) -> Error {
         let message = match path {
@@ -523,6 +576,42 @@ impl Error {
         });
         err
     }
+
+    /// A relation reference matches no relation kind. `suggestions` are the closest kinds.
+    pub fn unknown_relation(reference: &str, suggestions: &[resource::Tag]) -> Error {
+        let mut err = Error::new(
+            "UNKNOWN_RELATION",
+            1,
+            format!("no relation kind matches {reference}"),
+            json!({"relation": reference, "suggestions": suggestions}),
+        )
+        .fix("Use an existing relation kind (hali relation list), or add one first.");
+        err.suggested_command = Some(if relation::valid_name(reference) {
+            format!(
+                "hali --dry-run relation add {} --parent dcterms:relation",
+                shell_quote(reference)
+            )
+        } else {
+            "hali relation list".to_string()
+        });
+        err
+    }
+}
+
+/// Whether an IRI already appears in any position of any graph.
+pub(crate) fn is_used(store: &storage::Store, iri: &NamedNode) -> bool {
+    store
+        .quads_for_pattern(Some(iri.as_ref().into()), None, None, None)
+        .next()
+        .is_some()
+        || store
+            .quads_for_pattern(None, Some(iri.as_ref()), None, None)
+            .next()
+            .is_some()
+        || store
+            .quads_for_pattern(None, None, Some(TermRef::from(iri.as_ref())), None)
+            .next()
+            .is_some()
 }
 
 /// `<flag> <value>` as a shell reads it back. A value that starts with `-` would be read as a

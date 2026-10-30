@@ -2,7 +2,7 @@
 
 use crate::core::resource::{self, FileFacts, Record};
 use crate::core::{
-    self, Change, Clock, Context, Error, IdGen, Op, concept, schema, types, validate,
+    self, Change, Clock, Context, Error, IdGen, Op, concept, relation, schema, types, validate,
 };
 use crate::{media_type, ontology, paths, storage};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -86,6 +86,36 @@ enum Command {
         /// A path or a full UUID
         #[arg(value_name = "REF")]
         reference: String,
+        /// Forget it even when other Resources relate to it, removing those relations too
+        #[arg(long)]
+        force: bool,
+    },
+    /// Relate Resource A to Resource B by a relation kind; only this direction is stored
+    Relate {
+        /// A path or a full UUID
+        #[arg(value_name = "A")]
+        from: String,
+        /// A relation kind
+        #[arg(value_name = "RELATION")]
+        relation: String,
+        /// A path or a full UUID
+        #[arg(value_name = "B")]
+        to: String,
+    },
+    /// Manage the relation kinds: the standard relations and their sub-properties
+    #[command(subcommand)]
+    Relation(RelationCommand),
+    /// Remove the relation of Resource A to Resource B by exactly this relation kind
+    Unrelate {
+        /// A path or a full UUID
+        #[arg(value_name = "A")]
+        from: String,
+        /// A relation kind
+        #[arg(value_name = "RELATION")]
+        relation: String,
+        /// A path or a full UUID (also of a Resource no longer cataloged)
+        #[arg(value_name = "B")]
+        to: String,
     },
     /// Print the JSON Schema of a command's --json output, or of the error envelope
     Schema {
@@ -115,6 +145,12 @@ enum Command {
         /// Only Resources of this Type or a subtype of it (repeatable: all must match)
         #[arg(long = "type", value_name = "TYPE")]
         types: Vec<String>,
+        /// Only Resources related to this one, in either direction (a path or a full UUID)
+        #[arg(long, value_name = "REF")]
+        related_to: Option<String>,
+        /// With --related-to, only this relation kind or a sub-property of it
+        #[arg(long, value_name = "RELATION", requires = "related_to")]
+        via: Option<String>,
         /// The order: modified and added are newest first
         #[arg(long, value_enum, default_value_t = SortArg::Modified)]
         sort: SortArg,
@@ -258,6 +294,41 @@ enum TypeCommand {
         #[arg(value_name = "TYPE")]
         reference: String,
     },
+}
+
+#[derive(Subcommand)]
+enum RelationCommand {
+    /// Add a relation kind under a standard relation
+    Add {
+        /// Its name: the IRI local name and the label
+        #[arg(value_parser = parse_relation_name)]
+        name: String,
+        /// The standard relation it is a sub-property of
+        #[arg(long, value_name = "RELATION", required = true)]
+        parent: String,
+    },
+    /// List the relation kinds, sorted by label
+    List {
+        /// Maximum number of results
+        #[arg(long, default_value_t = 50, allow_hyphen_values = true, value_parser = parse_limit)]
+        limit: usize,
+        /// Results to skip
+        #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
+        offset: usize,
+    },
+    /// Remove a relation kind that no relation uses and no other kind is under
+    Remove {
+        /// A relation kind
+        #[arg(value_name = "RELATION")]
+        reference: String,
+    },
+}
+
+/// Rejects bad relation kind names at parse time, so they are usage errors in clap's format.
+fn parse_relation_name(name: &str) -> Result<String, String> {
+    relation::check_name(name)
+        .map(|()| name.to_string())
+        .map_err(|e| e.message)
 }
 
 /// Rejects bad Type names at parse time, so they are usage errors in clap's format.
@@ -520,9 +591,9 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 None,
             )?;
         }
-        Command::Forget { reference } => {
+        Command::Forget { reference, force } => {
             let id = resource::resolve_ref(&store, reference, paths::ref_path)?;
-            let mut forgotten = resource::forget(&ctx, &mut store, &id)?;
+            let mut forgotten = resource::forget(&ctx, &mut store, &id, *force)?;
             observe(&mut forgotten.value);
             let output = ResourceOutput {
                 schema_version: SCHEMA_VERSION,
@@ -540,7 +611,11 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             let confirmation = Confirmation {
                 command: "forget",
                 question: format!("forget resource {}", describe(record)),
-                retry: format!("hali forget {} --yes", core::shell_quote(&record.id)),
+                retry: format!(
+                    "hali forget {}{} --yes",
+                    core::shell_quote(&record.id),
+                    if *force { " --force" } else { "" }
+                ),
             };
             mutated(
                 cli,
@@ -561,13 +636,21 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             tags,
             exact,
             types,
+            related_to,
+            via,
             sort,
             limit,
             offset,
             fields,
             path_only,
         } => {
+            let related_to = related_to
+                .as_deref()
+                .map(|r| resource::resolve_ref(&store, r, paths::ref_path))
+                .transpose()?;
             let query = resource::Query {
+                related_to,
+                via: via.clone(),
                 title: title.clone(),
                 media_type: media_type.clone(),
                 missing: *missing,
@@ -636,6 +719,9 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             let id = resource::resolve_ref(&store, reference, paths::ref_path)?;
             let mut shown = resource::show(&ctx, &store, &id)?;
             observe(&mut shown.record);
+            for related in &mut shown.relations {
+                observe(&mut related.resource);
+            }
             if *path_only {
                 println!("{}", printable(&shown.record.path));
             } else if cli.json {
@@ -813,6 +899,105 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 retry: remove_retry("type remove", &t.id),
             };
             type_mutated(
+                cli,
+                &dir,
+                &store,
+                &removed,
+                ["removed", "would remove"],
+                Some(&confirmation),
+            )?;
+        }
+        Command::Relate { from, relation, to } | Command::Unrelate { from, relation, to } => {
+            let relate = matches!(cli.command, Command::Relate { .. });
+            // The arguments resolve in order: A, the relation, then B.
+            let a = resource::resolve_ref(&store, from, paths::ref_path)?;
+            relation::resolve(&ctx, &store, relation)?;
+            let b = if relate {
+                resource::resolve_ref(&store, to, paths::ref_path)?
+            } else {
+                resource::resolve_ref_or_uuid(&store, to, paths::ref_path)?
+            };
+            let done = if relate {
+                relation::relate(&ctx, &mut store, &a, relation, &b)?
+            } else {
+                relation::unrelate(&ctx, &mut store, &a, relation, &b)?
+            };
+            let link = &done.value;
+            let output = RelateOutput {
+                schema_version: SCHEMA_VERSION,
+                relation: link,
+            };
+            let [past, would] = if relate {
+                ["related", "would relate"]
+            } else {
+                ["unrelated", "would unrelate"]
+            };
+            let text = || {
+                let verb = match (cli.dry_run, done.changes.is_empty()) {
+                    (true, _) => would,
+                    (false, false) => past,
+                    (false, true) => "unchanged",
+                };
+                println!(
+                    "{verb} {} {} {}",
+                    printable(&link.from),
+                    printable(&link.relation),
+                    printable(&link.to)
+                );
+            };
+            mutated(
+                cli,
+                &dir,
+                &store,
+                storage::File::Resources,
+                output,
+                &done.changes,
+                text,
+                None,
+            )?;
+        }
+        Command::Relation(RelationCommand::Add { name, parent }) => {
+            let added = relation::add(&ctx, &mut store, name, parent)?;
+            relation_mutated(cli, &dir, &store, &added, ["added", "would add"], None)?;
+        }
+        Command::Relation(RelationCommand::List { limit, offset }) => {
+            let page = relation::list(&ctx, &store, *offset, *limit);
+            if cli.json {
+                print_json(&RelationListOutput {
+                    schema_version: SCHEMA_VERSION,
+                    page: &page,
+                });
+            } else {
+                for k in &page.results {
+                    println!(
+                        "{}\t{}\t{}",
+                        printable(&k.id),
+                        printable(&k.label),
+                        printable(&k.parents.join(", "))
+                    );
+                }
+                if let Some(next) = page.next_offset {
+                    eprintln!(
+                        "note: showing {} of {}; next: --offset {next}",
+                        page.results.len(),
+                        page.total
+                    );
+                }
+            }
+        }
+        Command::Relation(RelationCommand::Remove { reference }) => {
+            let removed = relation::remove(&ctx, &mut store, reference)?;
+            let k = &removed.value;
+            let confirmation = Confirmation {
+                command: "relation remove",
+                question: format!(
+                    "remove relation {} \"{}\"",
+                    printable(&k.id),
+                    printable(&k.label)
+                ),
+                retry: remove_retry("relation remove", &k.id),
+            };
+            relation_mutated(
                 cli,
                 &dir,
                 &store,
@@ -1084,6 +1269,37 @@ fn type_mutated(
     )
 }
 
+/// The end of `relation add|remove`.
+fn relation_mutated(
+    cli: &Cli,
+    dir: &Path,
+    store: &storage::Store,
+    done: &core::Mutation<relation::RelationKind>,
+    verbs: [&str; 2],
+    confirmation: Option<&Confirmation>,
+) -> Result<(), Error> {
+    let k = &done.value;
+    let output = RelationKindOutput {
+        schema_version: SCHEMA_VERSION,
+        relation_kind: k,
+    };
+    let summary = Summary {
+        noun: "relation",
+        id: &k.id,
+        label: &k.label,
+        verbs,
+    };
+    vocabulary_mutated(
+        cli,
+        dir,
+        store,
+        output,
+        &summary,
+        &done.changes,
+        confirmation,
+    )
+}
+
 /// The end of a mutating command on one store file: under `--dry-run`, the payload with the
 /// changes (or the `text` summary and the change lines); otherwise, if anything changed, it is
 /// confirmed (when the command asks), the file is saved, then the payload (or the `text`
@@ -1147,6 +1363,20 @@ fn print_shown(shown: &resource::Shown) {
         ("byte_size", r.byte_size.to_string()),
         ("modified", r.modified.clone()),
     ];
+    for related in &shown.relations {
+        let arrow = if related.direction == "out" {
+            "->"
+        } else {
+            "<-"
+        };
+        lines.push((
+            "relation",
+            format!(
+                "{arrow} {} {} \"{}\"",
+                related.relation, related.resource.id, related.resource.title
+            ),
+        ));
+    }
     if let Some(c) = &shown.catalog_record {
         lines.push(("catalog_record", c.id.clone()));
         lines.push(("issued", c.issued.clone().unwrap_or_default()));
@@ -1226,6 +1456,25 @@ struct TypeListOutput<'a> {
     schema_version: u32,
     #[serde(flatten)]
     page: &'a types::Page,
+}
+
+#[derive(Serialize)]
+struct RelateOutput<'a> {
+    schema_version: u32,
+    relation: &'a relation::Link,
+}
+
+#[derive(Serialize)]
+struct RelationKindOutput<'a> {
+    schema_version: u32,
+    relation_kind: &'a relation::RelationKind,
+}
+
+#[derive(Serialize)]
+struct RelationListOutput<'a> {
+    schema_version: u32,
+    #[serde(flatten)]
+    page: &'a relation::Page,
 }
 
 #[derive(Serialize)]

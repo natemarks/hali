@@ -18,7 +18,7 @@
         "tags": {"type": "array", "items": {"$ref": "#/$defs/tag"}},
         "byte_size": {"type": "integer", "minimum": 0},
         "modified": {"type": "string"},
-        "relations": {"type": "array"},
+        "relations": {"type": "array", "items": {"$ref": "#/$defs/related"}},
         "catalog_record": {"anyOf": [{"$ref": "#/$defs/catalog_record"}, {"type": "null"}]}
       },
       "required": ["id", "path", "title", "media_type", "editable", "missing", "stale", "types",

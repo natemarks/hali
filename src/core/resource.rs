@@ -2,9 +2,10 @@
 //! `edit` and `find`, with tags (§2.3). What hali knows of a file comes in as `FileFacts`;
 //! `core` never reads it.
 
-use super::{Context, Error, Mutation, apply, concept, rfc3339, types, validate};
+use super::{Context, Error, Mutation, apply, concept, relation, rfc3339, types, validate};
 use crate::ontology::{
-    HALI, HALI_MEDIA_TYPES, IANA_MEDIA_TYPES, RESOURCE, dcat, dcterms, foaf, prov, skos, spdx,
+    HALI, HALI_MEDIA_TYPES, IANA_MEDIA_TYPES, RESOURCE, STANDARD_RELATIONS, dcat, dcterms, foaf,
+    prov, skos, spdx,
 };
 use crate::paths::{file_url, path_from_file_url};
 use crate::storage::{File, Store};
@@ -14,7 +15,7 @@ use oxigraph::model::{
 };
 use oxigraph::sparql::{QueryResults, SparqlEvaluator};
 use serde::Serialize;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::Path;
 
 /// What was observed of a file to catalog.
@@ -91,9 +92,17 @@ pub struct AddedAll {
 pub struct Shown {
     #[serde(flatten)]
     pub record: Record,
-    /// Relations land with #18; always empty until then.
-    pub relations: Vec<serde_json::Value>,
+    pub relations: Vec<Related>,
     pub catalog_record: Option<CatalogRecord>,
+}
+
+/// One relation of a shown Resource: `out` when the shown Resource holds it, `in` when the other
+/// Resource does; the relation kind's id; the other Resource's record.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Related {
+    pub direction: String,
+    pub relation: String,
+    pub resource: Record,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -310,6 +319,16 @@ pub fn resolve_ref(
     found.map(|r| id_of(&r)).ok_or_else(unknown)
 }
 
+/// As `resolve_ref`, but a full UUID names a Resource even when it is no longer cataloged (the
+/// target of a relation `unrelate` removes).
+pub fn resolve_ref_or_uuid(
+    store: &Store,
+    reference: &str,
+    path_of: impl FnOnce(&str) -> Option<String>,
+) -> Result<String, Error> {
+    resolve_ref(store, reference, path_of).or_else(|err| parse_uuid(reference).ok_or(err))
+}
+
 /// One Resource with its catalog record.
 pub fn show(ctx: &Context, store: &Store, id: &str) -> Result<Shown, Error> {
     let resource = known(store, id)?;
@@ -327,9 +346,76 @@ pub fn show(ctx: &Context, store: &Store, id: &str) -> Result<Shown, Error> {
     });
     Ok(Shown {
         record: record(ctx, store, &resource),
-        relations: Vec::new(),
+        relations: relations(ctx, store, &resource),
         catalog_record,
     })
+}
+
+/// Every distinct relation in any graph between `resource` and a cataloged Resource, by a
+/// relation kind: out before in, then by relation id, then by Resource id. A self-relation is
+/// listed once, as `out`.
+fn relations(ctx: &Context, store: &Store, resource: &NamedNode) -> Vec<Related> {
+    let kinds = relation::kinds(store);
+    let mut found: BTreeSet<(u8, String, String, NamedNode)> = BTreeSet::new();
+    let outbound = store.quads_for_pattern(Some(resource.as_ref().into()), None, None, None);
+    for q in outbound {
+        let q = q.expect("reading the in-memory store");
+        if let Term::NamedNode(other) = q.object
+            && kinds.contains(&q.predicate)
+            && is_resource(store, &other)
+        {
+            found.insert((0, relation::id_of(&q.predicate), id_of(&other), other));
+        }
+    }
+    let inbound = store.quads_for_pattern(None, None, Some(resource.as_ref().into()), None);
+    for q in inbound {
+        let q = q.expect("reading the in-memory store");
+        if let NamedOrBlankNode::NamedNode(other) = q.subject
+            && other != *resource
+            && kinds.contains(&q.predicate)
+            && is_resource(store, &other)
+        {
+            found.insert((1, relation::id_of(&q.predicate), id_of(&other), other));
+        }
+    }
+    found
+        .into_iter()
+        .map(|(direction, relation, _, other)| Related {
+            direction: if direction == 0 { "out" } else { "in" }.to_string(),
+            relation,
+            resource: record(ctx, store, &other),
+        })
+        .collect()
+}
+
+/// Adds to a mutation of `resource` the replacement of its catalog record's `dcterms:modified`
+/// by now, in resources.ttl.
+pub(crate) fn touch(
+    ctx: &Context,
+    store: &Store,
+    resource: &NamedNode,
+    added: &mut Vec<Quad>,
+    removed: &mut Vec<Quad>,
+) {
+    let graph = File::Resources.graph();
+    if let Some(c) = catalog_record_of(store, resource) {
+        removed.extend(
+            store
+                .quads_for_pattern(
+                    Some(c.as_ref().into()),
+                    Some(named(dcterms::MODIFIED)),
+                    None,
+                    Some(graph.as_ref().into()),
+                )
+                .map(|q| q.expect("reading the in-memory store")),
+        );
+        added.push(Quad::new(
+            c,
+            named(dcterms::MODIFIED),
+            Literal::new_typed_literal(ctx.now(), xsd::DATE_TIME),
+            graph,
+        ));
+    }
 }
 
 /// What `edit` changes: a new title, Type references to assert or retract, and Concept
@@ -432,15 +518,7 @@ pub fn edit(
         });
     }
 
-    if let Some(c) = catalog_record_of(store, &resource) {
-        removed.extend(quads_of(&c, dcterms::MODIFIED));
-        added.push(Quad::new(
-            c,
-            named(dcterms::MODIFIED),
-            Literal::new_typed_literal(ctx.now(), xsd::DATE_TIME),
-            graph.clone(),
-        ));
-    }
+    touch(ctx, store, &resource, &mut added, &mut removed);
     validate::guard(store, &added, &removed)?;
     let changes = apply(store, &added, &removed);
     Ok(Mutation {
@@ -453,10 +531,44 @@ pub fn edit(
 /// node (`<id>#sha256`), every catalog record and every triple that points at it, and the `a dcterms:MediaType`
 /// triple of its non-IANA format if no other Resource uses that format. The user Person and
 /// the Concepts stay. The value is the record as it was. Needs no clock and no id, and never
-/// looks at the file. Refused, with the store unchanged, if the store would not conform.
-pub fn forget(ctx: &Context, store: &mut Store, id: &str) -> Result<Mutation<Record>, Error> {
+/// looks at the file. Unless `force`, refused with `FORGET_BLOCKED_BY_RELATIONS` while another
+/// Resource relates to it, in any graph. Refused, with the store unchanged, if the store would
+/// not conform.
+pub fn forget(
+    ctx: &Context,
+    store: &mut Store,
+    id: &str,
+    force: bool,
+) -> Result<Mutation<Record>, Error> {
     let resource = known(store, id)?;
     let was = record(ctx, store, &resource);
+    if !force {
+        let kinds = relation::kinds(store);
+        let inbound: HashSet<(NamedNode, NamedNode)> = store
+            .quads_for_pattern(None, None, Some(resource.as_ref().into()), None)
+            .filter_map(|q| {
+                let q = q.expect("reading the in-memory store");
+                match q.subject {
+                    NamedOrBlankNode::NamedNode(s)
+                        if s != resource
+                            && kinds.contains(&q.predicate)
+                            && is_resource(store, &s) =>
+                    {
+                        Some((s, q.predicate))
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+        if !inbound.is_empty() {
+            let from: HashSet<&NamedNode> = inbound.iter().map(|(s, _)| s).collect();
+            return Err(Error::forget_blocked_by_relations(
+                &was.id,
+                inbound.len(),
+                from.len(),
+            ));
+        }
+    }
     let graph = File::Resources.graph();
     let quads_of = |s: Option<&NamedNode>, o: Option<TermRef<'_>>| -> Vec<Quad> {
         store
@@ -584,6 +696,11 @@ pub struct Query {
     pub exact: bool,
     /// Type references: only Resources typed with each, or with a subclass of it.
     pub types: Vec<String>,
+    /// A Resource id: only Resources related to it, in either direction.
+    pub related_to: Option<String>,
+    /// A relation reference, with `related_to`: only relations of this kind or a sub-property
+    /// of it (default: any standard relation, with its sub-properties).
+    pub via: Option<String>,
     pub sort: Sort,
     pub offset: usize,
     pub limit: usize,
@@ -599,6 +716,8 @@ impl Default for Query {
             tags: Vec::new(),
             exact: false,
             types: Vec::new(),
+            related_to: None,
+            via: None,
             sort: Sort::Modified,
             offset: 0,
             limit: 50,
@@ -674,20 +793,38 @@ fn matching(store: &Store, text: &str, bound: &NamedNode) -> BTreeSet<NamedNode>
 
 /// Lists Resources (spec §6). `stat` gives the size and mtime of the regular file at a path, or
 /// `None`; it is called for every candidate when `missing` or `stale` filters, else only for the
-/// returned page. Nothing is hashed. An unknown Concept reference in `tags` is
-/// `UNKNOWN_CONCEPT`, then an unknown Type reference in `types` is `UNKNOWN_TYPE`.
+/// returned page. Nothing is hashed. An unknown `related_to` Resource is `UNKNOWN_RESOURCE`,
+/// then an unknown Concept reference in `tags` is `UNKNOWN_CONCEPT`, then an unknown Type
+/// reference in `types` is `UNKNOWN_TYPE`, then an unknown `via` is `UNKNOWN_RELATION`.
 pub fn find(
     ctx: &Context,
     store: &Store,
     query: &Query,
     stat: impl Fn(&str) -> Option<(u64, i64)>,
 ) -> Result<Found, Error> {
+    let related_to = query
+        .related_to
+        .as_deref()
+        .map(|id| known(store, id))
+        .transpose()?;
     let tags = resolve_tags(ctx, store, &query.tags)?;
     let types = resolve_types(ctx, store, &query.types)?;
+    let via: Vec<NamedNode> = match &query.via {
+        Some(reference) => vec![relation::resolve_iri(ctx, store, reference)?],
+        None => STANDARD_RELATIONS
+            .iter()
+            .map(|iri| NamedNode::new_unchecked(*iri))
+            .collect(),
+    };
+    let related = related_to.map(|r| {
+        via.iter()
+            .flat_map(|v| relation::related(store, &r, v))
+            .collect::<BTreeSet<NamedNode>>()
+    });
     let mut matched: Option<BTreeSet<NamedNode>> = None;
-    let sets = tags
-        .iter()
-        .map(|tag| tagged(store, tag, query.exact))
+    let sets = related
+        .into_iter()
+        .chain(tags.iter().map(|tag| tagged(store, tag, query.exact)))
         .chain(types.iter().map(|class| typed(store, class)));
     for these in sets {
         matched = Some(match matched {
@@ -877,7 +1014,7 @@ fn media_iri(base: &str, media_type: &str) -> Result<NamedNode, Error> {
 }
 
 /// A full hyphenated UUID, bare or after `urn:uuid:`, in any case, as a lowercase bare UUID.
-fn parse_uuid(reference: &str) -> Option<String> {
+pub(crate) fn parse_uuid(reference: &str) -> Option<String> {
     let bare = match reference.get(..9) {
         Some(prefix) if prefix.eq_ignore_ascii_case("urn:uuid:") => &reference[9..],
         _ => reference,
@@ -891,7 +1028,7 @@ fn parse_uuid(reference: &str) -> Option<String> {
 }
 
 /// The Resource with this bare id, or `UNKNOWN_RESOURCE`.
-fn known(store: &Store, id: &str) -> Result<NamedNode, Error> {
+pub(crate) fn known(store: &Store, id: &str) -> Result<NamedNode, Error> {
     Some(urn(id))
         .filter(|r| is_resource(store, r))
         .ok_or_else(|| Error::unknown_resource(id))
@@ -1076,13 +1213,13 @@ fn has(store: &Store, subject: &NamedNode, predicate: &str, object: TermRef<'_>)
         .is_some()
 }
 
-fn urn(id: &str) -> NamedNode {
+pub(crate) fn urn(id: &str) -> NamedNode {
     NamedNode::new_unchecked(format!("urn:uuid:{id}"))
 }
 
 /// An id as `--json` prints it: a `urn:uuid:` without the prefix, a `hali:` term by its local
 /// name, anything else as the whole IRI.
-fn id_of(node: &NamedNode) -> String {
+pub(crate) fn id_of(node: &NamedNode) -> String {
     let iri = node.as_str();
     iri.strip_prefix("urn:uuid:")
         .or_else(|| iri.strip_prefix(HALI))

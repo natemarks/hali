@@ -39,6 +39,15 @@ pub const IANA_MEDIA_TYPES: &str = "http://www.iana.org/assignments/media-types/
 /// Where hali names non-IANA (`x-`) media types (`dcterms:format`).
 pub const HALI_MEDIA_TYPES: &str = "https://w3id.org/hali/media-types/";
 
+/// The standard relations (spec §2.4), a fixed list: every relation kind is one of them or a
+/// sub-property of one.
+pub const STANDARD_RELATIONS: [&str; 4] = [
+    dcterms::RELATION,
+    dcterms::IS_PART_OF,
+    dcterms::REFERENCES,
+    prov::WAS_DERIVED_FROM,
+];
+
 /// Dublin Core terms.
 pub mod dcterms {
     pub const TITLE: &str = "http://purl.org/dc/terms/title";
@@ -47,6 +56,9 @@ pub mod dcterms {
     pub const FORMAT: &str = "http://purl.org/dc/terms/format";
     pub const MEDIA_TYPE: &str = "http://purl.org/dc/terms/MediaType";
     pub const SUBJECT: &str = "http://purl.org/dc/terms/subject";
+    pub const RELATION: &str = "http://purl.org/dc/terms/relation";
+    pub const IS_PART_OF: &str = "http://purl.org/dc/terms/isPartOf";
+    pub const REFERENCES: &str = "http://purl.org/dc/terms/references";
 }
 
 /// DCAT terms.
@@ -69,6 +81,7 @@ pub mod spdx {
 pub mod prov {
     pub const PERSON: &str = "http://www.w3.org/ns/prov#Person";
     pub const WAS_ATTRIBUTED_TO: &str = "http://www.w3.org/ns/prov#wasAttributedTo";
+    pub const WAS_DERIVED_FROM: &str = "http://www.w3.org/ns/prov#wasDerivedFrom";
 }
 
 /// FOAF terms.
@@ -80,11 +93,13 @@ pub mod foaf {
 /// OWL terms.
 pub mod owl {
     pub const CLASS: &str = "http://www.w3.org/2002/07/owl#Class";
+    pub const OBJECT_PROPERTY: &str = "http://www.w3.org/2002/07/owl#ObjectProperty";
 }
 
 /// RDF Schema terms.
 pub mod rdfs {
     pub const SUB_CLASS_OF: &str = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
+    pub const SUB_PROPERTY_OF: &str = "http://www.w3.org/2000/01/rdf-schema#subPropertyOf";
     pub const LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
 }
 

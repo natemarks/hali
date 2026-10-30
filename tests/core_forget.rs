@@ -1,7 +1,7 @@
 //! Goal tests for `forget` in `core` (#14, spec §2.6, §9.4, §9.8).
 //!
 //! Assumed API (invented here; the implementer follows it):
-//!   `resource::forget(&Context, &mut Store, id: &str) -> Result<Mutation<Record>, Error>`
+//!   `resource::forget(&Context, &mut Store, id: &str, force: bool) -> Result<Mutation<Record>, Error>`
 //!       removes, from the resources graph only, every quad whose subject is the Resource, its
 //!       checksum node or its catalog record, and every quad whose object is the Resource; the
 //!       `a dcterms:MediaType` triple of a non-IANA format node goes only when no remaining
@@ -127,7 +127,7 @@ mod goal {
     fn forget_removes_resource_record_checksum_and_inbound() {
         let mut store = load();
         let before = triples(&resources_ttl(&store));
-        let forgotten = resource::forget(&ctx(), &mut store, R2).unwrap();
+        let forgotten = resource::forget(&ctx(), &mut store, R2, true).unwrap();
 
         // The value is the record as it was.
         let record = &forgotten.value;
@@ -159,7 +159,7 @@ mod goal {
 
         // The tagged IANA Resource: the record carries its tag as it was.
         let mut store = load();
-        let r1 = resource::forget(&ctx(), &mut store, R1).unwrap();
+        let r1 = resource::forget(&ctx(), &mut store, R1, false).unwrap();
         assert_eq!(r1.value.media_type, "text/plain");
         let tags: Vec<&str> = r1.value.tags.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(tags, ["ml"]);
@@ -168,7 +168,7 @@ mod goal {
     #[test]
     fn forget_changes_are_sorted_removes() {
         let mut store = load();
-        let forgotten = resource::forget(&ctx(), &mut store, R2).unwrap();
+        let forgotten = resource::forget(&ctx(), &mut store, R2, true).unwrap();
         assert!(forgotten.changes.iter().all(|c| c.op == Op::Remove));
         let listed: Vec<&str> = forgotten
             .changes
@@ -189,7 +189,7 @@ mod goal {
             let mut store = load();
             let vocabulary = vocabulary_ttl(&store);
             let before = triples(&resources_ttl(&store));
-            resource::forget(&ctx(), &mut store, id).unwrap();
+            resource::forget(&ctx(), &mut store, id, true).unwrap();
             let text = resources_ttl(&store);
             let after = triples(&text);
 
@@ -228,11 +228,11 @@ mod goal {
         // R3 first: R2 still uses the format, so the format node stays, in the store and out
         // of the changes.
         let mut store = load();
-        let first = resource::forget(&ctx(), &mut store, R3).unwrap();
+        let first = resource::forget(&ctx(), &mut store, R3, false).unwrap();
         assert!(!first.changes.iter().any(|c| c.triple == format_node()));
         assert!(triples(&resources_ttl(&store)).contains(&format_node()));
         // Then R2, the last user: the node goes with it.
-        let last = resource::forget(&ctx(), &mut store, R2).unwrap();
+        let last = resource::forget(&ctx(), &mut store, R2, false).unwrap();
         assert!(
             last.changes
                 .iter()
@@ -244,14 +244,14 @@ mod goal {
 
         // The other order: R2 keeps the node for R3, and R3 then drops it.
         let mut store = load();
-        let first = resource::forget(&ctx(), &mut store, R2).unwrap();
+        let first = resource::forget(&ctx(), &mut store, R2, true).unwrap();
         assert!(!first.changes.iter().any(|c| c.triple == format_node()));
-        let last = resource::forget(&ctx(), &mut store, R3).unwrap();
+        let last = resource::forget(&ctx(), &mut store, R3, false).unwrap();
         assert!(last.changes.iter().any(|c| c.triple == format_node()));
 
         // R1 is IANA: it has no format node to drop, and R2 and R3 keep theirs.
         let mut store = load();
-        let r1 = resource::forget(&ctx(), &mut store, R1).unwrap();
+        let r1 = resource::forget(&ctx(), &mut store, R1, false).unwrap();
         assert!(!r1.changes.iter().any(|c| c.triple == format_node()));
         assert!(triples(&resources_ttl(&store)).contains(&format_node()));
     }
@@ -266,7 +266,7 @@ mod goal {
             C2,                                     // a catalog record
             "no-such-id",
         ] {
-            let err: Error = resource::forget(&ctx(), &mut store, unknown).unwrap_err();
+            let err: Error = resource::forget(&ctx(), &mut store, unknown, false).unwrap_err();
             assert_eq!(err.rule, "UNKNOWN_RESOURCE", "{unknown}");
             assert_eq!(err.exit_code(), 1);
             assert_eq!(err.details["ref"], unknown);
@@ -274,8 +274,8 @@ mod goal {
         assert_eq!(resources_ttl(&store), before);
 
         // A Resource that was forgotten is unknown, not a silent success.
-        resource::forget(&ctx(), &mut store, R1).unwrap();
-        let err = resource::forget(&ctx(), &mut store, R1).unwrap_err();
+        resource::forget(&ctx(), &mut store, R1, false).unwrap();
+        let err = resource::forget(&ctx(), &mut store, R1, false).unwrap_err();
         assert_eq!(err.rule, "UNKNOWN_RESOURCE");
     }
 
@@ -296,7 +296,7 @@ mod goal {
         .unwrap();
         let mut store = hali::storage::load(dir.path()).unwrap();
         let before = resources_ttl(&store);
-        let err = resource::forget(&ctx(), &mut store, R1).unwrap_err();
+        let err = resource::forget(&ctx(), &mut store, R1, false).unwrap_err();
         assert_eq!(err.rule, "SHACL_VIOLATION");
         assert_eq!(err.exit_code(), 1);
         let violations = err.details["violations"].as_array().unwrap();
@@ -342,7 +342,7 @@ mod goal {
         let r2_node = format!("{}#sha256", urn(R2));
         let before = triples(&resources_ttl(&store));
         assert_eq!(about(&before, &r2_node).len(), 2);
-        let m = resource::forget(&ctx(), &mut store, R1).unwrap();
+        let m = resource::forget(&ctx(), &mut store, R1, false).unwrap();
         let after = triples(&resources_ttl(&store));
         assert_eq!(about(&after, &r2_node), about(&before, &r2_node));
         assert!(about(&after, &format!("{}#sha256", urn(R1))).is_empty());
@@ -360,7 +360,7 @@ mod goal {
             edited
         });
         let before = triples(&resources_ttl(&store));
-        let m = resource::forget(&ctx(), &mut store, R1).unwrap();
+        let m = resource::forget(&ctx(), &mut store, R1, false).unwrap();
         let after = triples(&resources_ttl(&store));
         for s in [urn(R2), format!("{}#sha256", urn(R2))] {
             assert_eq!(about(&after, &s), about(&before, &s), "{s}");
@@ -384,7 +384,7 @@ mod goal {
             urn(R1)
         );
         let mut store = load_edited(|t| t + &extra);
-        resource::forget(&ctx(), &mut store, R1).unwrap();
+        resource::forget(&ctx(), &mut store, R1, false).unwrap();
         let text = resources_ttl(&store);
         for id in [C1, c1b, R1] {
             assert!(!text.contains(&urn(id)), "{id} remains:\n{text}");
@@ -408,7 +408,7 @@ mod goal {
         }
         let ctx = Context::new("en", Box::new(NoClock), Box::new(NoIds));
         let mut store = load();
-        resource::forget(&ctx, &mut store, R1).unwrap();
+        resource::forget(&ctx, &mut store, R1, false).unwrap();
     }
 
     // ---- criterion 3: the confirmation rule -----------------------------------------------------
