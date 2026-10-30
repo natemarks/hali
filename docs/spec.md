@@ -88,6 +88,7 @@ There is no archive and no delete. **Forget** removes a Resource and its catalog
 
 ### 2.7 Constraints (SHACL, enforced on every mutation and by `validate`)
 - Exactly one `downloadURL` (an IRI matching `^file:///`), one media type, one checksum and one title per Resource.
+- A Resource is an IRI, never a blank node (`sh:nodeKind sh:IRI` on `hali:ResourceShape`). The SPARQL constraints below do not look at blank nodes, so this one reports them.
 - Every `dcterms:subject` value is a Concept in `hali:topics`.
 - Every relation target is a `hali:Resource` (`hali:RelationTargetShape`, `sh:targetClass hali:Resource`): the object of any triple whose predicate reaches a standard relation through `rdfs:subPropertyOf*` is a `hali:Resource`. A relation to a node that is no cataloged Resource therefore fails SHACL, and so does every later mutation until it is removed.
 - Every custom relation property has a standard parent (`hali:RelationParentShape`, `sh:targetClass owl:ObjectProperty`): a property in the `hali:` namespace reaches a standard relation through `rdfs:subPropertyOf+`. Alignment properties outside `hali:` are not constrained.
