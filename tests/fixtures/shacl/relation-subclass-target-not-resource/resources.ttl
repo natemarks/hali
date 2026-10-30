@@ -1,0 +1,25 @@
+@prefix dcat: <http://www.w3.org/ns/dcat#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix hali: <https://w3id.org/hali#> .
+@prefix spdx: <http://spdx.org/rdf/terms#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# Two complete Resources and no relation: only the vocabulary is at fault.
+<urn:uuid:0192f0c4-0000-7000-8000-000000000a01> a hali:Resource ;
+    dcterms:title "x" ;
+    dcat:downloadURL <file:///fixtures/shacl/x.txt> ;
+    dcat:mediaType <http://www.iana.org/assignments/media-types/text/plain> ;
+    dcat:byteSize 6 ;
+    dcterms:modified "2026-10-20T14:02:11Z"^^xsd:dateTime ;
+    spdx:checksum <urn:uuid:0192f0c4-0000-7000-8000-000000000a01#sha256> .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000a01#sha256> spdx:algorithm spdx:checksumAlgorithm_sha256 ;
+    spdx:checksumValue "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"^^xsd:hexBinary .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000a02> a hali:Resource ;
+    dcterms:title "y" ;
+    dcat:downloadURL <file:///fixtures/shacl/y.txt> ;
+    dcat:mediaType <http://www.iana.org/assignments/media-types/text/plain> ;
+    dcat:byteSize 6 ;
+    dcterms:modified "2026-10-20T14:02:11Z"^^xsd:dateTime ;
+    spdx:checksum <urn:uuid:0192f0c4-0000-7000-8000-000000000a02#sha256> .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000a02#sha256> spdx:algorithm spdx:checksumAlgorithm_sha256 ;
+    spdx:checksumValue "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"^^xsd:hexBinary .

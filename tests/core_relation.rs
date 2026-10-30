@@ -512,6 +512,16 @@ mod goal {
     }
 
     #[test]
+    fn relate_with_a_blank_node_object_property_in_extensions() {
+        // A blank-node owl:ObjectProperty (an anonymous inverse) is no hali: relation kind: it
+        // must neither make the shapes unusable nor block a mutation.
+        let blank = "[] a owl:ObjectProperty ; owl:inverseOf dcterms:isPartOf .\n";
+        let (mut store, _dir) = load_with(&[("extensions.ttl", blank)]);
+        let m = relation::relate(&ctx(), &mut store, R5, "annotates", R2).unwrap();
+        assert_eq!(m.value, link(R5, "annotates", R2));
+    }
+
+    #[test]
     fn relate_non_relation_predicate_is_unknown() {
         // A property that is no relation kind cannot be used as one.
         let mut store = load();

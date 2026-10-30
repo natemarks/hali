@@ -117,4 +117,52 @@ mod goal {
             );
         }
     }
+
+    fn report(name: &str) -> hali::core::validate::Report {
+        match validate(&load(name), 0, 1000) {
+            Ok(report) => report,
+            Err(e) => panic!("{name}: {} {}", e.rule, e.message),
+        }
+    }
+
+    // A blank node, in any graph, that is an instance of the target class of a SHACL-SPARQL
+    // shape must not make the shapes unusable: rudof cannot bind a blank node into its query.
+    #[test]
+    fn a_blank_node_object_property_is_skipped() {
+        // A common OWL pattern in extensions.ttl: `[] a owl:ObjectProperty ; owl:inverseOf …`.
+        let report = report("relation-blank-property");
+        assert!(report.conforms, "{:?}", report.results);
+    }
+
+    #[test]
+    fn a_blank_node_resource_does_not_break_validation() {
+        let report = report("relation-blank-resource");
+        assert!(report.conforms, "{:?}", report.results);
+    }
+
+    #[test]
+    fn a_resource_by_a_subclass_chain_through_a_blank_node_is_targeted() {
+        let report = report("relation-subclass-target-not-resource");
+        assert_eq!(report.total, 1, "{:?}", report.results);
+        let v = &report.results[0];
+        assert_eq!(
+            v.focus_node,
+            "<urn:uuid:0192f0c4-0000-7000-8000-000000000a03>"
+        );
+        assert_eq!(v.shape.as_deref(), Some(TARGET_SHAPE));
+        assert_eq!(
+            v.value.as_deref(),
+            Some("<urn:uuid:0192f0c4-0000-7000-8000-000000000a99>")
+        );
+    }
+
+    #[test]
+    fn a_violation_is_still_reported_next_to_a_blank_node() {
+        let report = report("relation-blank-property-with-violation");
+        assert_eq!(report.total, 1, "{:?}", report.results);
+        let v = &report.results[0];
+        assert_eq!(v.focus_node, ORPHAN);
+        assert_eq!(v.shape.as_deref(), Some(PARENT_SHAPE));
+        assert_eq!(v.severity, "Violation");
+    }
 }

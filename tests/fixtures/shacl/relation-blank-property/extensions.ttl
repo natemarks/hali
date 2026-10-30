@@ -1,0 +1,7 @@
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+# A common OWL pattern: an anonymous inverse property. A blank node that is an owl:ObjectProperty
+# is no hali: relation kind, so hali:RelationParentShape skips it.
+[] a owl:ObjectProperty ;
+    owl:inverseOf dcterms:isPartOf .

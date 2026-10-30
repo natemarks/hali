@@ -1,0 +1,16 @@
+@prefix dcat: <http://www.w3.org/ns/dcat#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix hali: <https://w3id.org/hali#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix spdx: <http://spdx.org/rdf/terms#> .
+
+# Z is a Resource only through a subclass chain that runs through a blank node, and relates to a
+# node that is no hali:Resource: hali:RelationTargetShape still targets it.
+<http://example.org/Sub> rdfs:subClassOf [ rdfs:subClassOf hali:Resource ] .
+<urn:uuid:0192f0c4-0000-7000-8000-000000000a03> a <http://example.org/Sub> ;
+    dcterms:references <urn:uuid:0192f0c4-0000-7000-8000-000000000a99> ;
+    dcterms:title "z" ;
+    dcat:downloadURL <file:///fixtures/shacl/z.txt> ;
+    dcat:mediaType <http://www.iana.org/assignments/media-types/text/plain> ;
+    dcat:byteSize 6 ;
+    spdx:checksum <urn:uuid:0192f0c4-0000-7000-8000-000000000a03#sha256> .

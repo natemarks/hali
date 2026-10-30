@@ -6,7 +6,9 @@
 
 use super::SHAPES_TTL;
 use crate::storage::{CORE_GRAPH, EXTENSIONS_GRAPH, Store};
-use oxigraph::model::{NamedNodeRef, NamedOrBlankNode, NamedOrBlankNodeRef, Quad, QuadRef, Term};
+use oxigraph::model::{
+    NamedNode, NamedNodeRef, NamedOrBlankNode, NamedOrBlankNodeRef, Quad, QuadRef, Term,
+};
 use oxttl::TurtleParser;
 use rudof_rdf::rdf_core::term::Object;
 use rudof_rdf::rdf_impl::OxigraphInMemory;
@@ -18,6 +20,7 @@ use shacl::validator::processor::{GraphValidation, ShaclProcessor};
 use shacl::validator::report::ValidationResult;
 use shacl::validator::store::Graph;
 use shacl::validator::{ShaclConfig, ShaclValidationMode};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 const SH: &str = "http://www.w3.org/ns/shacl#";
 
@@ -77,18 +80,20 @@ fn quietly<T>(f: impl FnOnce() -> Result<T, ShapesInvalid>) -> Result<T, ShapesI
 }
 
 fn run(store: &Store, extra: &[Quad], removed: &[Quad]) -> Result<Vec<Violation>, ShapesInvalid> {
-    let schema = shapes(store)?;
-
     let mut data = OxigraphInMemory::new();
+    let mut classes = Classes::default();
     for quad in store.iter() {
         let quad = quad.expect("reading the in-memory store");
         if !removed.contains(&quad) {
+            classes.note(quad.as_ref());
             add(&mut data, quad.as_ref());
         }
     }
     for quad in extra {
+        classes.note(quad.as_ref());
         add(&mut data, quad.as_ref());
     }
+    let schema = shapes(store, &classes)?;
     let graph = Graph::try_from(data).expect("building the in-memory SHACL data graph");
     let report = GraphValidation::new(graph)
         .validate(
@@ -160,19 +165,86 @@ fn refuse(store: &Store) -> Result<(), ShapesInvalid> {
 }
 
 /// Parses and compiles the shapes graph.
-fn shapes(store: &Store) -> Result<IRSchema, ShapesInvalid> {
+///
+/// rudof binds a SPARQL constraint's focus node with `VALUES ?this { … }`, where a blank node is
+/// invalid SPARQL. So each `sh:targetClass C` of a core shape with `sh:sparql` is handed to rudof
+/// as one `sh:targetNode` per IRI instance of `C` in the data: blank nodes are never its focus
+/// nodes. (`refuse` keeps `sh:sparql` out of the extensions, so only core shapes have it.)
+fn shapes(store: &Store, classes: &Classes) -> Result<IRSchema, ShapesInvalid> {
+    let target_class = format!("{SH}targetClass");
+    let target_node = format!("{SH}targetNode");
+    let target_node = NamedNodeRef::new_unchecked(&target_node);
+    let sparql = format!("{SH}sparql");
+    let core = NamedNodeRef::new_unchecked(CORE_GRAPH);
     let mut rdf = OxigraphInMemory::new();
     for graph in [CORE_GRAPH, EXTENSIONS_GRAPH] {
         let graph = NamedNodeRef::new_unchecked(graph);
         for quad in store.quads_for_pattern(None, None, None, Some(graph.into())) {
-            add(
-                &mut rdf,
-                quad.expect("reading the in-memory store").as_ref(),
-            );
+            let quad = quad.expect("reading the in-memory store");
+            let sparql_target = graph == core
+                && quad.predicate.as_str() == target_class
+                && store
+                    .quads_for_pattern(
+                        Some(quad.subject.as_ref()),
+                        Some(NamedNodeRef::new_unchecked(&sparql)),
+                        None,
+                        Some(core.into()),
+                    )
+                    .next()
+                    .is_some();
+            if sparql_target {
+                for node in classes.named_instances(quad.object.clone()) {
+                    rdf.add_triple_ref(quad.subject.as_ref(), target_node, node.as_ref())
+                        .expect("adding to an in-memory graph cannot fail");
+                }
+            } else {
+                add(&mut rdf, quad.as_ref());
+            }
         }
     }
     let ast = ShaclParser::new(rdf).parse().map_err(|_| ShapesInvalid)?;
     IRSchema::compile(&ast).map_err(|_| ShapesInvalid)
+}
+
+/// The data graph's `rdf:type` and `rdfs:subClassOf` triples, by object.
+#[derive(Default)]
+struct Classes {
+    instances: HashMap<Term, Vec<NamedOrBlankNode>>,
+    subclasses: HashMap<Term, Vec<NamedOrBlankNode>>,
+}
+
+impl Classes {
+    fn note(&mut self, quad: QuadRef<'_>) {
+        let map = match quad.predicate.as_str() {
+            "http://www.w3.org/1999/02/22-rdf-syntax-ns#type" => &mut self.instances,
+            "http://www.w3.org/2000/01/rdf-schema#subClassOf" => &mut self.subclasses,
+            _ => return,
+        };
+        map.entry(quad.object.into_owned())
+            .or_default()
+            .push(quad.subject.into_owned());
+    }
+
+    /// The SHACL instances of `class` (`rdf:type/rdfs:subClassOf*`) that are IRIs.
+    fn named_instances(&self, class: Term) -> BTreeSet<NamedNode> {
+        let mut found = BTreeSet::new();
+        let mut seen = HashSet::from([class.clone()]);
+        let mut pending = vec![class];
+        while let Some(class) = pending.pop() {
+            for node in self.instances.get(&class).into_iter().flatten() {
+                if let NamedOrBlankNode::NamedNode(node) = node {
+                    found.insert(node.clone());
+                }
+            }
+            for sub in self.subclasses.get(&class).into_iter().flatten() {
+                let sub = Term::from(sub.clone());
+                if seen.insert(sub.clone()) {
+                    pending.push(sub);
+                }
+            }
+        }
+        found
+    }
 }
 
 fn add(rdf: &mut OxigraphInMemory, quad: QuadRef<'_>) {
