@@ -91,6 +91,21 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// Re-record the hash, size and mtime of Resources from their files
+    #[command(group(
+        clap::ArgGroup::new("which")
+            .required(true)
+            .multiple(false)
+            .args(["refs", "all"])
+    ))]
+    Refresh {
+        /// Paths or full UUIDs; always re-hashed
+        #[arg(value_name = "REF")]
+        refs: Vec<String>,
+        /// Every Resource; hashes only the Stale ones
+        #[arg(long)]
+        all: bool,
+    },
     /// Relate Resource A to Resource B by a relation kind; only this direction is stored
     Relate {
         /// A path or a full UUID
@@ -633,6 +648,71 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 &forgotten.changes,
                 text,
                 Some(&confirmation),
+            )?;
+        }
+        Command::Refresh { refs, all } => {
+            let target = if *all {
+                resource::Target::All
+            } else {
+                let mut ids = Vec::new();
+                for r in refs {
+                    ids.push(resource::resolve_ref(&store, r, paths::ref_path)?);
+                }
+                resource::Target::Ids(ids)
+            };
+            let mut done = resource::refresh(
+                &ctx,
+                &mut store,
+                &target,
+                |p| storage::stat(Path::new(p)),
+                |p| match storage::inspect(Path::new(p)) {
+                    Ok(found) => Ok(resource::Seen::Hashed(resource::Hashed {
+                        byte_size: found.byte_size,
+                        modified: core::rfc3339(found.mtime),
+                        sha256: found.sha256,
+                    })),
+                    Err(storage::InspectError::Missing | storage::InspectError::Directory) => {
+                        Ok(resource::Seen::Missing)
+                    }
+                    Err(storage::InspectError::Other) => Err(Error::not_a_regular_file(p, "other")),
+                    Err(storage::InspectError::Unreadable) => Err(Error::file_unreadable(p)),
+                },
+            )?;
+            for record in done
+                .value
+                .refreshed
+                .iter_mut()
+                .chain(&mut done.value.missing)
+            {
+                observe(record);
+            }
+            let output = RefreshedOutput {
+                schema_version: SCHEMA_VERSION,
+                done: &done.value,
+            };
+            let verb = if cli.dry_run {
+                "would refresh"
+            } else {
+                "refreshed"
+            };
+            let text = || {
+                for r in &done.value.refreshed {
+                    println!("{verb} resource {}", describe_record(r));
+                }
+                for r in &done.value.missing {
+                    println!("missing resource {}", describe_record(r));
+                }
+                println!("unchanged {}", done.value.unchanged);
+            };
+            mutated(
+                cli,
+                &dir,
+                &store,
+                storage::File::Resources,
+                output,
+                &done.changes,
+                text,
+                None,
             )?;
         }
         Command::Find {
@@ -1438,6 +1518,13 @@ fn print_shown(shown: &resource::Shown) {
     for (name, value) in lines {
         println!("{name}\t{}", printable(&value));
     }
+}
+
+#[derive(Serialize)]
+struct RefreshedOutput<'a> {
+    schema_version: u32,
+    #[serde(flatten)]
+    done: &'a resource::Refreshed,
 }
 
 #[derive(Serialize)]

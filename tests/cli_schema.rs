@@ -10,11 +10,12 @@ mod goal {
     use std::path::Path;
     use tempfile::TempDir;
 
-    const NAMES: [&str; 6] = [
+    const NAMES: [&str; 7] = [
         "concept add",
         "concept list",
         "error",
         "find",
+        "refresh",
         "schema",
         "validate",
     ];
@@ -133,7 +134,7 @@ mod goal {
         assert_eq!(out.stderr, "");
         assert_eq!(
             out.stdout,
-            "add\nconcept add\nconcept edit\nconcept list\nconcept remove\nconcept rename\nconcept show\ndescribe\nedit\nerror\nfind\nforget\nrelate\nrelation add\nrelation list\nrelation remove\nschema\nshow\ntype add\ntype list\ntype remove\nunrelate\nvalidate\n"
+            "add\nconcept add\nconcept edit\nconcept list\nconcept remove\nconcept rename\nconcept show\ndescribe\nedit\nerror\nfind\nforget\nrefresh\nrelate\nrelation add\nrelation list\nrelation remove\nschema\nshow\ntype add\ntype list\ntype remove\nunrelate\nvalidate\n"
         );
     }
 
