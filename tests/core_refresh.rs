@@ -42,7 +42,6 @@
 //!   gone.txt    no regular file
 //!   sneaky.txt  6 bytes, 1792504931, sha256 of "HELLO\n"      (same size and mtime: not Stale)
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::resource::{self, Hashed, Refreshed, Seen, Target};
     use hali::core::{Context, Error, FixedClock, Mutation, Op, SeededIdGen};

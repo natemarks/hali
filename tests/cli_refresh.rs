@@ -31,10 +31,8 @@
 //! tests/snapshots/cli_schema__schema_list_json.snap and the `refresh` row of
 //! tests/dry_run_guard.rs; the test `schema_lists_refresh` below covers the new list exactly.
 
-#[cfg(feature = "goal")]
 mod support;
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::{Value, json};

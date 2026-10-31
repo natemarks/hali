@@ -216,7 +216,6 @@ mod goal {
         "cli_refresh__refresh_json",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_20: &[(&str, &str)] = &[
         ("cli_dry_run__refresh_dry_run_json", "refresh"),
         ("cli_refresh__refresh_all_json", "refresh"),
@@ -235,7 +234,6 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_15);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_18);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_19);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_20);
         rows
     }
@@ -285,7 +283,6 @@ mod goal {
             pending_19 = &[];
         }
         let mut pending_20: &[&str] = GOAL_SNAPS_20;
-        #[cfg(feature = "goal")]
         {
             pending_20 = &[];
         }
@@ -413,7 +410,6 @@ mod goal {
         assert!(goldens.len() >= 53, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 70, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 73, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 76, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
@@ -1618,7 +1614,6 @@ mod goal {
 
     /// #20: what the `refresh` schema accepts and refuses: a real branch and a dry-run branch,
     /// every key required, `unchanged` a non-negative integer, nothing else allowed.
-    #[cfg(feature = "goal")]
     #[test]
     fn refresh_schema_accepts_and_rejects() {
         let record = |id: &str, missing: bool| {
