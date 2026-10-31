@@ -1,0 +1,5 @@
+---
+source: tests/cli_refresh.rs
+expression: out.stdout
+---
+{"schema_version":1,"refreshed":[{"id":"0192f0c4-0000-7000-8000-000000000902","path":"/TMP/files/edited.txt","title":"edited","media_type":"text/plain","editable":true,"missing":false,"stale":false,"types":[],"tags":[],"byte_size":12,"modified":"2026-10-22T10:00:00Z"}],"missing":[],"unchanged":0}
