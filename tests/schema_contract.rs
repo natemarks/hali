@@ -208,6 +208,21 @@ mod goal {
         ("cli_describe__describe_json_empty", "describe"),
     ];
 
+    /// Snapshots written by the active goal (#20): hidden from a build without the goal
+    /// feature (the `refresh` schema they name does not exist until the goal is met).
+    const GOAL_SNAPS_20: &[&str] = &[
+        "cli_dry_run__refresh_dry_run_json",
+        "cli_refresh__refresh_all_json",
+        "cli_refresh__refresh_json",
+    ];
+
+    #[cfg(feature = "goal")]
+    const GOAL_STDOUT_GOLDENS_20: &[(&str, &str)] = &[
+        ("cli_dry_run__refresh_dry_run_json", "refresh"),
+        ("cli_refresh__refresh_all_json", "refresh"),
+        ("cli_refresh__refresh_json", "refresh"),
+    ];
+
     /// Every stdout snapshot's row.
     #[allow(unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
@@ -220,6 +235,8 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_15);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_18);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_19);
+        #[cfg(feature = "goal")]
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_20);
         rows
     }
 
@@ -267,6 +284,11 @@ mod goal {
         {
             pending_19 = &[];
         }
+        let mut pending_20: &[&str] = GOAL_SNAPS_20;
+        #[cfg(feature = "goal")]
+        {
+            pending_20 = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -282,6 +304,7 @@ mod goal {
                 || pending_15.contains(&stem.as_str())
                 || pending_18.contains(&stem.as_str())
                 || pending_19.contains(&stem.as_str())
+                || pending_20.contains(&stem.as_str())
             {
                 continue;
             }
@@ -390,6 +413,8 @@ mod goal {
         assert!(goldens.len() >= 53, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 70, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 73, "found only {} goldens", goldens.len());
+        #[cfg(feature = "goal")]
+        assert!(goldens.len() >= 76, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
                 .unwrap_or_else(|| panic!("golden `{}` is not mapped to a schema", g.stem));
@@ -1586,6 +1611,163 @@ mod goal {
                 errs.is_empty(),
                 valid,
                 "`hali schema describe` should {} `{name}`: {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #20: what the `refresh` schema accepts and refuses: a real branch and a dry-run branch,
+    /// every key required, `unchanged` a non-negative integer, nothing else allowed.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn refresh_schema_accepts_and_rejects() {
+        let record = |id: &str, missing: bool| {
+            json!({"id": id, "path": "/TMP/files/a.txt", "title": "a", "media_type": "text/plain",
+                "editable": true, "missing": missing, "stale": false, "types": [],
+                "tags": [], "byte_size": 6, "modified": "2026-10-20T14:02:11Z"})
+        };
+        let real = || {
+            json!({"schema_version": 1,
+                "refreshed": [record("0192f0c4-0000-7000-8000-000000000902", false)],
+                "missing": [record("0192f0c4-0000-7000-8000-000000000904", true)],
+                "unchanged": 2})
+        };
+        let dry = || {
+            let mut v = real();
+            v["dry_run"] = json!(true);
+            v["changes"] = json!([{"op": "add", "triple": "<a:b> <a:c> <a:d> ."}]);
+            v
+        };
+        let with = |base: Value, key: &str, value: Value| {
+            let mut v = base;
+            v[key] = value;
+            v
+        };
+        let without = |base: Value, key: &str| {
+            let mut v = base;
+            v.as_object_mut().unwrap().remove(key);
+            v
+        };
+        let v = validator("refresh");
+        let cases: Vec<(String, Value, bool)> = vec![
+            ("real".into(), real(), true),
+            ("dry run".into(), dry(), true),
+            (
+                "empty".into(),
+                json!({"schema_version": 1, "refreshed": [], "missing": [], "unchanged": 0}),
+                true,
+            ),
+            (
+                "dry run, no changes".into(),
+                with(with(real(), "dry_run", json!(true)), "changes", json!([])),
+                true,
+            ),
+            ("no unchanged".into(), without(real(), "unchanged"), false),
+            (
+                "unchanged -1".into(),
+                with(real(), "unchanged", json!(-1)),
+                false,
+            ),
+            (
+                "unchanged 1.5".into(),
+                with(real(), "unchanged", json!(1.5)),
+                false,
+            ),
+            (
+                "unchanged string".into(),
+                with(real(), "unchanged", json!("2")),
+                false,
+            ),
+            (
+                "unchanged is a list".into(),
+                with(real(), "unchanged", json!([])),
+                false,
+            ),
+            ("no refreshed".into(), without(real(), "refreshed"), false),
+            ("no missing".into(), without(real(), "missing"), false),
+            (
+                "no schema_version".into(),
+                without(real(), "schema_version"),
+                false,
+            ),
+            (
+                "version 2".into(),
+                with(real(), "schema_version", json!(2)),
+                false,
+            ),
+            ("extra key".into(), with(real(), "total", json!(3)), false),
+            (
+                "dry_run alone".into(),
+                with(real(), "dry_run", json!(true)),
+                false,
+            ),
+            (
+                "changes alone".into(),
+                with(real(), "changes", json!([])),
+                false,
+            ),
+            (
+                "dry_run false".into(),
+                with(dry(), "dry_run", json!(false)),
+                false,
+            ),
+            (
+                "dry run, no changes key".into(),
+                without(dry(), "changes"),
+                false,
+            ),
+            (
+                "bad op".into(),
+                with(
+                    dry(),
+                    "changes",
+                    json!([{"op": "replace", "triple": "<a:b> <a:c> <a:d> ."}]),
+                ),
+                false,
+            ),
+            (
+                "refreshed is not records".into(),
+                with(real(), "refreshed", json!(["x"])),
+                false,
+            ),
+            (
+                "record minus stale".into(),
+                with(
+                    real(),
+                    "refreshed",
+                    json!([without(
+                        record("0192f0c4-0000-7000-8000-000000000902", false),
+                        "stale"
+                    )]),
+                ),
+                false,
+            ),
+            (
+                "record extra key".into(),
+                with(
+                    real(),
+                    "missing",
+                    json!([with(
+                        record("0192f0c4-0000-7000-8000-000000000904", true),
+                        "x",
+                        json!(1)
+                    )]),
+                ),
+                false,
+            ),
+            (
+                "forget payload".into(),
+                json!({"schema_version": 1,
+                    "resource": record("0192f0c4-0000-7000-8000-000000000902", false)}),
+                false,
+            ),
+        ];
+        for (name, instance, valid) in cases {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema refresh` should {} `{name}`: {instance}; errors: {errs:?}",
                 if valid { "accept" } else { "reject" }
             );
         }
