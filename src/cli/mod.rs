@@ -677,7 +677,15 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                     Err(storage::InspectError::Other) => Err(Error::not_a_regular_file(p, "other")),
                     Err(storage::InspectError::Unreadable) => Err(Error::file_unreadable(p)),
                 },
-            )?;
+            )
+            .map_err(|mut err| {
+                // Store paths are hand-editable: keep control characters off the
+                // terminal in text mode. The JSON message and details stay raw.
+                if !cli.json {
+                    err.message = printable(&err.message);
+                }
+                err
+            })?;
             for record in done
                 .value
                 .refreshed
