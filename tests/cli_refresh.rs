@@ -870,4 +870,92 @@ mod goal {
         let out2 = env.run(["schema", "refresh", "--json"]);
         assert_eq!(out2.stdout, out.stdout);
     }
+
+    // ---- a path taken from the store never drives the terminal ---------------------------------
+
+    /// Renames files/edited.txt to `name` (raw, may hold control characters) and points R2's
+    /// recorded `dcat:downloadURL` at it, percent-encoded as `encoded`.
+    fn rename_r2(env: &Env, name: &str, encoded: &str) {
+        let from = env.root.join("files/edited.txt");
+        std::fs::rename(&from, env.root.join("files").join(name)).unwrap();
+        let ttl = env.data().join("resources.ttl");
+        let text = std::fs::read_to_string(&ttl).unwrap();
+        let old = format!("file://{}/files/edited.txt>", env.root.display());
+        assert!(text.contains(&old), "fixture URL of R2 not found");
+        let new = format!("file://{}/files/{encoded}>", env.root.display());
+        std::fs::write(&ttl, text.replace(&old, &new)).unwrap();
+    }
+
+    #[test]
+    fn refresh_error_text_escapes_symlink_path() {
+        for (name, encoded, escaped) in [
+            ("e\u{1b}[31mX", "e%1B%5B31mX", "e\\u{1b}[31mX"),
+            ("a\nb", "a%0Ab", "a\\u{a}b"),
+        ] {
+            let env = Env::new();
+            let target = env.root.join("target.bin");
+            write_file(&target, b"hello world\n", NEW_SECS);
+            rename_r2(&env, name, encoded);
+            let link = env.root.join("files").join(name);
+            std::fs::remove_file(&link).unwrap();
+            symlink(&target, &link).unwrap();
+            let before = env.state();
+            let out = env.run(["refresh", "--all"]);
+            assert_eq!(out.code, Some(1), "{encoded}: {}", out.stderr);
+            assert_eq!(out.stdout, "");
+            assert!(
+                !out.stderr.contains('\u{1b}'),
+                "{encoded}: raw ESC on stderr"
+            );
+            assert_eq!(
+                out.stderr,
+                format!(
+                    "error: /TMP/files/{escaped} is not a regular file; only regular files can be cataloged\nhint: Give the path of an existing regular file.\n"
+                ),
+                "{encoded}"
+            );
+            assert_eq!(env.state(), before, "{encoded}: nothing written");
+        }
+    }
+
+    #[test]
+    fn refresh_error_text_escapes_unreadable_path() {
+        let env = Env::new();
+        rename_r2(&env, "e\u{1b}[31mX", "e%1B%5B31mX");
+        if !made_unreadable(&env.root.join("files/e\u{1b}[31mX")) {
+            return; // root can read a mode 000 file
+        }
+        let before = env.state();
+        let out = env.run(["refresh", "--all"]);
+        assert_eq!(out.code, Some(1), "{}", out.stderr);
+        assert_eq!(out.stdout, "");
+        assert!(!out.stderr.contains('\u{1b}'), "raw ESC on stderr");
+        assert_eq!(
+            out.stderr,
+            "error: cannot read /TMP/files/e\\u{1b}[31mX\nhint: Check that you can read the file and the directories above it.\n"
+        );
+        assert_eq!(env.state(), before, "nothing written");
+    }
+
+    #[test]
+    fn refresh_error_json_keeps_raw_path() {
+        let env = Env::new();
+        let target = env.root.join("target.bin");
+        write_file(&target, b"hello world\n", NEW_SECS);
+        rename_r2(&env, "a\nb\u{1b}[31mX", "a%0Ab%1B%5B31mX");
+        let link = env.root.join("files/a\nb\u{1b}[31mX");
+        std::fs::remove_file(&link).unwrap();
+        symlink(&target, &link).unwrap();
+        let before = env.state();
+        let out = env.run(["--json", "refresh", "--all"]);
+        let e = failed(&out, 1, "NOT_A_REGULAR_FILE");
+        assert_eq!(e["error"]["details"]["path"], "/TMP/files/a\nb\u{1b}[31mX");
+        assert!(
+            out.stderr.contains("\\u001b") && !out.stderr.contains('\u{1b}'),
+            "serde escapes the path: {}",
+            out.stderr
+        );
+        assert_eq!(out.stderr.lines().count(), 1, "one line of JSON");
+        assert_eq!(env.state(), before, "nothing written");
+    }
 }
