@@ -62,6 +62,10 @@ _Avoid_: actor, author, owner
 To remove a Resource from the ontology while leaving its file untouched.
 _Avoid_: delete, remove, archive
 
+**Refresh**:
+To re-record a Resource's content hash, size and modification time from its file as it is now.
+_Avoid_: rescan, sync, update
+
 **Relink**:
 To point a Missing Resource at its file's new location.
 _Avoid_: repair, fix, move

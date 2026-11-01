@@ -34,6 +34,7 @@ const CASES: &[(&str, &str, &[&str])] = &[
     ("edit", "store", &["edit", STORED, "--title", "guard probe"]),
     ("find", "store", &["find", "--limit", "1"]),
     ("forget", "store", &["forget", STORED]),
+    ("refresh", "store", &["refresh", "--all"]),
     ("relate", "relations", &["relate", REL_R5, "annotates", REL_R2]),
     ("relation add", "relations", &["relation", "add", "guard-probe", "--parent", "dcterms:relation"]),
     ("relation list", "relations", &["relation", "list"]),

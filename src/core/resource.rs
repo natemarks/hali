@@ -145,6 +145,40 @@ pub fn add(
     catalog(ctx, store, facts, title, &[], &[], user_name)
 }
 
+/// The triples that say what a file is: its size, mtime and checksum, with the Resource's link to
+/// its own checksum node. Shared by `catalog` and `refresh`.
+fn file_quads(
+    resource: &NamedNode,
+    byte_size: u64,
+    modified: &str,
+    sha256: &str,
+) -> Vec<(NamedNode, NamedNodeRef<'static>, Term)> {
+    let checksum = checksum_node(resource);
+    vec![
+        (
+            resource.clone(),
+            named(dcat::BYTE_SIZE),
+            Literal::new_typed_literal(byte_size.to_string(), xsd::INTEGER).into(),
+        ),
+        (
+            resource.clone(),
+            named(dcterms::MODIFIED),
+            Literal::new_typed_literal(modified, xsd::DATE_TIME).into(),
+        ),
+        (
+            resource.clone(),
+            named(spdx::CHECKSUM),
+            checksum.clone().into(),
+        ),
+        (checksum.clone(), named(spdx::ALGORITHM), iri(spdx::SHA256)),
+        (
+            checksum,
+            named(spdx::CHECKSUM_VALUE),
+            Literal::new_typed_literal(sha256, xsd::HEX_BINARY).into(),
+        ),
+    ]
+}
+
 /// As `add`, typing a newly cataloged Resource with the Types `types` and tagging it with the
 /// Concepts `tags`.
 fn catalog(
@@ -173,7 +207,6 @@ fn catalog(
         Some(person) => (person, false),
         None => (urn(&ctx.next_id()), true),
     };
-    let checksum = checksum_node(&resource);
     let title = title.unwrap_or_else(|| default_title(&facts.path));
     let url = NamedNode::new(file_url(&facts.path))
         .map_err(|_| Error::usage("the path does not make a valid file URL"))?;
@@ -187,23 +220,6 @@ fn catalog(
             Literal::new_simple_literal(title).into(),
         ),
         (&resource, named(dcat::DOWNLOAD_URL), url.into()),
-        (
-            &resource,
-            named(dcat::BYTE_SIZE),
-            Literal::new_typed_literal(facts.byte_size.to_string(), xsd::INTEGER).into(),
-        ),
-        (
-            &resource,
-            named(dcterms::MODIFIED),
-            Literal::new_typed_literal(facts.modified.clone(), xsd::DATE_TIME).into(),
-        ),
-        (&resource, named(spdx::CHECKSUM), checksum.clone().into()),
-        (&checksum, named(spdx::ALGORITHM), iri(spdx::SHA256)),
-        (
-            &checksum,
-            named(spdx::CHECKSUM_VALUE),
-            Literal::new_typed_literal(facts.sha256.clone(), xsd::HEX_BINARY).into(),
-        ),
         (
             &catalog_record,
             named(rdf::TYPE.as_str()),
@@ -247,10 +263,15 @@ fn catalog(
     }
 
     let graph = File::Resources.graph();
-    let quads: Vec<Quad> = triples
+    let mut quads: Vec<Quad> = triples
         .into_iter()
         .map(|(s, p, o)| Quad::new(s.clone(), p, o, graph.clone()))
         .collect();
+    quads.extend(
+        file_quads(&resource, facts.byte_size, &facts.modified, &facts.sha256)
+            .into_iter()
+            .map(|(s, p, o)| Quad::new(s, p, o, graph.clone())),
+    );
     validate::guard(store, &quads, &[])?;
     let changes = apply(store, &quads, &[]);
     Ok(Mutation {
@@ -619,6 +640,160 @@ pub fn forget(
     let changes = apply(store, &[], &removed);
     Ok(Mutation {
         value: was,
+        changes,
+    })
+}
+
+/// Which Resources `refresh` considers.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Target {
+    /// Every cataloged Resource, in id order.
+    All,
+    /// These bare ids, in argument order.
+    Ids(Vec<String>),
+}
+
+/// What was read of a file by hashing it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Hashed {
+    pub byte_size: u64,
+    /// The mtime, `YYYY-MM-DDTHH:MM:SSZ`.
+    pub modified: String,
+    /// Lowercase hex.
+    pub sha256: String,
+}
+
+/// What hashing found at a Resource's path.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Seen {
+    /// No regular file there any more.
+    Missing,
+    Hashed(Hashed),
+}
+
+/// The outcome of `refresh`; `missing` and `stale` of the records are left for the caller.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Refreshed {
+    pub refreshed: Vec<Record>,
+    pub missing: Vec<Record>,
+    pub unchanged: usize,
+}
+
+/// The quads to add and to remove so that `resource` records `hashed`: its size, mtime and
+/// checksum value, and a single checksum link to its own node. The algorithm triple is kept.
+/// Both are empty when the store already says so.
+pub(crate) fn refresh_one(
+    store: &Store,
+    resource: &NamedNode,
+    hashed: &Hashed,
+) -> (Vec<Quad>, Vec<Quad>) {
+    let graph = File::Resources.graph();
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    for (s, p, o) in file_quads(resource, hashed.byte_size, &hashed.modified, &hashed.sha256) {
+        if p.as_str() == spdx::ALGORITHM {
+            continue;
+        }
+        let want = Quad::new(s.clone(), p, o, graph.clone());
+        let held: Vec<Quad> = store
+            .quads_for_pattern(
+                Some(s.as_ref().into()),
+                Some(p),
+                None,
+                Some(graph.as_ref().into()),
+            )
+            .map(|q| q.expect("reading the in-memory store"))
+            .collect();
+        if held.len() == 1 && held[0] == want {
+            continue;
+        }
+        removed.extend(held);
+        added.push(want);
+    }
+    (added, removed)
+}
+
+/// Re-records what the files of Resources are now (spec §9.1 **Refresh**). `stat` gives the size
+/// and mtime (seconds) of the regular file at a recorded path; `hash` reads it. Every Resource is
+/// resolved before any file is read. Named Resources are always hashed; `All` hashes only the
+/// Stale ones. A Resource with no regular file is listed as missing and left alone. The changes
+/// of all Resources are one mutation with one SHACL check; on an error the store is untouched.
+pub fn refresh(
+    ctx: &Context,
+    store: &mut Store,
+    target: &Target,
+    stat: impl Fn(&str) -> Option<(u64, i64)>,
+    mut hash: impl FnMut(&str) -> Result<Seen, Error>,
+) -> Result<Mutation<Refreshed>, Error> {
+    let mut ids: Vec<String> = Vec::new();
+    let named_only = match target {
+        Target::All => {
+            ids = subjects(store, rdf::TYPE.as_str(), iri(RESOURCE).as_ref())
+                .iter()
+                .map(id_of)
+                .collect();
+            ids.sort();
+            false
+        }
+        Target::Ids(given) => {
+            let mut seen = HashSet::new();
+            for id in given {
+                known(store, id)?;
+                if seen.insert(id.clone()) {
+                    ids.push(id.clone());
+                }
+            }
+            true
+        }
+    };
+
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    let mut refreshed = Vec::new();
+    let mut missing = Vec::new();
+    let mut unchanged = 0;
+    for id in &ids {
+        let resource = urn(id);
+        let before = record(ctx, store, &resource);
+        let seen = stat(&before.path);
+        let Some(stats) = seen else {
+            missing.push(resource);
+            continue;
+        };
+        let mut observed = before.clone();
+        observed.observe(Some(stats));
+        if !named_only && !observed.stale {
+            unchanged += 1;
+            continue;
+        }
+        match hash(&before.path)? {
+            Seen::Missing => missing.push(resource),
+            Seen::Hashed(hashed) => {
+                let (mut add, mut remove) = refresh_one(store, &resource, &hashed);
+                if add.is_empty() && remove.is_empty() {
+                    unchanged += 1;
+                } else {
+                    touch(ctx, store, &resource, &mut add, &mut remove);
+                    added.extend(add);
+                    removed.extend(remove);
+                    refreshed.push(resource);
+                }
+            }
+        }
+    }
+
+    let changes = if added.is_empty() && removed.is_empty() {
+        Vec::new()
+    } else {
+        validate::guard(store, &added, &removed)?;
+        apply(store, &added, &removed)
+    };
+    Ok(Mutation {
+        value: Refreshed {
+            refreshed: refreshed.iter().map(|r| record(ctx, store, r)).collect(),
+            missing: missing.iter().map(|r| record(ctx, store, r)).collect(),
+            unchanged,
+        },
         changes,
     })
 }
