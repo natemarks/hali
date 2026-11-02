@@ -391,14 +391,22 @@ fn parse_limit(limit: &str) -> Result<usize, String> {
     }
 }
 
-/// Makes stored text safe to print: control and bidi/format characters become a visible
-/// `\u{..}` escape, so a hand-edited store cannot drive the terminal or forge rows.
+/// Makes outside text safe to print: control, separator, bidi and invisible format characters
+/// become a visible `\u{..}` escape, so a hand-edited store or a hostile argument cannot drive
+/// the terminal or forge rows (spec §9.3). ZWNJ and ZWJ are kept: scripts need them.
 fn printable(text: &str) -> String {
     use std::fmt::Write;
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
-        let unsafe_char = c.is_control()
-            || matches!(c, '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}');
+        let unsafe_char = c.is_control() // C0 (TAB, LF, CR), DEL, C1 (U+0085)
+            || matches!(c,
+                '\u{2028}' | '\u{2029}' // line and paragraph separators
+                | '\u{061C}' | '\u{200E}' | '\u{200F}' // bidi marks
+                | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' // bidi embeddings, isolates
+                | '\u{00AD}' | '\u{180E}' | '\u{200B}' // invisible format characters
+                | '\u{2060}'..='\u{2064}' | '\u{206A}'..='\u{206F}'
+                | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{E0000}'..='\u{E007F}'); // tag characters
         if unsafe_char {
             write!(out, "\\u{{{:x}}}", u32::from(c)).expect("writing to a String");
         } else {
@@ -677,15 +685,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                     Err(storage::InspectError::Other) => Err(Error::not_a_regular_file(p, "other")),
                     Err(storage::InspectError::Unreadable) => Err(Error::file_unreadable(p)),
                 },
-            )
-            .map_err(|mut err| {
-                // Store paths are hand-editable: keep control characters off the
-                // terminal in text mode. The JSON message and details stay raw.
-                if !cli.json {
-                    err.message = printable(&err.message);
-                }
-                err
-            })?;
+            )?;
             for record in done
                 .value
                 .refreshed
@@ -1676,13 +1676,22 @@ fn report(err: &Error, json: bool) {
         );
         return;
     }
-    eprintln!("error: {}", err.message);
+    eprint!("{}", error_text(err));
+}
+
+/// What text mode writes to stderr for an error: an `error:` line, then a `hint:` line. The
+/// message, fix and command are each escaped for the terminal (spec §9.3), so outside text
+/// cannot add lines or drive the terminal. `details` is never printed.
+pub fn error_text(err: &Error) -> String {
+    let mut text = format!("error: {}\n", printable(&err.message));
     if let Some(fix) = &err.suggested_fix {
+        let fix = printable(fix);
         match &err.suggested_command {
-            Some(cmd) => eprintln!("hint: {fix} Try: {cmd}"),
-            None => eprintln!("hint: {fix}"),
+            Some(cmd) => text.push_str(&format!("hint: {fix} Try: {}\n", printable(cmd))),
+            None => text.push_str(&format!("hint: {fix}\n")),
         }
     }
+    text
 }
 
 type Injected = (Box<dyn Clock>, Box<dyn IdGen>);
@@ -1770,6 +1779,14 @@ mod tests {
             printable("a\u{1b}b\u{7f}\u{85}\u{202e}\n"),
             "a\\u{1b}b\\u{7f}\\u{85}\\u{202e}\\u{a}"
         );
+        assert_eq!(
+            printable(
+                "\t\r\u{2028}\u{2029}\u{61c}\u{ad}\u{180e}\u{200b}\u{2060}\u{206f}\u{feff}\u{fff9}\u{e0041}"
+            ),
+            "\\u{9}\\u{d}\\u{2028}\\u{2029}\\u{61c}\\u{ad}\\u{180e}\\u{200b}\\u{2060}\\u{206f}\\u{feff}\\u{fff9}\\u{e0041}"
+        );
+        let kept = "\u{200c}\u{200d}\u{a0}\u{34f}\u{fe0f}\u{fffd}\u{3164}\u{2065}\u{2070}";
+        assert_eq!(printable(kept), kept);
         assert_eq!(printable("café 日本"), "café 日本");
     }
 }
