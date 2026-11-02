@@ -335,8 +335,9 @@ impl Error {
             json!({"concept": concept, "tagged": tagged, "narrower": narrower}),
         )
         .fix(&format!(
-            "Untag the Resources (hali edit <ref> --remove-tag {id}) and unlink the narrower Concepts (hali concept edit <C> --remove-broader {id}), then retry.",
-            id = shell_quote(concept)
+            "Untag the Resources (hali edit <ref> {tag}) and unlink the narrower Concepts (hali concept edit <C> {broader}), then retry.",
+            tag = flag_value("--remove-tag", concept),
+            broader = flag_value("--remove-broader", concept)
         ));
         err.suggested_command = Some(if tagged > 0 {
             format!("hali find --exact {}", flag_value("--tag", concept))
@@ -395,7 +396,7 @@ impl Error {
         )
         .fix(&format!(
             "Remove the relations (hali unrelate <ref> {} <ref>) and remove its sub-relations first (hali relation remove <S>), then retry.",
-            shell_quote(id)
+            positional(id)
         ));
         err.suggested_command = Some("hali relation list".to_string());
         err
@@ -428,7 +429,7 @@ impl Error {
         )
         .fix(&format!(
             "Remove them (hali unrelate <ref> <relation> {}), or forget with --force to remove them too, then retry.",
-            shell_quote(resource)
+            positional(resource)
         ));
         err.suggested_command = Some(format!("hali show {}", shell_quote(resource)));
         err
