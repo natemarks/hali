@@ -403,9 +403,9 @@ hali generate completions <bash|zsh|fish>
   ```
   `show` adds `relations` and the catalog record. `relations` holds `{"direction":"out"|"in","relation":"<relation id>","resource":<Resource record>}` for every distinct triple, in any graph, whose predicate is a relation kind and whose other end is a cataloged Resource: `out` when the shown Resource is the subject, `in` when it is the object. A relation of a Resource to itself is listed once, as `out`; a dangling end is skipped (`validate` reports it). They are sorted `out` before `in`, then by relation id, then by the other Resource's id, and the nested records carry `missing` and `stale` like the shown one. Text: after `modified`, one line per relation, `relation<TAB>-> <relation id> <id> "<title>"` for `out` and `relation<TAB><- <relation id> <id> "<title>"` for `in`.
 - **`--path-only`** prints one absolute path per line (`find`, `show`, `new`).
-- **No pager.** No color when stdout isn't a TTY or `NO_COLOR` is set.
+- **No pager.** No color when stdout isn't a TTY or `NO_COLOR` is set. A usage error is never colored (§9.4).
 - **`find` never returns file content.**
-- **Escaped for the terminal** means each control character (C0, DEL, C1), line or paragraph separator (U+2028, U+2029), bidi control (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) and invisible format character (U+00AD, U+180E, U+200B, U+2060–U+2064, U+206A–U+206F, U+FEFF, U+FFF9–U+FFFB, U+E0000–U+E007F) is printed as `\u{<hex>}`; everything else, ZWNJ and ZWJ included, is printed as is. `--json` output is never escaped this way.
+- **Escaped for the terminal** means each control character (C0, DEL, C1), line or paragraph separator (U+2028, U+2029), bidi control (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) and invisible format character (U+00AD, U+180E, U+200B, U+2060–U+2064, U+206A–U+206F, U+FEFF, U+FFF9–U+FFFB, U+E0000–U+E007F) is printed as `\u{<hex>}`; everything else, ZWNJ and ZWJ included, is printed as is. `--json` output is never escaped this way. The list is explicit: other invisible format characters (such as the Arabic number signs U+0600–U+0605, U+06DD, U+070F, and script-specific format controls), variation selectors, the combining grapheme joiner, the Mongolian free variation selectors and the Hangul fillers are deliberately not escaped, because they are part of real text in some scripts. They can make two different ids look the same, but they cannot move the cursor, set the title or add a line.
 
 ### 9.4 Exit codes and errors
 | Code | Meaning |
@@ -420,7 +420,7 @@ hali generate completions <bash|zsh|fish>
   {"schema_version":1,"error":{"rule":"UNKNOWN_CONCEPT","message":"…","details":{"concept":"ml","suggestions":[]},
    "suggested_fix":"…","suggested_command":"hali --dry-run concept add ml"}}
   ```
-- **In text mode**, the output is one `error:` line plus a `hint:` line; the message, the suggested fix and the suggested command are each escaped for the terminal (§9.3), so outside text can neither add lines nor drive the terminal.
+- **In text mode**, the output is one `error:` line plus a `hint:` line; the message, the suggested fix and the suggested command are each escaped for the terminal (§9.3), so outside text can neither add lines nor drive the terminal. A usage error that clap reports itself (an unknown subcommand or flag, a missing or invalid argument, an unknown `schema` name) keeps clap's layout without colour. Every argument it repeats is escaped for the terminal, and so is the rest of its text apart from its line breaks.
 - **Size:** errors stay well under 10k characters.
 - **Rules** (SCREAMING_SNAKE, minimum set): `UNKNOWN_RESOURCE`, `UNKNOWN_CONCEPT`, `UNKNOWN_TYPE`, `UNKNOWN_RELATION`, `LABEL_TAKEN`, `POSSIBLE_MOVE`, `FORGET_BLOCKED_BY_RELATIONS`, `IN_USE`, `HASH_MISMATCH`, `NOT_A_REGULAR_FILE`, `NON_UTF8_PATH`, `FILE_UNREADABLE`, `SHACL_VIOLATION`, `CONFIRMATION_REQUIRED`, `READ_ONLY_QUERY`, `STORE_LOCKED`.
 
