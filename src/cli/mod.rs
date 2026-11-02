@@ -20,7 +20,7 @@ use std::process::ExitCode;
 const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Parser)]
-#[command(name = "hali", version, about)]
+#[command(name = "hali", bin_name = "hali", version, about)]
 struct Cli {
     /// Print JSON instead of text
     #[arg(long, global = true)]
