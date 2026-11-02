@@ -177,6 +177,10 @@ mod goal {
             vec!["hali", "refresh"],
             vec!["hali", "refresh", "--all", "R1"],
             vec!["hali", "find", "--limit", "zz"],
+            // clap's `tip: to pass '<arg>' as a value` line (ContextKind::Suggested).
+            vec!["hali", "schema", "--bogus"],
+            vec!["hali", "concept", "show", "--bogus"],
+            vec!["hali", "edit", "--bogus"],
         ] {
             let plain = usage_text(command().try_get_matches_from(&argv).unwrap_err());
             let stripped = styled
@@ -227,5 +231,166 @@ mod goal {
         let text = usage_text(err);
         assert!(!text.contains('\u{1b}'), "raw ESC in {text:?}");
         assert!(text.contains("\\u{1b}]0;x\\u{7}"), "{text:?}");
+    }
+
+    /// Escapes every character of the contract's set, as `usage_text` shows it.
+    fn escape_str(s: &str) -> String {
+        s.chars()
+            .map(|c| {
+                if is_escaped(c) {
+                    escape(c)
+                } else {
+                    c.to_string()
+                }
+            })
+            .collect()
+    }
+
+    fn stripped_clap(argv: &[String]) -> String {
+        command()
+            .styles(Styles::styled())
+            .try_get_matches_from(argv)
+            .unwrap_err()
+            .render()
+            .to_string()
+    }
+
+    fn argv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// clap's `tip: to pass '<arg>' as a value, use '-- <arg>'` line survives, escaped.
+    #[test]
+    fn tip_line_escaped() {
+        let ordinary = usage_text(
+            command()
+                .try_get_matches_from(["hali", "schema", "--bogus"])
+                .unwrap_err(),
+        );
+        assert!(
+            ordinary.contains("\n  tip: to pass '--bogus' as a value, use '-- --bogus'\n"),
+            "{ordinary:?}"
+        );
+        let hostile = "--a\u{1b}]0;x\u{7}";
+        let text = usage_text(
+            command()
+                .try_get_matches_from(["hali", "schema", hostile])
+                .unwrap_err(),
+        );
+        assert!(!text.contains('\u{1b}'), "raw ESC in {text:?}");
+        let shown = "--a\\u{1b}]0;x\\u{7}";
+        assert!(
+            text.contains(&format!(
+                "\n  tip: to pass '{shown}' as a value, use '-- {shown}'\n"
+            )),
+            "{text:?}"
+        );
+    }
+
+    /// One argv per clap `ContextKind` this command tree can emit, with the hostile value in
+    /// each position it can occupy. Ordinary values equal clap's own text without colour;
+    /// hostile ones leave no character of the escaped set (but LF) and add no line.
+    ///
+    /// Kinds, and where the table reaches them:
+    /// - InvalidSubcommand: `hali X`; SuggestedSubcommand: `hali fnd` (the suggestion comes from
+    ///   the command names, never argv, so it only has an ordinary case);
+    /// - InvalidArg: `hali --X`, `hali find --X`; SuggestedArg: `hali find --lmit` (likewise);
+    /// - Suggested (the `tip:` line): `schema --X`, `concept show --X`, `edit --X`;
+    /// - InvalidValue and ValidValue: `find --limit X`, `find --sort X`; SuggestedValue:
+    ///   `find --sort modifid` (from the valid values, so ordinary only);
+    /// - PriorArg: `refresh --all R1` (the text names the other argument, never argv, so ordinary only);
+    ///   Usage: `concept add`, `describe X`;
+    /// - Custom domain messages (InvalidValue sources): `concept add X`, `type add X`,
+    ///   `relation add X`.
+    ///
+    /// Not emittable here: ActualNumValues, ExpectedNumValues and MinValues (no argument sets
+    /// `num_args`), TrailingArg (no `trailing_var_arg`), SuggestedCommand (clap raises it only
+    /// for a built-in `help` misuse this tree cannot reach through argv).
+    #[test]
+    fn every_context_kind() {
+        type Build = fn(&str) -> Vec<String>;
+        let table: Vec<(&str, Build)> = vec![
+            ("InvalidSubcommand", |x| argv(&["hali", x])),
+            ("InvalidSubcommand (nested)", |x| {
+                argv(&["hali", "concept", x])
+            }),
+            ("InvalidArg", |x| vec!["hali".into(), format!("--{x}")]),
+            ("InvalidArg (nested)", |x| {
+                vec!["hali".into(), "find".into(), format!("--{x}")]
+            }),
+            ("Suggested schema", |x| {
+                vec!["hali".into(), "schema".into(), format!("--{x}")]
+            }),
+            ("Suggested concept show", |x| {
+                vec![
+                    "hali".into(),
+                    "concept".into(),
+                    "show".into(),
+                    format!("--{x}"),
+                ]
+            }),
+            ("Suggested edit", |x| {
+                vec!["hali".into(), "edit".into(), format!("--{x}")]
+            }),
+            ("InvalidValue limit", |x| {
+                argv(&["hali", "find", "--limit", x])
+            }),
+            ("InvalidValue/ValidValue sort", |x| {
+                argv(&["hali", "find", "--sort", x])
+            }),
+            ("Usage describe", |x| argv(&["hali", "describe", x])),
+            ("Custom concept add", |x| {
+                argv(&["hali", "concept", "add", x])
+            }),
+            ("Custom type add", |x| argv(&["hali", "type", "add", x])),
+            ("Custom relation add", |x| {
+                argv(&["hali", "relation", "add", x])
+            }),
+        ];
+        for (label, build) in &table {
+            // Ordinary value: clap's own text.
+            // (The domain parsers accept "bogus"; these are their ordinary rejections.)
+            let ordinary = match *label {
+                "Custom type add" | "Custom relation add" => "1x",
+                "Custom concept add" => "",
+                _ => "bogus",
+            };
+            let v = build(ordinary);
+            let plain = usage_text(command().try_get_matches_from(&v).unwrap_err());
+            assert_eq!(plain, stripped_clap(&v), "{label} {v:?}");
+            // Hostile values: no raw character of the set, the escaped text shown, no extra line.
+            for hostile in [
+                "a\u{1b}]0;x\u{7}b",
+                "a\u{9b}\u{202e}\u{200b}\u{e0041}b",
+                "a\nerror: forged",
+            ] {
+                let v = build(hostile);
+                let text = usage_text(command().try_get_matches_from(&v).unwrap_err());
+                for c in text.chars().filter(|&c| c != '\n') {
+                    assert!(!is_escaped(c), "{label}: raw {c:?} in {text:?}");
+                }
+                assert!(
+                    text.contains(&escape_str(hostile)),
+                    "{label}: {:?} not in {text:?}",
+                    escape_str(hostile)
+                );
+                assert_eq!(
+                    text.lines().count(),
+                    plain.lines().count(),
+                    "{label} {hostile:?}: {text:?}"
+                );
+            }
+        }
+        // Kinds whose value comes from the command tree itself: ordinary only.
+        for v in [
+            argv(&["hali", "fnd"]),
+            argv(&["hali", "find", "--lmit"]),
+            argv(&["hali", "find", "--sort", "modifid"]),
+            argv(&["hali", "refresh", "--all", "R1"]),
+            argv(&["hali", "concept", "add"]),
+        ] {
+            let plain = usage_text(command().try_get_matches_from(&v).unwrap_err());
+            assert_eq!(plain, stripped_clap(&v), "{v:?}");
+        }
     }
 }

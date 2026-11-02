@@ -249,6 +249,14 @@ mod goal {
                 format!("error: unknown schema `nope`; valid names: {names}\n{ROOT_FOOT}"),
             ),
             (
+                vec!["schema", "--bogus"],
+                "error: unexpected argument '--bogus' found\n\n  tip: to pass '--bogus' as a value, use '-- --bogus'\n\nUsage: hali schema [OPTIONS] [NAME]...\n\nFor more information, try '--help'.\n".to_string(),
+            ),
+            (
+                vec!["concept", "show", "--bogus"],
+                "error: unexpected argument '--bogus' found\n\n  tip: to pass '--bogus' as a value, use '-- --bogus'\n\nUsage: hali concept show [OPTIONS] <CONCEPT>\n\nFor more information, try '--help'.\n".to_string(),
+            ),
+            (
                 vec!["refresh"],
                 "error: the following required arguments were not provided:\n  <REF|--all>\n\nUsage: hali refresh <REF|--all>\n\nFor more information, try '--help'.\n".to_string(),
             ),
