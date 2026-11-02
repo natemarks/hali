@@ -303,7 +303,7 @@ Sources:
 - [CLI command surface and JSON contract](https://github.com/natemarks/mcp-local-notes/issues/60)
 - [Conventions for agent-friendly CLIs and agent docs](https://github.com/natemarks/mcp-local-notes/issues/63)
 
-One `hali` binary (clap 4, derive).
+One `hali` binary (clap 4, derive). Its help, usage errors and version always call it `hali`, whatever name it was started under: the name it was run as (`argv[0]`) is never printed.
 
 ### 9.1 Commands
 ```
