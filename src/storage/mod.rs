@@ -3,7 +3,10 @@
 //! Each source sits in its own named graph, `https://w3id.org/hali/graph/{name}`; nothing is
 //! put in the default graph.
 //!
-//! It also reads cataloged files (`inspect`, `stat`), only ever read-only.
+//! It also reads cataloged files (`inspect`, `stat`), only ever read-only, and walks
+//! directories for them (`walk`).
+
+pub mod walk;
 
 use crate::ontology::{CORE_TTL, PREFIXES, SHAPES_TTL};
 use oxigraph::model::vocab::rdf;
