@@ -20,8 +20,11 @@
 //!   form (the domain message does that today), so its literal holds `\u{1b}`, `\r` and the like
 //!   as the backslash text Debug produces; clap's own text does not escape that text further;
 //! - `schema <x>` lists the valid names (read from `hali schema`); only the unknown subcommand
-//!   and the value cases are asserted to take an argument holding `\n` without adding a line (the
-//!   contract escapes the context values clap repeats, and `schema`'s message is not one);
+//!   and the value cases are asserted to take an argument holding `\n` without adding a line;
+//!   `schema`'s message is custom text, not a clap context value, so `usage_text` cannot tell
+//!   which part is argv: `show_schema` escapes the name with `printable` (newline included)
+//!   before building the message, and `schema_newline_in_name` and
+//!   `schema_hostile_name_families` here are the authority (no unit test can cover it);
 //! - `--json` asserts only exit 2 and no raw §9.3 character other than `\n` in stdout or stderr
 //!   (#84 and #118 may change the text);
 //! - on a pty the output ends lines with CR LF, which is turned into LF before comparing; help on
@@ -285,6 +288,57 @@ mod goal {
             ),
         );
         assert_eq!(out.stderr.lines().count(), ordinary.stderr.lines().count());
+    }
+
+    /// `schema`'s message is custom text, not a clap context value: the name it repeats must be
+    /// escaped by `show_schema` itself, newline included, so a name cannot add a line.
+    #[test]
+    fn schema_newline_in_name() {
+        let env = Env::new();
+        let names = env.schema_names();
+        let ordinary = env.run(["schema", "zz"]);
+        assert_eq!(ordinary.code, Some(2), "{}", ordinary.stderr);
+        let out = env.run(["schema", "zz\nerror: forged"]);
+        assert_usage(
+            "schema newline",
+            &out,
+            &format!(
+                "error: unknown schema `zz\\u{{a}}error: forged`; valid names: {names}\n{ROOT_FOOT}"
+            ),
+        );
+        assert_eq!(out.stderr.lines().count(), ordinary.stderr.lines().count());
+        // a name given as several words is joined before it is repeated
+        let words = env.run(["schema", "zz", "error:\nforged"]);
+        assert_eq!(
+            words.stderr.lines().count(),
+            ordinary.stderr.lines().count(),
+            "{}",
+            words.stderr
+        );
+    }
+
+    /// Each hostile family, alone, in a `schema` name: shown as `\u{..}`, never raw, with the
+    /// line count of an ordinary unknown name.
+    #[test]
+    fn schema_hostile_name_families() {
+        let env = Env::new();
+        let names = env.schema_names();
+        let ordinary = env.run(["schema", "zz"]);
+        for (label, raw, shown) in [
+            ("CR", "zz\r", "zz\\u{d}"),
+            ("U+009B", "zz\u{9b}", "zz\\u{9b}"),
+            ("U+202E", "zz\u{202e}", "zz\\u{202e}"),
+            ("ESC", "zz\u{1b}[2J", "zz\\u{1b}[2J"),
+            ("OSC", "zz\u{1b}]0;PWN\u{7}", "zz\\u{1b}]0;PWN\\u{7}"),
+        ] {
+            let out = env.run(["schema", raw]);
+            assert_usage(
+                label,
+                &out,
+                &format!("error: unknown schema `{shown}`; valid names: {names}\n{ROOT_FOOT}"),
+            );
+            assert_eq!(out.stderr.lines().count(), ordinary.stderr.lines().count());
+        }
     }
 
     /// Guard: help and version are clap's, on stdout with exit 0; a bare command prints its help
