@@ -30,7 +30,6 @@
 //!   which has no `exec -a`), and bytes after CRLF to LF must equal the run through a symlink
 //!   named `hali`, for `--help`, no arguments and `concept`; `zz` must have no ESC at all.
 
-#[cfg(feature = "goal")]
 mod goal {
     use clap::builder::Styles;
     use std::ffi::{OsStr, OsString};
