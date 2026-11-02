@@ -395,19 +395,32 @@ fn parse_limit(limit: &str) -> Result<usize, String> {
 /// become a visible `\u{..}` escape, so a hand-edited store or a hostile argument cannot drive
 /// the terminal or forge rows (spec §9.3). ZWNJ and ZWJ are kept: scripts need them.
 fn printable(text: &str) -> String {
+    escape_where(text, escaped)
+}
+
+/// Like `printable`, but keeps line feeds: for text clap lays out itself.
+fn printable_lines(text: &str) -> String {
+    escape_where(text, |c| escaped(c) && c != '\n')
+}
+
+/// Whether spec §9.3 escapes `c`: the one place the list is written.
+fn escaped(c: char) -> bool {
+    c.is_control() // C0 (TAB, LF, CR), DEL, C1 (U+0085)
+        || matches!(c,
+            '\u{2028}' | '\u{2029}' // line and paragraph separators
+            | '\u{061C}' | '\u{200E}' | '\u{200F}' // bidi marks
+            | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' // bidi embeddings, isolates
+            | '\u{00AD}' | '\u{180E}' | '\u{200B}' // invisible format characters
+            | '\u{2060}'..='\u{2064}' | '\u{206A}'..='\u{206F}'
+            | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{E0000}'..='\u{E007F}') // tag characters
+}
+
+fn escape_where(text: &str, unsafe_char: impl Fn(char) -> bool) -> String {
     use std::fmt::Write;
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
-        let unsafe_char = c.is_control() // C0 (TAB, LF, CR), DEL, C1 (U+0085)
-            || matches!(c,
-                '\u{2028}' | '\u{2029}' // line and paragraph separators
-                | '\u{061C}' | '\u{200E}' | '\u{200F}' // bidi marks
-                | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' // bidi embeddings, isolates
-                | '\u{00AD}' | '\u{180E}' | '\u{200B}' // invisible format characters
-                | '\u{2060}'..='\u{2064}' | '\u{206A}'..='\u{206F}'
-                | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}'
-                | '\u{E0000}'..='\u{E007F}'); // tag characters
-        if unsafe_char {
+        if unsafe_char(c) {
             write!(out, "\\u{{{:x}}}", u32::from(c)).expect("writing to a String");
         } else {
             out.push(c);
@@ -443,11 +456,81 @@ fn env(key: &str) -> Option<String> {
 
 /// The clap command tree, for tests that enumerate every subcommand.
 pub fn command() -> clap::Command {
-    Cli::command()
+    Cli::command().styles(clap::builder::Styles::plain())
+}
+
+/// A clap usage error as text-mode stderr: clap's layout without colour, every argument it
+/// repeats (and the rest of its text) escaped per spec §9.3, line breaks of its own kept.
+pub fn usage_text(mut err: clap::Error) -> String {
+    use clap::error::{ContextKind, ContextValue};
+    let escaped_values: Vec<(ContextKind, ContextValue)> = err
+        .context()
+        .filter(|(kind, _)| *kind != ContextKind::Usage)
+        .map(|(kind, value)| {
+            let value = match value {
+                ContextValue::String(v) => ContextValue::String(printable(v)),
+                ContextValue::Strings(v) => {
+                    ContextValue::Strings(v.iter().map(|s| printable(s)).collect())
+                }
+                ContextValue::StyledStr(v) => {
+                    ContextValue::String(printable(&v.ansi().to_string()))
+                }
+                // Stays StyledStrs: the formatter only renders Suggested (the `tip:` line) in
+                // that form.
+                ContextValue::StyledStrs(v) => ContextValue::StyledStrs(
+                    v.iter()
+                        .map(|s| clap::builder::StyledStr::from(printable(&s.ansi().to_string())))
+                        .collect(),
+                ),
+                other => other.clone(),
+            };
+            (kind, value)
+        })
+        .collect();
+    for (kind, value) in escaped_values {
+        err.insert(kind, value);
+    }
+    printable_lines(&err.render().ansi().to_string())
+}
+
+/// Parses argv. Help and version output is clap's own; a usage error is rendered through
+/// `usage_text`, so argv never reaches the terminal raw. `Err` carries the exit code.
+fn parse() -> Result<Cli, ExitCode> {
+    use clap::FromArgMatches;
+    use clap::error::ErrorKind;
+    let first = match Cli::try_parse() {
+        Ok(cli) => return Ok(cli),
+        Err(err) => err,
+    };
+    if matches!(
+        first.kind(),
+        ErrorKind::DisplayHelp
+            | ErrorKind::DisplayVersion
+            | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+    ) {
+        let _ = first.print();
+        return Err(ExitCode::from(u8::try_from(first.exit_code()).unwrap_or(2)));
+    }
+    let err = match command()
+        .try_get_matches()
+        .and_then(|mut m| Cli::from_arg_matches_mut(&mut m))
+    {
+        Err(plain) => plain,
+        Ok(_) => first,
+    };
+    Err(usage(err))
+}
+
+fn usage(err: clap::Error) -> ExitCode {
+    let _ = std::io::stderr().write_all(usage_text(err).as_bytes());
+    ExitCode::from(2)
 }
 
 pub fn run() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = match parse() {
+        Ok(cli) => cli,
+        Err(code) => return code,
+    };
     if let Command::Schema { name } = &cli.command {
         return show_schema(&cli, name);
     }
@@ -487,16 +570,14 @@ fn show_schema(cli: &Cli, words: &[String]) -> ExitCode {
             print_json(&doc);
             ExitCode::SUCCESS
         }
-        None => Cli::command()
-            .error(
-                clap::error::ErrorKind::InvalidValue,
-                format!(
-                    "unknown schema `{}`; valid names: {}",
-                    words.join(" "),
-                    schema::names().join(", ")
-                ),
-            )
-            .exit(),
+        None => usage(command().error(
+            clap::error::ErrorKind::InvalidValue,
+            format!(
+                "unknown schema `{}`; valid names: {}",
+                printable(&words.join(" ")),
+                schema::names().join(", ")
+            ),
+        )),
     }
 }
 
