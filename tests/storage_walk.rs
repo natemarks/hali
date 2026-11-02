@@ -65,6 +65,16 @@ mod goal {
         "GIT_CONFIG_SYSTEM",
     ];
 
+    /// A sandbox, or return from the test (it printed why).
+    macro_rules! sandbox {
+        () => {
+            match Sandbox::new() {
+                Some(sb) => sb,
+                None => return,
+            }
+        };
+    }
+
     struct Sandbox {
         dir: tempfile::TempDir,
         root: PathBuf,
@@ -76,13 +86,30 @@ mod goal {
 
     impl Sandbox {
         /// `<tmp>/root` (the tree), `<tmp>/home` (HOME), `<tmp>/xdg` (XDG_CONFIG_HOME).
-        fn new() -> Sandbox {
+        ///
+        /// `None` (after a loud NOTE) when an ancestor of the sandbox holds an ignore file or a
+        /// `.git`: `ignore` reads those through "the root's parents", so the expectations of a
+        /// test would not hold, and a failure would be about the machine, not the walker.
+        fn new() -> Option<Sandbox> {
             let guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
             let dir = tempfile::Builder::new()
                 .prefix("hali-walk-")
                 .tempdir()
                 .unwrap();
             let base = dir.path().canonicalize().unwrap();
+            for ancestor in base.ancestors().skip(1) {
+                for name in [".gitignore", ".ignore", ".haliignore", ".git"] {
+                    let found = ancestor.join(name);
+                    if fs::symlink_metadata(&found).is_ok() {
+                        eprintln!(
+                            "NOTE: SKIPPED: {found:?} exists above the sandbox {base:?}; the \
+                             walk would honour it as a parent's ignore file or repository, so \
+                             this test proves nothing here. Set TMPDIR to a clean directory."
+                        );
+                        return None;
+                    }
+                }
+            }
             let (root, home, xdg) = (base.join("root"), base.join("home"), base.join("xdg"));
             for d in [&root, &home, &xdg] {
                 fs::create_dir(d).unwrap();
@@ -95,14 +122,14 @@ mod goal {
                 std::env::set_var("GIT_CONFIG_GLOBAL", home.join(".gitconfig"));
                 std::env::set_var("GIT_CONFIG_SYSTEM", base.join("no-system-gitconfig"));
             }
-            Sandbox {
+            Some(Sandbox {
                 dir,
                 root,
                 home,
                 xdg,
                 saved,
                 _guard: guard,
-            }
+            })
         }
 
         fn base(&self) -> PathBuf {
@@ -330,7 +357,7 @@ mod goal {
 
     #[test]
     fn hidden() {
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         write(&sb.root, "a.txt", "12345");
         write(&sb.root, ".hidden.txt", "h");
         write(&sb.root, ".hid/inner.txt", "i");
@@ -397,7 +424,7 @@ mod goal {
         // `.gitignore` is honoured only inside a git repository; `.ignore` and `.haliignore`
         // always; the ignore files themselves are hidden, so they are never yielded.
         {
-            let sb = Sandbox::new();
+            let sb = sandbox!();
             write(&sb.root, ".gitignore", "from-gitignore.txt\n");
             write(&sb.root, ".ignore", "from-ignore.txt\n");
             write(&sb.root, ".haliignore", "from-haliignore.txt\n");
@@ -422,7 +449,7 @@ mod goal {
         // Inside a repository: .gitignore at any depth, .git/info/exclude, .ignore, .haliignore
         // (also in subdirectories), with directory patterns, anchoring and negation.
         {
-            let sb = Sandbox::new();
+            let sb = sandbox!();
             make_repo(&sb.root);
             write(
                 &sb.root,
@@ -475,7 +502,7 @@ mod goal {
 
         // The global gitignore: $XDG_CONFIG_HOME/git/ignore ...
         {
-            let sb = Sandbox::new();
+            let sb = sandbox!();
             make_repo(&sb.root);
             write(&sb.xdg, "git/ignore", "xdg.txt\n");
             for n in ["xdg.txt", "keep.txt"] {
@@ -486,7 +513,7 @@ mod goal {
         }
         // ... unless core.excludesFile in ~/.gitconfig names another one, which then wins.
         {
-            let sb = Sandbox::new();
+            let sb = sandbox!();
             make_repo(&sb.root);
             let custom = sb.base().join("custom-ignore");
             fs::write(&custom, "cfg.txt\n").unwrap();
@@ -506,7 +533,7 @@ mod goal {
         // The root's parents: .ignore and .haliignore of any ancestor, and the .gitignore and
         // .git/info/exclude of an ancestor that is a repository.
         {
-            let sb = Sandbox::new();
+            let sb = sandbox!();
             let top = sb.base();
             make_repo(&top);
             write(&top, ".gitignore", "pg.txt\n");
@@ -527,7 +554,7 @@ mod goal {
 
     #[test]
     fn no_ignore() {
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         make_repo(&sb.root);
         write(&sb.root, ".gitignore", "g.txt\n");
         write(&sb.root, ".git/info/exclude", "e.txt\n");
@@ -591,7 +618,7 @@ mod goal {
 
     #[test]
     fn bad_ignore_file() {
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         make_repo(&sb.root);
         // Two invalid lines in one file are reported once; the valid lines still apply.
         write(
@@ -627,7 +654,7 @@ mod goal {
 
     #[test]
     fn builtin_excludes() {
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         make_repo(&sb.root);
         for rel in [
             "keep.txt",
@@ -696,7 +723,7 @@ mod goal {
 
     #[test]
     fn user_excludes() {
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         for rel in [
             "a.log",
             "sub/b.log",
@@ -774,7 +801,7 @@ mod goal {
 
     #[test]
     fn symlinks() {
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         let outside = sb.base().join("outside");
         write(&outside, "o.txt", "o");
         write(&outside, "inner/oo.txt", "o");
@@ -823,7 +850,7 @@ mod goal {
     fn symlink_no_bypass() {
         // A file symlink inside the root can never yield a file the walk would not yield at
         // its real path: the link is silent, and the real file keeps its own treatment.
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         write(&sb.root, ".haliignore", "ign.txt\n");
         for rel in [
             "keep.txt",
@@ -899,7 +926,7 @@ mod goal {
     fn symlinked_root_alias() {
         // The walk is built from the canonical root, so a symlink alias of the root gives the
         // same result as the root: one file, at its real path (not `alias/f.txt` as well).
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         write(&sb.root, "f.txt", "f");
         symlink("f.txt", sb.root.join("z-link")).unwrap();
         let alias = sb.base().join("alias");
@@ -926,7 +953,7 @@ mod goal {
     fn prune_via_alias() {
         // A data dir given as a symlinked alias is still pruned: it is compared canonicalized.
         // (Without the canonicalization the alias never equals the walked path.)
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         write(&sb.root, "keep.txt", "x");
         write(&sb.root, "state/hali/d.ttl", "x");
         write(&sb.root, "state/hali/sub/e.ttl", "x");
@@ -947,7 +974,7 @@ mod goal {
 
     #[test]
     fn special_files() {
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         write(&sb.root, "ok.txt", "ok");
         write(&sb.root, "sub/after.txt", "x");
         let fifo = std::ffi::CString::new(sb.root.join("pipe").as_os_str().as_bytes()).unwrap();
@@ -1009,7 +1036,7 @@ mod goal {
                  that it is walked, not that it is Unreadable"
             );
         }
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         write(&sb.root, "a-ok.txt", "x");
         write(&sb.root, "secret.txt", "x");
         write(&sb.root, "locked/inner.txt", "x");
@@ -1059,7 +1086,7 @@ mod goal {
         // IN_OPEN watch on every directory of the tree sees no open of any other name. (A
         // positive control proves the watch works here; if it cannot, the test says so and
         // returns rather than guessing.)
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         make_repo(&sb.root);
         write(&sb.root, ".gitignore", "g.txt\n");
         write(&sb.root, ".haliignore", "h.txt\n");
@@ -1164,7 +1191,7 @@ mod goal {
 
     #[test]
     fn non_utf8() {
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         write(&sb.root, "a.txt", "x");
         write(&sb.root, "z.txt", "x");
         let bad_file = OsStr::from_bytes(b"bad\xff.txt");
@@ -1196,7 +1223,7 @@ mod goal {
 
     #[test]
     fn determinism() {
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         // Created in an order unrelated to the sorted one.
         for rel in [
             "z.txt",
@@ -1275,7 +1302,7 @@ mod goal {
 
     #[test]
     fn reads_only() {
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         make_repo(&sb.root);
         write(&sb.root, ".gitignore", "g.txt\n{bad\n");
         write(&sb.root, ".haliignore", "h.txt\n");
@@ -1318,9 +1345,11 @@ mod goal {
     // ---- 7. ignore files fail closed ----
     //
     // A candidate ignore file (`.gitignore`, `.ignore`, `.haliignore`), or a `.git` file, that
-    // is not a regular file, is over 1 MiB, is not valid UTF-8 or cannot be read is yielded as
-    // `Skipped { BadIgnoreFile, path: that file }` and its directory is not walked. For the
-    // root or a parent of the root, one such skip is yielded and nothing is walked.
+    // is not a regular file, is over 256 KiB, has `{` nesting deeper than 100 levels, is not
+    // valid UTF-8 or cannot be read is yielded as `Skipped { BadIgnoreFile, path: that file }`
+    // and its directory is not walked. The same when the crate cannot build the matcher for a
+    // file that passed those checks. For the root or a parent of the root, one such skip is
+    // yielded and nothing is walked.
 
     #[test]
     fn ignore_file_fifo_never_opened() {
@@ -1328,7 +1357,7 @@ mod goal {
         // block there. The FIFO is a `.ignore` (honoured in any directory).
         // (1) in the root: nothing is walked.
         {
-            let sb = Sandbox::new();
+            let sb = sandbox!();
             write(&sb.root, "a.txt", "x");
             write(&sb.root, "sub/b.txt", "x");
             mkfifo(&sb.root.join(".ignore"));
@@ -1343,7 +1372,7 @@ mod goal {
         }
         // (2) in a subdirectory: that directory is not walked, the rest is.
         {
-            let sb = Sandbox::new();
+            let sb = sandbox!();
             write(&sb.root, "ok/y.txt", "x");
             write(&sb.root, "sub/x.txt", "x");
             write(&sb.root, "sub/deeper/z.txt", "x");
@@ -1358,7 +1387,7 @@ mod goal {
         }
         // (3) in a grandparent of the root: one skip, nothing walked.
         {
-            let sb = Sandbox::new();
+            let sb = sandbox!();
             let gp = sb.base().join("gp");
             let root = gp.join("mid/root");
             write(&root, "a.txt", "x");
@@ -1376,7 +1405,7 @@ mod goal {
         // (the crate follows the `.git` file to it). The skip names the `.git` file or the
         // FIFO.
         {
-            let sb = Sandbox::new();
+            let sb = sandbox!();
             let (elsewhere, common) = (sb.base().join("elsewhere"), sb.base().join("common"));
             write(&sb.root, "a.txt", "x");
             write(
@@ -1405,7 +1434,7 @@ mod goal {
     fn ignore_file_device() {
         // `.haliignore -> /dev/zero` never ends. The walk runs in a child under a 1 GiB
         // address-space cap, so a walker that reads it dies there instead of eating the host.
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         write(&sb.root, "a.txt", "x");
         symlink("/dev/zero", sb.root.join(".haliignore")).unwrap();
         let all = run_capped(&sb.root).unwrap_or_else(|e| panic!("root case: {e}"));
@@ -1418,7 +1447,7 @@ mod goal {
         );
 
         drop(sb);
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         write(&sb.root, "ok/y.txt", "x");
         write(&sb.root, "sub/x.txt", "x");
         symlink("/dev/zero", sb.root.join("sub/.ignore")).unwrap();
@@ -1433,7 +1462,7 @@ mod goal {
     #[test]
     fn huge_ignore_file_bounded() {
         // A 10 MB single line: reported without being parsed, and the walk stays small.
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         write(&sb.root, "ok.txt", "x");
         write(&sb.root, "sub/x.txt", "x");
         write(
@@ -1451,20 +1480,21 @@ mod goal {
 
     #[test]
     fn ignore_file_size_boundary() {
-        // 1 MiB exactly is accepted; one byte more is not. Comment lines keep it cheap.
+        // 256 KiB (262,144 bytes) exactly is accepted; one byte more is not. Comment lines keep
+        // it cheap.
         let line = format!("#{}\n", "c".repeat(1022));
         assert_eq!(line.len(), 1024);
-        let one_mib = line.repeat(1024);
-        assert_eq!(one_mib.len(), 1 << 20);
+        let at_cap = line.repeat(256);
+        assert_eq!(at_cap.len(), 262_144);
 
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         write(&sb.root, "sub/x.txt", "x");
-        write(&sb.root, "sub/.haliignore", &one_mib);
+        write(&sb.root, "sub/.haliignore", &at_cap);
         let (got, skips) = outcome(&sb, opts());
         assert_eq!(got, ["sub/x.txt"]);
         assert!(skips.is_empty(), "{skips:?}");
 
-        write(&sb.root, "sub/.haliignore", &format!("{one_mib}\n"));
+        write(&sb.root, "sub/.haliignore", &format!("{at_cap}\n"));
         let (got, skips) = outcome(&sb, opts());
         assert!(got.is_empty(), "{got:?}");
         assert_eq!(
@@ -1473,11 +1503,175 @@ mod goal {
         );
     }
 
+    /// `n` nested brace groups around one name: `{{{a}}}`.
+    fn nested_braces(n: usize) -> String {
+        format!("{}a{}\n", "{".repeat(n), "}".repeat(n))
+    }
+
+    #[test]
+    fn ignore_file_deep_nesting() {
+        // 100,000 nested braces fit in 200 KB, under the size cap. globset recurses once per
+        // level, so unchecked this overflows the stack and aborts the whole process (SIGABRT).
+        // Each placement runs in the capped child process: an abort there fails the test
+        // cleanly instead of killing the test run.
+        let deep = nested_braces(100_000);
+        assert!(deep.len() < 262_144, "the file must pass the size cap");
+
+        // (1) in a subdirectory: reported at that file, the directory is not walked, the
+        // siblings are yielded and the process survives.
+        {
+            let sb = sandbox!();
+            write(&sb.root, "a.txt", "x");
+            write(&sb.root, "ok/y.txt", "x");
+            write(&sb.root, "sub/x.txt", "x");
+            write(&sb.root, "sub/deeper/z.txt", "x");
+            write(&sb.root, "zz/last.txt", "x");
+            write(&sb.root, "sub/.ignore", &deep);
+            let all = run_capped(&sb.root).unwrap_or_else(|e| panic!("subdirectory case: {e}"));
+            assert_eq!(
+                sorted(files(&sb.root, &all)),
+                ["a.txt", "ok/y.txt", "zz/last.txt"]
+            );
+            assert_eq!(
+                skipped(&sb.root, &all),
+                [("sub/.ignore".to_string(), SkipReason::BadIgnoreFile)]
+            );
+        }
+        // (2) in the root: one skip, nothing walked.
+        {
+            let sb = sandbox!();
+            write(&sb.root, "a.txt", "x");
+            write(&sb.root, "sub/b.txt", "x");
+            write(&sb.root, ".haliignore", &deep);
+            let all = run_capped(&sb.root).unwrap_or_else(|e| panic!("root case: {e}"));
+            assert_eq!(
+                all,
+                [Walked::Skipped {
+                    path: path_str(&sb.root.join(".haliignore")),
+                    reason: SkipReason::BadIgnoreFile
+                }]
+            );
+        }
+        // (3) in a grandparent of the root: one skip, nothing walked.
+        {
+            let sb = sandbox!();
+            let gp = sb.base().join("gp");
+            let root = gp.join("mid/root");
+            write(&root, "a.txt", "x");
+            write(&gp, ".ignore", &deep);
+            let all = run_capped(&root).unwrap_or_else(|e| panic!("parent case: {e}"));
+            assert_eq!(
+                all,
+                [Walked::Skipped {
+                    path: path_str(&gp.join(".ignore")),
+                    reason: SkipReason::BadIgnoreFile
+                }]
+            );
+        }
+        // (4) the boundary: nesting of exactly 100 is accepted (the rule applies: `a` is
+        // ignored), 101 is rejected. Many groups side by side are not deep: 200 in a row
+        // nest 1 level, and are accepted.
+        {
+            let sb = sandbox!();
+            write(&sb.root, "sub/x.txt", "x");
+            write(&sb.root, "sub/a", "x");
+            write(&sb.root, "sub/.ignore", &nested_braces(100));
+            let (got, skips) = outcome(&sb, opts());
+            assert_eq!(got, ["sub/x.txt"], "nesting of 100 is accepted and applied");
+            assert!(skips.is_empty(), "{skips:?}");
+
+            write(&sb.root, "sub/.ignore", &nested_braces(101));
+            let (got, skips) = outcome(&sb, opts());
+            assert!(got.is_empty(), "nesting of 101 is rejected: {got:?}");
+            assert_eq!(
+                skips,
+                [("sub/.ignore".to_string(), SkipReason::BadIgnoreFile)]
+            );
+
+            write(&sb.root, "sub/.ignore", &format!("{}\n", "{a}".repeat(200)));
+            let (got, skips) = outcome(&sb, opts());
+            assert_eq!(got, ["sub/a", "sub/x.txt"], "side by side is not nested");
+            assert!(skips.is_empty(), "{skips:?}");
+        }
+    }
+
+    /// An ignore file that passes the size cap and the nesting bound but whose matcher the
+    /// crate cannot build: one alternation of about 20,000 patterns compiles past the regex
+    /// engine's 10 MiB NFA limit. `secret*` comes first: the crate drops every rule of a file
+    /// whose matcher fails to build, so a walker that carries on would yield `secret.key`.
+    /// (Deep nesting cannot serve here: the crate's own nest limit is 250 levels, and the
+    /// walker rejects more than 100 before the crate sees the file.)
+    fn unbuildable_ignore() -> String {
+        let mut alternation = String::from("{");
+        let mut i = 0;
+        while alternation.len() < 260_000 {
+            alternation.push_str(&format!("*{i}*?,"));
+            i += 1;
+        }
+        alternation.push_str("z}");
+        let text = format!("secret*\n{alternation}\n");
+        assert!(text.len() < 262_144, "the file must pass the size cap");
+        text
+    }
+
+    #[test]
+    fn bad_ignore_file_build_failure() {
+        let unbuildable = unbuildable_ignore();
+
+        // (1) in a subdirectory: the candidate file is reported (not the directory), `b` is not
+        // walked, so `b/secret.key` is not yielded.
+        {
+            let sb = sandbox!();
+            write(&sb.root, "ok/y.txt", "x");
+            write(&sb.root, "b/secret.key", "x");
+            write(&sb.root, "b/keep.txt", "x");
+            write(&sb.root, "zz/last.txt", "x");
+            write(&sb.root, "b/.ignore", &unbuildable);
+            let (got, skips) = outcome(&sb, opts());
+            assert_eq!(got, ["ok/y.txt", "zz/last.txt"]);
+            assert_eq!(
+                skips,
+                [("b/.ignore".to_string(), SkipReason::BadIgnoreFile)]
+            );
+        }
+        // (2) in the root: one skip at the file, nothing walked.
+        {
+            let sb = sandbox!();
+            write(&sb.root, "secret.key", "x");
+            write(&sb.root, "sub/b.txt", "x");
+            write(&sb.root, ".ignore", &unbuildable);
+            let all = run(&sb.root, opts());
+            assert_eq!(
+                all,
+                [Walked::Skipped {
+                    path: path_str(&sb.root.join(".ignore")),
+                    reason: SkipReason::BadIgnoreFile
+                }]
+            );
+        }
+        // (3) in a grandparent of the root: one skip at the file, nothing walked.
+        {
+            let sb = sandbox!();
+            let gp = sb.base().join("gp");
+            let root = gp.join("mid/root");
+            write(&root, "secret.key", "x");
+            write(&gp, ".ignore", &unbuildable);
+            let all = run(&root, opts());
+            assert_eq!(
+                all,
+                [Walked::Skipped {
+                    path: path_str(&gp.join(".ignore")),
+                    reason: SkipReason::BadIgnoreFile
+                }]
+            );
+        }
+    }
+
     #[test]
     fn bad_ignore_file_invalid_utf8() {
         // `a.txt`, a byte that is not UTF-8, `b.txt`: the file is reported and its directory is
         // not walked (its valid lines are not applied).
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         write(&sb.root, "ok.txt", "x");
         for n in ["a", "b", "c"] {
             write(&sb.root, &format!("sub/{n}.txt"), "x");
@@ -1493,7 +1687,7 @@ mod goal {
 
         // In the root: one skip, nothing walked; also for `.gitignore` inside a repository.
         drop(sb);
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         make_repo(&sb.root);
         write(&sb.root, "ok.txt", "x");
         fs::write(sb.root.join(".gitignore"), b"a.txt\n\xff\nb.txt\n").unwrap();
@@ -1510,7 +1704,7 @@ mod goal {
     #[test]
     fn bad_ignore_file_in_parent() {
         // A parent of the root whose `.haliignore` is not UTF-8: one skip, nothing walked.
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         write(&sb.root, "ok.txt", "x");
         write(&sb.root, "sub/b.txt", "x");
         fs::write(sb.base().join(".haliignore"), b"\xff\xfe\n").unwrap();
@@ -1526,7 +1720,7 @@ mod goal {
         // A parent's ignore file with an invalid glob line keeps the old behaviour: reported
         // once, its valid lines still apply, the walk goes on.
         drop(sb);
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         write(&sb.root, "keep.txt", "x");
         write(&sb.root, "p.txt", "x");
         write(&sb.base(), ".ignore", "p.txt\n{bad\n");
@@ -1543,7 +1737,7 @@ mod goal {
 
     #[test]
     fn unreadable_ignore_file_reported() {
-        let sb = Sandbox::new();
+        let sb = sandbox!();
         write(&sb.root, "ok.txt", "x");
         write(&sb.root, "sub/a.txt", "x");
         write(&sb.root, "sub/b.txt", "x");
@@ -1567,5 +1761,301 @@ mod goal {
                 [("sub/.haliignore".to_string(), SkipReason::BadIgnoreFile)]
             );
         }
+    }
+
+    // ---- 8. the ignore files behind `.git`, and other review round 2 cases ----
+
+    /// A tree around `sub`: the files outside it are `OUTSIDE_SUB`.
+    fn outside_sub(sb: &Sandbox) {
+        write(&sb.root, "ok/y.txt", "x");
+        write(&sb.root, "sub/x.txt", "x");
+        write(&sb.root, "sub/deeper/z.txt", "x");
+        write(&sb.root, "zz/last.txt", "x");
+    }
+
+    const OUTSIDE_SUB: [&str; 2] = ["ok/y.txt", "zz/last.txt"];
+
+    /// Asserts one `BadIgnoreFile` skip, at any of `candidates` (the walker may name the
+    /// `.git` file or the file it leads to), with only the files outside `sub` walked.
+    fn assert_sub_skipped_at(sb: &Sandbox, all: &[Walked], candidates: &[PathBuf]) {
+        assert_eq!(sorted(files(&sb.root, all)), OUTSIDE_SUB, "{all:?}");
+        let skips = skipped_abs(all);
+        assert_eq!(skips.len(), 1, "{all:?}");
+        assert_eq!(skips[0].1, SkipReason::BadIgnoreFile);
+        assert!(
+            candidates.iter().any(|p| path_str(p) == skips[0].0),
+            "the skip names one of {candidates:?}: {skips:?}"
+        );
+    }
+
+    #[test]
+    fn git_dir_info_exclude_fifo() {
+        // `sub` is a repository with a real `.git` directory whose `info/exclude` is a FIFO.
+        // The crate reads that file when it enters `sub`, so the walker must have looked first.
+        {
+            let sb = sandbox!();
+            outside_sub(&sb);
+            make_repo(&sb.root.join("sub"));
+            mkfifo(&sb.root.join("sub/.git/info/exclude"));
+            let (got, skips) = outcome(&sb, opts());
+            assert_eq!(got, OUTSIDE_SUB);
+            assert_eq!(
+                skips,
+                [(
+                    "sub/.git/info/exclude".to_string(),
+                    SkipReason::BadIgnoreFile
+                )]
+            );
+        }
+        // The root variant: one skip, nothing walked.
+        {
+            let sb = sandbox!();
+            write(&sb.root, "a.txt", "x");
+            make_repo(&sb.root);
+            mkfifo(&sb.root.join(".git/info/exclude"));
+            let all = run(&sb.root, opts());
+            assert_eq!(
+                all,
+                [Walked::Skipped {
+                    path: path_str(&sb.root.join(".git/info/exclude")),
+                    reason: SkipReason::BadIgnoreFile
+                }]
+            );
+        }
+        // A device (`info/exclude -> /dev/zero`) is never read either: capped child.
+        {
+            let sb = sandbox!();
+            outside_sub(&sb);
+            make_repo(&sb.root.join("sub"));
+            symlink("/dev/zero", sb.root.join("sub/.git/info/exclude")).unwrap();
+            let all = run_capped(&sb.root).unwrap_or_else(|e| panic!("device case: {e}"));
+            assert_eq!(sorted(files(&sb.root, &all)), OUTSIDE_SUB);
+            assert_eq!(
+                skipped(&sb.root, &all),
+                [(
+                    "sub/.git/info/exclude".to_string(),
+                    SkipReason::BadIgnoreFile
+                )]
+            );
+        }
+    }
+
+    #[test]
+    fn git_commondir_fifo() {
+        // `sub/.git` is a file `gitdir: <wt>`, and `<wt>/commondir` is itself a FIFO (the crate
+        // reads it to find `info/exclude`). The skip names the `.git` file or the FIFO.
+        {
+            let sb = sandbox!();
+            outside_sub(&sb);
+            let wt = sb.base().join("wt");
+            fs::create_dir_all(&wt).unwrap();
+            write(&sb.root, "sub/.git", &format!("gitdir: {}\n", wt.display()));
+            mkfifo(&wt.join("commondir"));
+            let all = run(&sb.root, opts());
+            assert_sub_skipped_at(&sb, &all, &[sb.root.join("sub/.git"), wt.join("commondir")]);
+        }
+        // The root variant: one skip, nothing walked.
+        {
+            let sb = sandbox!();
+            write(&sb.root, "a.txt", "x");
+            let wt = sb.base().join("wt");
+            fs::create_dir_all(&wt).unwrap();
+            write(&sb.root, ".git", &format!("gitdir: {}\n", wt.display()));
+            mkfifo(&wt.join("commondir"));
+            let all = run(&sb.root, opts());
+            let skips = skipped_abs(&all);
+            assert_eq!(all.len(), 1, "nothing is walked: {all:?}");
+            assert_eq!(skips[0].1, SkipReason::BadIgnoreFile);
+            assert!(
+                [sb.root.join(".git"), wt.join("commondir")]
+                    .iter()
+                    .any(|p| path_str(p) == skips[0].0),
+                "{skips:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn git_symlink_to_dir_with_fifo_exclude() {
+        // `sub/.git` is a symlink to a directory outside the root, and that directory's
+        // `info/exclude` is a FIFO. The crate follows the symlink to it.
+        let sb = sandbox!();
+        outside_sub(&sb);
+        let store = sb.base().join("store");
+        fs::create_dir_all(store.join("info")).unwrap();
+        fs::write(store.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        mkfifo(&store.join("info/exclude"));
+        symlink(&store, sb.root.join("sub/.git")).unwrap();
+        let all = run(&sb.root, opts());
+        assert_sub_skipped_at(
+            &sb,
+            &all,
+            &[
+                sb.root.join("sub/.git/info/exclude"),
+                store.join("info/exclude"),
+            ],
+        );
+    }
+
+    #[test]
+    fn git_entry_not_a_regular_file_or_directory() {
+        // A `.git` that is a FIFO, a symlink to a file, or dangling is rejected, reported at
+        // `.git`, and its directory is not walked.
+        for kind in ["fifo", "symlink-to-file", "dangling"] {
+            let sb = sandbox!();
+            outside_sub(&sb);
+            let git = sb.root.join("sub/.git");
+            match kind {
+                "fifo" => mkfifo(&git),
+                "symlink-to-file" => {
+                    write(&sb.base(), "plain-file", "gitdir: nowhere\n");
+                    symlink(sb.base().join("plain-file"), &git).unwrap();
+                }
+                _ => symlink(sb.base().join("no-such-target"), &git).unwrap(),
+            }
+            let (got, skips) = outcome(&sb, opts());
+            assert_eq!(got, OUTSIDE_SUB, "{kind}");
+            assert_eq!(
+                skips,
+                [("sub/.git".to_string(), SkipReason::BadIgnoreFile)],
+                "{kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn gitignore_fifo_outside_repo() {
+        // Outside a repository the crate would not read `.gitignore`, but it is a candidate
+        // like the others: a FIFO named so is reported and its directory not walked.
+        {
+            let sb = sandbox!();
+            outside_sub(&sb);
+            mkfifo(&sb.root.join("sub/.gitignore"));
+            let (got, skips) = outcome(&sb, opts());
+            assert_eq!(got, OUTSIDE_SUB);
+            assert_eq!(
+                skips,
+                [("sub/.gitignore".to_string(), SkipReason::BadIgnoreFile)]
+            );
+        }
+        {
+            let sb = sandbox!();
+            write(&sb.root, "a.txt", "x");
+            mkfifo(&sb.root.join(".gitignore"));
+            let all = run(&sb.root, opts());
+            assert_eq!(
+                all,
+                [Walked::Skipped {
+                    path: path_str(&sb.root.join(".gitignore")),
+                    reason: SkipReason::BadIgnoreFile
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn ignore_file_in_0o111_dir() {
+        // `locked` can be searched but not listed (mode 0o111): the walker can `lstat` the
+        // FIFO `.ignore` inside it, so it reports that file, not an unreadable directory,
+        // and opens nothing. As root permissions do not apply: skipped, loudly.
+        if is_root() {
+            eprintln!(
+                "NOTE: SKIPPED ignore_file_in_0o111_dir: running as root, for whom a mode-0o111 \
+                 directory is listable, so there is nothing to prove"
+            );
+            return;
+        }
+        let sb = sandbox!();
+        write(&sb.root, "a.txt", "x");
+        write(&sb.root, "locked/inner.txt", "x");
+        write(&sb.root, "zz.txt", "x");
+        mkfifo(&sb.root.join("locked/.ignore"));
+        let _restore = Restore(vec![sb.root.join("locked")]);
+        fs::set_permissions(sb.root.join("locked"), fs::Permissions::from_mode(0o111)).unwrap();
+        let (got, skips) = outcome(&sb, opts());
+        assert_eq!(got, ["a.txt", "zz.txt"]);
+        assert_eq!(
+            skips,
+            [("locked/.ignore".to_string(), SkipReason::BadIgnoreFile)]
+        );
+    }
+
+    #[test]
+    fn symlink_to_locked_target() {
+        // `link -> locked/f.txt`, with `locked` at mode 000: the link cannot be resolved for
+        // lack of permission, which is `Unreadable`; `NotRegular` is for a link that leads to
+        // nothing or to something that is not a regular file. As root permissions do not
+        // apply: skipped, loudly.
+        if is_root() {
+            eprintln!(
+                "NOTE: SKIPPED symlink_to_locked_target: running as root, for whom a mode-000 \
+                 directory can be searched, so the link resolves"
+            );
+            return;
+        }
+        let sb = sandbox!();
+        write(&sb.root, "a.txt", "x");
+        write(&sb.root, "locked/f.txt", "x");
+        symlink("locked/f.txt", sb.root.join("link")).unwrap();
+        let _restore = Restore(vec![sb.root.join("locked")]);
+        fs::set_permissions(sb.root.join("locked"), fs::Permissions::from_mode(0o000)).unwrap();
+        let (got, skips) = outcome(&sb, opts());
+        assert_eq!(got, ["a.txt"]);
+        assert_eq!(
+            skips,
+            [
+                ("link".to_string(), SkipReason::Unreadable),
+                ("locked".to_string(), SkipReason::Unreadable),
+            ]
+        );
+    }
+
+    #[test]
+    fn hidden_unhidden_by_whitelist_documented() {
+        // Accepted and documented (spec §7): a `!` line in an ignore file can override the
+        // hidden rule, so `!.*` un-hides `.env` although `include_hidden` is off. User excludes,
+        // the built-ins and the data dir cannot be overridden that way. This test pins the
+        // behaviour so a change to it is deliberate.
+        let sb = sandbox!();
+        let data = sb.root.join("data");
+        write(
+            &sb.root,
+            ".ignore",
+            "!.*\n!*.log\n!node_modules\n!data\n!target\n",
+        );
+        write(&sb.root, "a.txt", "x");
+        write(&sb.root, ".env", "x");
+        write(&sb.root, ".hid/h.txt", "x");
+        write(&sb.root, "skip.log", "x");
+        write(&sb.root, "node_modules/n.txt", "x");
+        write(&sb.root, "sub/target/t.txt", "x");
+        write(&sb.root, "data/d.txt", "x");
+        let options = WalkOptions::new(false, false, vec!["*.log".to_string()], vec![data])
+            .ok()
+            .expect("valid options");
+        let (got, skips) = outcome(&sb, options);
+        assert_eq!(got, [".env", ".hid/h.txt", ".ignore", "a.txt"]);
+        assert!(skips.is_empty(), "{skips:?}");
+
+        // Without the whitelist line the hidden names are skipped again.
+        write(&sb.root, ".ignore", "# nothing\n");
+        let (got, _) = outcome(&sb, opts());
+        assert_eq!(got, ["a.txt", "data/d.txt", "skip.log"]);
+    }
+
+    #[test]
+    fn root_that_is_the_data_dir_is_walked() {
+        // The crate never applies `filter_entry` at depth 0, so a root that is the data dir is
+        // walked, not pruned. Accepted: #22 must refuse such a root. Pinned so a change is
+        // deliberate.
+        let sb = sandbox!();
+        write(&sb.root, "a.txt", "x");
+        write(&sb.root, "sub/b.txt", "x");
+        let options = WalkOptions::new(false, false, vec![], vec![sb.root.clone()])
+            .ok()
+            .expect("valid options");
+        let (got, skips) = outcome(&sb, options);
+        assert_eq!(got, ["a.txt", "sub/b.txt"]);
+        assert!(skips.is_empty(), "{skips:?}");
     }
 }
