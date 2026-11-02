@@ -1,0 +1,2 @@
+tests/error_text.rs
+tests/cli_error_text.rs
