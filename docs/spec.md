@@ -405,7 +405,7 @@ hali generate completions <bash|zsh|fish>
 - **`--path-only`** prints one absolute path per line (`find`, `show`, `new`).
 - **No pager.** No color when stdout isn't a TTY or `NO_COLOR` is set.
 - **`find` never returns file content.**
-- **Escaped for the terminal** means each control character (C0, DEL, C1), line or paragraph separator (U+2028, U+2029), bidi control (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) and invisible format character (U+00AD, U+180E, U+200B, U+2060–U+2064, U+206A–U+206F, U+FEFF, U+FFF9–U+FFFB, U+E0000–U+E007F) is printed as `\u{<hex>}`; everything else, ZWNJ and ZWJ included, is printed as is. `--json` output is never escaped this way.
+- **Escaped for the terminal** means each control character (C0, DEL, C1), line or paragraph separator (U+2028, U+2029), bidi control (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) and invisible format character (U+00AD, U+180E, U+200B, U+2060–U+2064, U+206A–U+206F, U+FEFF, U+FFF9–U+FFFB, U+E0000–U+E007F) is printed as `\u{<hex>}`; everything else, ZWNJ and ZWJ included, is printed as is. `--json` output is never escaped this way. The list is explicit: other invisible format characters (such as the Arabic number signs U+0600–U+0605, U+06DD, U+070F, and script-specific format controls), variation selectors, the combining grapheme joiner, the Mongolian free variation selectors and the Hangul fillers are deliberately not escaped, because they are part of real text in some scripts. They can make two different ids look the same, but they cannot move the cursor, set the title or add a line.
 
 ### 9.4 Exit codes and errors
 | Code | Meaning |
