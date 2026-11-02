@@ -28,8 +28,8 @@
 //! directory. Entries come depth first, each directory's entries sorted by file name
 //! (byte order); a directory symlink is neither followed nor reported, and a file symlink
 //! whose real path is inside the root is silent (the real file is walked directly).
-//! The walker never opens a regular file (readability is `inspect`'s business in #22), so a
-//! mode-000 file is yielded as a `File`.
+//! The walker never opens a regular file other than an ignore-file candidate (readability is
+//! `inspect`'s business in #22), so a mode-000 file is yielded as a `File`.
 //!
 //! Tests that need a memory cap run the walk in a child process (see `run_capped`): RLIMIT_AS
 //! is per process, so setting it in a thread of the test binary would also cap every other test.
@@ -87,9 +87,10 @@ mod goal {
     impl Sandbox {
         /// `<tmp>/root` (the tree), `<tmp>/home` (HOME), `<tmp>/xdg` (XDG_CONFIG_HOME).
         ///
-        /// `None` (after a loud NOTE) when an ancestor of the sandbox holds an ignore file or a
-        /// `.git`: `ignore` reads those through "the root's parents", so the expectations of a
-        /// test would not hold, and a failure would be about the machine, not the walker.
+        /// `None` (after a loud NOTE) when an ancestor of the sandbox holds an ignore file, a
+        /// `.git` or a `.jj` (a repository marker too: it switches `.gitignore` on): `ignore`
+        /// reads those through "the root's parents", so the expectations of a test would not
+        /// hold, and a failure would be about the machine, not the walker.
         fn new() -> Option<Sandbox> {
             let guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
             let dir = tempfile::Builder::new()
@@ -98,7 +99,7 @@ mod goal {
                 .unwrap();
             let base = dir.path().canonicalize().unwrap();
             for ancestor in base.ancestors().skip(1) {
-                for name in [".gitignore", ".ignore", ".haliignore", ".git"] {
+                for name in [".gitignore", ".ignore", ".haliignore", ".git", ".jj"] {
                     let found = ancestor.join(name);
                     if fs::symlink_metadata(&found).is_ok() {
                         eprintln!(
@@ -259,26 +260,20 @@ mod goal {
 
     const CAP_BYTES: u64 = 1 << 30;
 
-    /// The default-options walk of `root` in a child process whose address space is capped at
-    /// 1 GiB (RLIMIT_AS) and which is killed after 30 s. Returns the walk, or what went wrong:
-    /// an allocation failure aborts the child, so a walker that reads a device or a huge file
-    /// into memory fails the test instead of taking the run down.
-    ///
-    /// The child is this very test binary, re-run on `capped_child` with the root in the
-    /// environment; the cap is set between fork and exec, so only the child has it. The child
-    /// inherits the sandbox's HOME and XDG_CONFIG_HOME.
-    fn run_capped(root: &Path) -> Result<Vec<Walked>, String> {
+    /// Runs the test `test` of this very binary as a child process, with `key=value` in its
+    /// environment, whose address space is capped at 1 GiB (RLIMIT_AS) and which is killed after
+    /// 30 s. Returns its stdout, or what went wrong: an allocation failure or a stack overflow
+    /// aborts the child, so a walker that reads a device or a huge file into memory, or that
+    /// recurses without bound, fails the test instead of taking the run down. The cap is set
+    /// between fork and exec, so only the child has it. The child inherits the sandbox's HOME
+    /// and XDG_CONFIG_HOME.
+    fn spawn_capped(test: &str, key: &str, value: &OsStr) -> Result<String, String> {
         let mut cmd = Command::new(std::env::current_exe().unwrap());
-        cmd.args([
-            "goal::capped_child",
-            "--exact",
-            "--nocapture",
-            "--test-threads=1",
-        ])
-        .env("HALI_WALK_CAPPED_ROOT", root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        cmd.args([test, "--exact", "--nocapture", "--test-threads=1"])
+            .env(key, value)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         // SAFETY: only setrlimit, which is async-signal-safe, runs between fork and exec.
         unsafe {
             cmd.pre_exec(|| {
@@ -313,29 +308,40 @@ mod goal {
                 "the walk died under the 1 GiB address-space cap ({s}); stderr: {}",
                 stderr.lines().last().unwrap_or("")
             )),
-            Some(_) => Ok(stdout
-                .lines()
-                .filter_map(|l| l.split_once("WALKED ").map(|(_, rest)| rest))
-                .map(|l| match l.split_once(' ').unwrap() {
-                    ("F", path) => Walked::File {
-                        path: path.to_string(),
-                        byte_size: 0,
-                        mtime: UNIX_EPOCH,
-                    },
-                    (reason, path) => Walked::Skipped {
-                        path: path.to_string(),
-                        reason: match reason {
-                            "Unreadable" => SkipReason::Unreadable,
-                            "NotRegular" => SkipReason::NotRegular,
-                            "NonUtf8" => SkipReason::NonUtf8,
-                            "OutsideRoot" => SkipReason::OutsideRoot,
-                            "BadIgnoreFile" => SkipReason::BadIgnoreFile,
-                            other => panic!("unexpected reason {other}"),
-                        },
-                    },
-                })
-                .collect()),
+            Some(_) => Ok(stdout.into_owned()),
         }
+    }
+
+    /// The default-options walk of `root` in a capped child process (`capped_child`, with the root
+    /// in the environment). Returns the walk, or what went wrong.
+    fn run_capped(root: &Path) -> Result<Vec<Walked>, String> {
+        let stdout = spawn_capped(
+            "goal::capped_child",
+            "HALI_WALK_CAPPED_ROOT",
+            root.as_os_str(),
+        )?;
+        Ok(stdout
+            .lines()
+            .filter_map(|l| l.split_once("WALKED ").map(|(_, rest)| rest))
+            .map(|l| match l.split_once(' ').unwrap() {
+                ("F", path) => Walked::File {
+                    path: path.to_string(),
+                    byte_size: 0,
+                    mtime: UNIX_EPOCH,
+                },
+                (reason, path) => Walked::Skipped {
+                    path: path.to_string(),
+                    reason: match reason {
+                        "Unreadable" => SkipReason::Unreadable,
+                        "NotRegular" => SkipReason::NotRegular,
+                        "NonUtf8" => SkipReason::NonUtf8,
+                        "OutsideRoot" => SkipReason::OutsideRoot,
+                        "BadIgnoreFile" => SkipReason::BadIgnoreFile,
+                        other => panic!("unexpected reason {other}"),
+                    },
+                },
+            })
+            .collect())
     }
 
     /// The child side of `run_capped`: it does nothing unless the parent started it. (libtest
@@ -351,6 +357,25 @@ mod goal {
                 Walked::Skipped { path, reason } => println!("WALKED {reason:?} {path}"),
             }
         }
+    }
+
+    /// The child side of `exclude_nesting_bounded`: builds an exclude of `n` nested brace groups
+    /// (`n` from the environment) and says whether `WalkOptions::new` refused it.
+    #[test]
+    fn capped_exclude_child() {
+        let Some(n) = std::env::var_os("HALI_WALK_CAPPED_EXCLUDE_DEPTH") else {
+            return;
+        };
+        let n: usize = n.to_str().unwrap().parse().unwrap();
+        match WalkOptions::new(false, false, vec![nested_braces(n)], vec![]) {
+            Err(pattern) => println!("EXCLUDE refused {}", pattern.len()),
+            Ok(_) => println!("EXCLUDE accepted"),
+        }
+    }
+
+    /// `n` nested brace groups around one name: `{{{a}}}`.
+    fn nested_braces(n: usize) -> String {
+        format!("{}a{}", "{".repeat(n), "}".repeat(n))
     }
 
     // ---- 1. hidden, and the shape of a yielded file ----
@@ -795,6 +820,55 @@ mod goal {
         assert_eq!(err(&[" a", "b "]), None);
         assert_eq!(err(&["*.log", "build/"]), None);
         assert_eq!(err(&[]), None);
+
+        // `{` nesting deeper than 100 levels is refused (globset recurses once per level, so a
+        // hostile `[scan].exclude` would overflow the stack): 100 are accepted, 101 refused. It
+        // is the depth that counts, not the running total, and escapes and classes hold no braces
+        // (the same counter as for ignore files).
+        let (deep100, deep101) = (nested_braces(100), nested_braces(101));
+        assert_eq!(err(&[&deep100]), None, "100 levels are accepted");
+        assert_eq!(err(&[&deep101]), Some(deep101.clone()), "101 are refused");
+        let inner = format!("x/{deep101}/y");
+        assert_eq!(err(&[&inner]), Some(inner.clone()));
+        assert_eq!(err(&["ok", &deep101, "{bad"]), Some(deep101.clone()));
+        assert_eq!(err(&["{bad", &deep101]), Some("{bad".to_string()));
+        assert_eq!(
+            err(&["ok", &deep100, &deep100, &deep100]),
+            None,
+            "depth, not total"
+        );
+        assert_eq!(
+            err(&[&"{a}".repeat(200)]),
+            None,
+            "side by side is not nested"
+        );
+        assert_eq!(
+            err(&[&format!("{}a", "\\{".repeat(101))]),
+            None,
+            "escaped braces"
+        );
+        assert_eq!(
+            err(&[&format!("{}a", "[{]".repeat(101))]),
+            None,
+            "braces in a class"
+        );
+    }
+
+    #[test]
+    fn exclude_nesting_bounded() {
+        // 100,000 nested braces: without the bound, `OverrideBuilder::add` recurses once per
+        // level and overflows the stack, aborting the process. So it runs in the capped child,
+        // where an abort fails this test cleanly.
+        let out = spawn_capped(
+            "goal::capped_exclude_child",
+            "HALI_WALK_CAPPED_EXCLUDE_DEPTH",
+            OsStr::new("100000"),
+        )
+        .unwrap_or_else(|e| panic!("a 100,000-level exclude: {e}"));
+        assert!(
+            out.contains("EXCLUDE refused 200001"),
+            "the exclude is refused as given: {out}"
+        );
     }
 
     // ---- 4. symlinks ----
@@ -1503,18 +1577,13 @@ mod goal {
         );
     }
 
-    /// `n` nested brace groups around one name: `{{{a}}}`.
-    fn nested_braces(n: usize) -> String {
-        format!("{}a{}\n", "{".repeat(n), "}".repeat(n))
-    }
-
     #[test]
     fn ignore_file_deep_nesting() {
         // 100,000 nested braces fit in 200 KB, under the size cap. globset recurses once per
         // level, so unchecked this overflows the stack and aborts the whole process (SIGABRT).
         // Each placement runs in the capped child process: an abort there fails the test
         // cleanly instead of killing the test run.
-        let deep = nested_braces(100_000);
+        let deep = format!("{}\n", nested_braces(100_000));
         assert!(deep.len() < 262_144, "the file must pass the size cap");
 
         // (1) in a subdirectory: reported at that file, the directory is not walked, the
@@ -1575,12 +1644,20 @@ mod goal {
             let sb = sandbox!();
             write(&sb.root, "sub/x.txt", "x");
             write(&sb.root, "sub/a", "x");
-            write(&sb.root, "sub/.ignore", &nested_braces(100));
+            write(
+                &sb.root,
+                "sub/.ignore",
+                &format!("{}\n", nested_braces(100)),
+            );
             let (got, skips) = outcome(&sb, opts());
             assert_eq!(got, ["sub/x.txt"], "nesting of 100 is accepted and applied");
             assert!(skips.is_empty(), "{skips:?}");
 
-            write(&sb.root, "sub/.ignore", &nested_braces(101));
+            write(
+                &sb.root,
+                "sub/.ignore",
+                &format!("{}\n", nested_braces(101)),
+            );
             let (got, skips) = outcome(&sb, opts());
             assert!(got.is_empty(), "nesting of 101 is rejected: {got:?}");
             assert_eq!(
@@ -2057,5 +2134,166 @@ mod goal {
         let (got, skips) = outcome(&sb, options);
         assert_eq!(got, ["a.txt", "sub/b.txt"]);
         assert!(skips.is_empty(), "{skips:?}");
+    }
+
+    // ---- 9. the live ignore-rule budget ----
+    //
+    // The crate keeps the compiled matcher of every ancestor directory alive while the walk is
+    // under it, so memory grows with depth. The walker keeps a running total of the bytes of
+    // ignore files accepted along the CURRENT path (the root's parents included, each file once,
+    // released on leaving a directory) and reports a candidate that would take it over 512 KiB
+    // (524,288 bytes) as `bad_ignore_file` at that file, without walking its directory.
+    // (The ignore files are dot files, so they are never yielded as files themselves.)
+
+    /// A comment-only ignore file of exactly `n` bytes (`n >= 2`): it passes every check and
+    /// costs nothing to compile, so only its size counts.
+    fn comments(n: usize) -> String {
+        assert!(n >= 2);
+        format!("#{}\n", "c".repeat(n - 2))
+    }
+
+    /// An ignore file of about 250,000 bytes of `a*bN.x` lines (`N` distinct from every other
+    /// `part`): it passes the size cap and the nesting bound, and it is expensive to compile
+    /// (the crate holds the matcher for as long as the walk is under its directory).
+    fn expensive_ignore(part: usize) -> String {
+        let mut text = String::new();
+        let mut n = part * 1_000_000;
+        while text.len() < 249_990 {
+            text.push_str(&format!("a*b{n}.x\n"));
+            n += 1;
+        }
+        assert!(text.len() < 250_100, "{}", text.len());
+        text
+    }
+
+    #[test]
+    fn ignore_budget_nested() {
+        // 8 nested directories, each with a ~250 KB accepted `.ignore`: the first two make
+        // ~500 KB, the third crosses 524,288. Unbounded, the crate holds all eight compiled
+        // matchers at once (gigabytes), so the capped child dies or hangs. Bounded, the walk
+        // ends cleanly with one `bad_ignore_file` at the file that crosses the budget, and
+        // nothing from that directory down is walked.
+        let sb = sandbox!();
+        write(&sb.root, "top.txt", "x");
+        let mut dir = String::new();
+        for i in 1..=8 {
+            dir.push_str(&format!("d{i}/"));
+            write(&sb.root, &format!("{dir}f.txt"), "x");
+            write(&sb.root, &format!("{dir}.ignore"), &expensive_ignore(i));
+        }
+        let all = run_capped(&sb.root).unwrap_or_else(|e| panic!("nested case: {e}"));
+        assert_eq!(
+            sorted(files(&sb.root, &all)),
+            ["d1/d2/f.txt", "d1/f.txt", "top.txt"]
+        );
+        assert_eq!(
+            skipped(&sb.root, &all),
+            [("d1/d2/d3/.ignore".to_string(), SkipReason::BadIgnoreFile)]
+        );
+    }
+
+    #[test]
+    fn ignore_budget_boundary() {
+        // Exactly 524,288 bytes along one path is accepted, 524,289 is rejected, whichever
+        // file takes the total there: one in a parent of the root, one in the root, one in a
+        // subdirectory. (One file per directory: which file of a directory is counted first
+        // is not part of the contract.)
+        // (1) accepted: parent 262,144 + root 131,072 + sub 131,072 = 524,288.
+        let sb = sandbox!();
+        let gp = sb.base().join("gp");
+        let root = gp.join("mid/root");
+        write(&gp, ".ignore", &comments(262_144));
+        write(&root, ".ignore", &comments(131_072));
+        write(&root, "a.txt", "x");
+        write(&root, "sub/x.txt", "x");
+        write(&root, "sub/.ignore", &comments(131_072));
+        let all = run(&root, opts());
+        assert_eq!(sorted(files(&root, &all)), ["a.txt", "sub/x.txt"]);
+        assert!(
+            skipped_abs(&all).is_empty(),
+            "exactly the budget passes: {all:?}"
+        );
+
+        // (2) one byte more in the subdirectory: reported there, `sub` not walked.
+        write(&root, "sub/.ignore", &comments(131_073));
+        let all = run(&root, opts());
+        assert_eq!(files(&root, &all), ["a.txt"]);
+        assert_eq!(
+            skipped_abs(&all),
+            [(
+                path_str(&root.join("sub/.ignore")),
+                SkipReason::BadIgnoreFile
+            )]
+        );
+
+        // (3) one byte more in the root's own file (parent 262,144 + mid 131,072 + root
+        // 131,073): one skip at the root's file, nothing walked.
+        write(&gp, "mid/.ignore", &comments(131_072));
+        write(&root, ".ignore", &comments(131_073));
+        write(&root, "sub/.ignore", &comments(2));
+        let all = run(&root, opts());
+        assert_eq!(
+            all,
+            [Walked::Skipped {
+                path: path_str(&root.join(".ignore")),
+                reason: SkipReason::BadIgnoreFile
+            }]
+        );
+        drop(sb);
+
+        // (4) the file that crosses the budget is itself in a parent of the root: parent
+        // 262,144 + mid 200,000 + mid2 62,145 = 524,289. One skip at mid2's file, nothing
+        // walked.
+        let sb = sandbox!();
+        let gp = sb.base().join("gp");
+        let root = gp.join("mid/mid2/root");
+        write(&root, "a.txt", "x");
+        write(&gp, ".ignore", &comments(262_144));
+        write(&gp, "mid/.ignore", &comments(200_000));
+        write(&gp, "mid/mid2/.ignore", &comments(62_145));
+        let all = run(&root, opts());
+        assert_eq!(
+            all,
+            [Walked::Skipped {
+                path: path_str(&gp.join("mid/mid2/.ignore")),
+                reason: SkipReason::BadIgnoreFile
+            }]
+        );
+        // ... and 62,144 (exactly the budget) is accepted.
+        write(&gp, "mid/mid2/.ignore", &comments(62_144));
+        let all = run(&root, opts());
+        assert_eq!(files(&root, &all), ["a.txt"]);
+        assert!(skipped_abs(&all).is_empty(), "{all:?}");
+    }
+
+    #[test]
+    fn ignore_budget_released() {
+        // The budget is charged along the current path only. The root's own file (262,144)
+        // stays charged all along; below it, eight sibling directories each hold two files of
+        // 131,072 (a directory and its child: 262,144 + 262,144 = 524,288 exactly), and four
+        // more siblings each hold one file at the per-file cap. Together that is far over
+        // 524,288, so a walker that never gave a directory's bytes back would report most of
+        // them; all of it is walked.
+        let sb = sandbox!();
+        write(&sb.root, ".ignore", &comments(262_144));
+        write(&sb.root, "a.txt", "x");
+        let mut expected = vec!["a.txt".to_string()];
+        for i in 0..8 {
+            write(&sb.root, &format!("s{i}/.ignore"), &comments(131_072));
+            write(&sb.root, &format!("s{i}/inner/.ignore"), &comments(131_072));
+            write(&sb.root, &format!("s{i}/inner/x.txt"), "x");
+            expected.push(format!("s{i}/inner/x.txt"));
+        }
+        for i in 0..4 {
+            write(&sb.root, &format!("k{i}/.haliignore"), &comments(262_144));
+            write(&sb.root, &format!("k{i}/y.txt"), "x");
+            expected.push(format!("k{i}/y.txt"));
+        }
+        let (got, skips) = outcome(&sb, opts());
+        assert_eq!(got, sorted(expected));
+        assert!(
+            skips.is_empty(),
+            "siblings are not charged for each other: {skips:?}"
+        );
     }
 }

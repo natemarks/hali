@@ -7,7 +7,10 @@ set -uo pipefail
 # the symlink rule (inside-root links silent), that the walker opens no regular file other than
 # ignore-file candidates, the 256 KiB cap and the 100-level nesting bound, the build-failure rule,
 # the `.git` directory / file / commondir coverage, the accepted race, the parents and `!` lines,
-# the global-config gap, the root-is-the-data-dir note, the skip reasons, the one-level-listing note, and the refused empty and whitespace-only excludes; §15
+# the global-config gap (a FIFO at a config file, silent loss of global gitignore errors), the live
+# ignore-rule budget (512 KiB along the current path), the silent loss of rules when a file changes
+# after the check, the root-is-the-data-dir note, the skip reasons, the one-level-listing note, and
+# the refused empty, whitespace-only and over-nested excludes; §15
 # pins `ignore` 0.4.34. The goal commit writes this text, so the check passes by design: it
 # guards against an implementer editing the spec away.
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
@@ -29,7 +32,7 @@ need7 'directories named `.git`, `node_modules`, `target`, `__pycache__` and `ve
 need7 '`.gitignore`, `.git/info/exclude` and the global gitignore (git'"'"'s `core.excludesFile`, else `$XDG_CONFIG_HOME/git/ignore`) apply only inside a git repository (a directory holding `.git` or `.jj` counts as one)'
 need7 '`.ignore` and **`.haliignore`** (gitignore syntax) apply in any directory, including the root'"'"'s parents'
 need7 '`--no-ignore` turns off exactly these five, and nothing else'
-need7 'An ignore file with an invalid glob line still applies its valid lines and is reported as skipped (`bad_ignore_file`)'
+need7 'An invalid glob line in one of the per-directory sources (`.gitignore`, `.ignore`, `.haliignore`, `.git/info/exclude`) still lets the file'"'"'s valid lines apply, and the file is reported as skipped (`bad_ignore_file`); the global gitignore is not covered'
 need7 '**Ignore files fail closed:**'
 need7 'with `lstat` and a bounded, non-blocking read'
 need7 '`.git/info/exclude` when `.git` is a directory (or a symlink to one)'
@@ -39,13 +42,20 @@ need7 'A `.git` that is a FIFO, a symlink to a file, or dangling is rejected the
 need7 'A matcher the `ignore` crate fails to build for a file that passed those checks'
 need7 'also fails closed, reported at the candidate file.'
 need7 'A FIFO or a device named as an ignore file is therefore never opened.'
+need7 '**Live ignore-rule budget:**'
+need7 'keeps the compiled matcher of every ancestor directory alive while the walk is under it, so memory grows with depth'
+need7 'a running total of the bytes of ignore files accepted along the current path (the root'"'"'s parents included, each file counted once)'
+need7 'over 512 KiB (524,288 bytes) as skipped (`bad_ignore_file`, at that file); its directory is not walked, and for the root or a parent of the root, nothing is walked.'
+need7 'A file counts only while the walk is under its directory, so siblings are not charged for each other'"'"'s files.'
 need7 'a race remains, and it is not narrow: whoever controls the tree controls how wide it is'
-need7 'This is a denial of service only, and it is accepted.'
+need7 'Those are denials of service.'
+need7 'If a file changes after the check, the crate also silently throws away I/O errors from ignore files, so a directory can be walked with none, or only the first lines, of its rules, and nothing is reported: rules can be lost silently. This is accepted.'
 need7 'closes it and is the first task after `hali scan` (#22); `hali scan` leaves the store unchanged if the process dies mid-scan.'
 need7 'ignore files in the root'"'"'s parents are honoured (git semantics), including world-writable ones such as `/tmp`'
 need7 'A `!` line in an ignore file (in the root, a subdirectory or a parent) can override the hidden rule; user excludes, the built-in excludes and the data dir cannot be overridden.'
 need7 'not git'"'"'s own configuration (`~/.gitconfig`, `$XDG_CONFIG_HOME/git/config`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `/etc/gitconfig`) or the file `core.excludesFile` names.'
-need7 'a FIFO there blocks the walk.'
+need7 'A FIFO at one of the git config files blocks the walk (`walk()` does not return); the file `core.excludesFile` names is checked with `is_file()` first, so a FIFO there is never opened.'
+need7 'The `ignore` crate drops errors in the global gitignore silently: an invalid line, or a file it cannot build, is never reported, and its rules vanish.'
 need7 'the `ignore` crate never applies the built-in and data-dir filter to the root itself, so a root that is the data dir, or inside it, is walked; `hali scan` refuses such a root.'
 need7 'Does not follow symlinked directories (nothing under one is scanned, and it is not reported)'
 need7 'inside the root it is silent, because the real file is walked directly and is subject to every filter'
@@ -56,7 +66,7 @@ need7 '`non_utf8` (a directory with such a name is reported once and not entered
 need7 'The walker does not open regular files other than ignore-file candidates (opened by the check above and by the `ignore` crate): whether one can be read is left to `inspect`'
 need7 'Hidden, ignored, built-in and pruned directories are listed one level by the `ignore` crate before being skipped, but nothing under them is yielded or entered.'
 need7 'The walk is built from the canonical root.'
-need7 'a pattern with no `/` matches a name at any depth, one with a `/` is anchored at the root; an invalid glob, an empty or whitespace-only one, or one starting with `!`, is rejected'
+need7 'a pattern with no `/` matches a name at any depth, one with a `/` is anchored at the root; an invalid glob, an empty or whitespace-only one, one starting with `!`, or one with `{` nested deeper than 100 levels (the same bound as for ignore files), is rejected'
 
 printf '%s\n' "$section15" | grep -qF '| Directory walk | `ignore` | 0.4.34 |' || {
     echo 'MISSING: §15 pins `ignore` at 0.4.34 (| Directory walk | `ignore` | 0.4.34 |)'
