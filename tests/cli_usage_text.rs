@@ -30,7 +30,6 @@
 //! - on a pty the output ends lines with CR LF, which is turned into LF before comparing; help on
 //!   a pty is expected to keep its colour (ESC present) and exit 0.
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use clap::builder::Styles;

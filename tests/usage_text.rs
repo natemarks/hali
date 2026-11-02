@@ -21,7 +21,6 @@
 //!   through `Display` (which strips clap's colour codes);
 //! - a styled error given to `usage_text` shows clap's own colour codes escaped, never raw.
 
-#[cfg(feature = "goal")]
 mod goal {
     use clap::builder::Styles;
     use hali::cli::{command, usage_text};
