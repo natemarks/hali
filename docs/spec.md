@@ -265,11 +265,12 @@ Sources:
 - [scan ignore rules and pruning](https://github.com/natemarks/mcp-local-notes/issues/67)
 - §6
 
-- **Walker:** the `ignore` crate (ripgrep's).
-  - Skips hidden files and directories by default.
-  - Honours `.gitignore` inside git repos, plus `.ignore`, `.git/info/exclude`, the global gitignore and **`.haliignore`** (gitignore syntax) in any directory.
-  - Does not follow symlinked directories, and resolves symlinked files to their real paths.
-- **Built-in excludes:** `node_modules`, `target`, `__pycache__`, `venv`, plus `[scan].exclude`.
+- **Walker:** the `ignore` crate (ripgrep's), sequential, and it only reads.
+  - Skips hidden files and directories by default (the root itself is always walked).
+  - Ignore files: `.gitignore` only inside a git repository (a directory holding `.git`), `.git/info/exclude`, the global gitignore (git's `core.excludesFile`, else `$XDG_CONFIG_HOME/git/ignore`), `.ignore` and **`.haliignore`** (gitignore syntax) in any directory, including the root's parents. `--no-ignore` turns off exactly these five, and nothing else. An ignore file with an invalid line still applies its valid lines and is reported as skipped (`bad_ignore_file`).
+  - Does not follow symlinked directories (nothing under one is scanned, and it is not reported). A symlinked file is resolved to its real path: inside the root it is scanned once, at that real path; outside the root it is skipped (`outside_root`); a broken one is skipped (`not_regular`).
+  - Skip reasons: `too_large` (over `max_size`), `unreadable`, `not_regular` (FIFOs, sockets, devices and broken symlinks, which are never opened), `non_utf8` (a directory with such a name is reported once and not entered), `outside_root` and `bad_ignore_file`. A skipped entry never stops the walk.
+- **Built-in excludes:** directories named `.git`, `node_modules`, `target`, `__pycache__` and `venv`, at any depth, and hali's data dir (§4) are never entered, even with `--include-hidden` or `--no-ignore`. User excludes (`[scan].exclude`, `--exclude GLOB`) use gitignore syntax relative to the root: a pattern with no `/` matches a name at any depth, one with a `/` is anchored at the root; an invalid glob, or one starting with `!`, is rejected.
 - **Size limit:** files over `max_size` (default 1 GiB) are skipped and reported. An explicit `add` has no limit and bypasses all ignore rules.
 - **What gets registered:** every regular file that passes the filters, of any media type, **untagged and untyped**, with its detected media type. `--media-type` (repeatable, wildcards allowed) narrows a scan.
 - **`--dry-run`** prints a summary first: counts by media type, and new / refreshed / relinked / missing / skipped.
@@ -723,7 +724,7 @@ Every dependency is pinned **exactly**. Versions are those current at spec time 
 | JSON | `serde`, `serde_json` | pin at build / 1.0.154 |
 | Media types | `xdg-mime` | 0.4.0 |
 | XDG base dirs | `etcetera` | 0.11.0 |
-| Directory walk | `ignore` | 0.4.33 |
+| Directory walk | `ignore` | 0.4.34 |
 | Identity | `uuid` (v7), `sha2` | 1.29.0 / 0.11.1 |
 | Config | a TOML parser (e.g. `toml`) | pin at build |
 | **dev:** CLI tests | `assert_cmd`, `tempfile` | 2.2.2 / 3.27.0 |
