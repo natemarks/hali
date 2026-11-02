@@ -21,7 +21,6 @@
 //!   `cannot read or write /TMP/d\u{1b}[31mX`;
 //! - the `--json` envelope of H is checked field by field, not against a golden snapshot.
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::Value;

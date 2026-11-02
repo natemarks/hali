@@ -19,7 +19,6 @@
 //!   marks, U+034F, VS16, U+FFFD, NBSP, U+200C, U+200D, and the neighbours just outside each
 //!   escaped range, including U+3164, which the contract leaves alone on purpose).
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::cli::error_text;
     use hali::core::{Error, flag_value, positional};
