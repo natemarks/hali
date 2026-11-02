@@ -475,8 +475,12 @@ pub fn usage_text(mut err: clap::Error) -> String {
                 ContextValue::StyledStr(v) => {
                     ContextValue::String(printable(&v.ansi().to_string()))
                 }
-                ContextValue::StyledStrs(v) => ContextValue::Strings(
-                    v.iter().map(|s| printable(&s.ansi().to_string())).collect(),
+                // Stays StyledStrs: the formatter only renders Suggested (the `tip:` line) in
+                // that form.
+                ContextValue::StyledStrs(v) => ContextValue::StyledStrs(
+                    v.iter()
+                        .map(|s| clap::builder::StyledStr::from(printable(&s.ansi().to_string())))
+                        .collect(),
                 ),
                 other => other.clone(),
             };
