@@ -3,7 +3,11 @@
 //!
 //! The walk yields every regular, UTF-8 file it keeps, and every entry it has to skip with a
 //! reason; a skip never stops it. Directory symlinks are never followed, so there are no cycles.
-//! It never opens a regular file other than an ignore file.
+//! The only regular files it opens are ignore-file candidates and what the crate reads behind
+//! `.git` (a `.git` file and the `commondir` it leads to), each with a bounded, non-blocking
+//! read. Ignore files fail closed: one that fails the check, or whose rules would take the live
+//! ignore-rule budget (the bytes of ignore files accepted along the current path) over 512 KiB,
+//! is reported and its directory is not walked.
 
 use ignore::gitignore::GitignoreBuilder;
 use ignore::overrides::{Override, OverrideBuilder};
@@ -32,6 +36,11 @@ const MAX_IGNORE_FILE: u64 = 256 << 10;
 /// when it compiles a glob, so a deep one overflows the stack and aborts the process.
 const MAX_BRACE_NESTING: usize = 100;
 
+/// The live ignore-rule budget, in bytes (512 KiB): the crate holds the compiled matcher of every
+/// directory above the entry it walks, so the ignore files accepted along the current path (the
+/// root's parents included) may total no more than this.
+const MAX_LIVE_IGNORE_BYTES: u64 = 512 << 10;
+
 /// How to walk. Build it with [`WalkOptions::new`], which validates `excludes`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WalkOptions {
@@ -48,7 +57,7 @@ pub struct WalkOptions {
 
 impl WalkOptions {
     /// Returns the first pattern in `excludes` that is not a valid glob, is empty or only
-    /// whitespace, or starts with `!`.
+    /// whitespace, starts with `!`, or nests `{` deeper than 100 levels.
     pub fn new(
         include_hidden: bool,
         no_ignore: bool,
@@ -84,15 +93,18 @@ pub enum Walked {
 pub enum SkipReason {
     /// Over `max_size`; the walk itself never produces it.
     TooLarge,
-    /// A directory the walk cannot read, or an entry whose `stat` fails.
+    /// A directory the walk cannot read, an entry whose `stat` fails, or a symlink whose target
+    /// cannot be reached for lack of permission.
     Unreadable,
-    /// A FIFO, socket, device, or a broken or looping symlink.
+    /// A FIFO, socket, device, a broken or looping symlink, or a symlink to something not
+    /// regular.
     NotRegular,
     NonUtf8,
     /// A file symlink that resolves outside the root.
     OutsideRoot,
-    /// An ignore file that fails the fail-closed check (its directory is not walked), or one
-    /// with an invalid line (its valid lines still apply).
+    /// An ignore file that fails the fail-closed check or would take the live ignore-rule budget
+    /// over 512 KiB (its directory is not walked), or one with an invalid line (its valid lines
+    /// still apply).
     BadIgnoreFile,
 }
 
@@ -101,7 +113,11 @@ fn overrides(root: &Path, excludes: &[String]) -> Result<Override, String> {
     let mut builder = OverrideBuilder::new(root);
     for pattern in excludes {
         // An empty or blank pattern would match nothing, or everything.
-        if pattern.trim().is_empty() || pattern.starts_with('!') {
+        // Over-nested braces are refused before `add`, whose compile would overflow the stack.
+        if pattern.trim().is_empty()
+            || pattern.starts_with('!')
+            || brace_nesting(pattern) > MAX_BRACE_NESTING
+        {
             return Err(pattern.clone());
         }
         builder
@@ -123,7 +139,9 @@ fn overrides(root: &Path, excludes: &[String]) -> Result<Override, String> {
 /// Walks `root`, an absolute directory, from its real path: depth first, each directory's
 /// entries sorted by file name (byte order). The root itself is always walked, even if hidden
 /// or excluded. If an ignore file of the root or of one of its parents fails the fail-closed
-/// check, that file is the only entry and nothing is walked.
+/// check or overflows the live ignore-rule budget, it is reported and nothing is walked: that
+/// is the one entry, unless the crate still drops the rules of a file changed after the check,
+/// when the fail-closed fallback reports every ignore file of the parents.
 ///
 /// Panics if `opts.excludes` holds a pattern that `WalkOptions::new` rejects.
 pub fn walk(root: &Path, opts: &WalkOptions) -> impl Iterator<Item = Walked> + use<> {
@@ -141,17 +159,22 @@ pub fn walk(root: &Path, opts: &WalkOptions) -> impl Iterator<Item = Walked> + u
 
     // The crate reads the ignore files of every parent (`parents(true)`) and of the root before
     // the filter sees anything, so they are checked here, from `/` down.
+    // They stay charged to the live ignore-rule budget for the whole walk.
+    let mut budget = Budget::default();
     if use_ignore_files {
         let mut dirs: Vec<&Path> = root.ancestors().collect();
         dirs.reverse();
-        if let Some(bad) = dirs
-            .into_iter()
-            .find_map(|dir| check_ignore_files(dir).err())
-        {
-            walk.report(&bad, SkipReason::BadIgnoreFile);
-            return walk;
+        for dir in dirs {
+            match check_ignore_files(dir, budget.enter(0)) {
+                Ok(bytes) => budget.charge(0, bytes),
+                Err(bad) => {
+                    walk.report(&bad, SkipReason::BadIgnoreFile);
+                    return walk;
+                }
+            }
         }
     }
+    let budget = Mutex::new(budget);
 
     let mut builder = WalkBuilder::new(&root);
     builder
@@ -189,12 +212,15 @@ pub fn walk(root: &Path, opts: &WalkOptions) -> impl Iterator<Item = Walked> + u
             lock(&pending).push((ent.path().to_path_buf(), SkipReason::NonUtf8));
             return false;
         }
-        if is_dir
-            && use_ignore_files
-            && let Err(bad) = check_ignore_files(ent.path())
-        {
-            lock(&pending).push((bad, SkipReason::BadIgnoreFile));
-            return false;
+        if is_dir && use_ignore_files {
+            let mut budget = budget.lock().unwrap_or_else(|e| e.into_inner());
+            match check_ignore_files(ent.path(), budget.enter(ent.depth())) {
+                Ok(bytes) => budget.charge(ent.depth(), bytes),
+                Err(bad) => {
+                    lock(&pending).push((bad, SkipReason::BadIgnoreFile));
+                    return false;
+                }
+            }
         }
         true
     });
@@ -212,53 +238,65 @@ fn lock(pending: &Pending) -> std::sync::MutexGuard<'_, Vec<(PathBuf, SkipReason
 /// Checks, before the crate reads them, the ignore files it would read for `dir`: its
 /// `.gitignore`, `.ignore` and `.haliignore`, and through `.git` the repository's
 /// `info/exclude` (for a `.git` file also the file itself and the `commondir` it leads to).
-/// Returns the first one that fails.
-fn check_ignore_files(dir: &Path) -> Result<(), PathBuf> {
+/// The ignore files (not `.git` or `commondir`, which hold no rules) are charged against
+/// `remaining`, the bytes left of the live ignore-rule budget. Returns the bytes charged, or the
+/// first file that fails, which may be the one that would take the budget over.
+fn check_ignore_files(dir: &Path, remaining: u64) -> Result<u64, PathBuf> {
+    let mut charged = 0;
     for name in IGNORE_FILES {
-        check_ignore_file(dir, &dir.join(name))?;
+        charged += check_ignore_file(dir, &dir.join(name), remaining - charged)?;
     }
     let git = dir.join(".git");
     let git_type = match fs::symlink_metadata(&git) {
         Ok(meta) => meta.file_type(),
-        Err(e) if absent(&e) => return Ok(()),
+        Err(e) if absent(&e) => return Ok(charged),
         Err(_) => return Err(git),
     };
     // The crate follows a `.git` symlink; a directory holds the repository itself.
-    if git_type.is_dir() || (git_type.is_symlink() && git.is_dir()) {
-        return check_ignore_file(dir, &git.join("info/exclude"));
-    }
-    // A `.git` file `gitdir: <dir>`, read the crate's way (its first line); `<dir>/commondir`
-    // names the directory that holds `info/exclude`.
-    let Some(text) = read_ignore_file(&git)? else {
-        return Ok(());
-    };
-    let Some(git_dir) = text.lines().next().and_then(|l| l.strip_prefix("gitdir: ")) else {
-        return Ok(());
-    };
-    let git_dir = PathBuf::from(git_dir);
-    let Some(text) = read_ignore_file(&git_dir.join("commondir"))? else {
-        return Ok(());
-    };
-    let Some(common) = text.lines().next() else {
-        return Ok(());
-    };
-    let common = if common.starts_with('.') {
-        git_dir.join(common)
+    let exclude = if git_type.is_dir() || (git_type.is_symlink() && git.is_dir()) {
+        git.join("info/exclude")
     } else {
-        PathBuf::from(common)
+        // A `.git` file `gitdir: <dir>`, read the crate's way (its first line); `<dir>/commondir`
+        // names the directory that holds `info/exclude`.
+        let Some(text) = read_ignore_file(&git)? else {
+            return Ok(charged);
+        };
+        let Some(git_dir) = text.lines().next().and_then(|l| l.strip_prefix("gitdir: ")) else {
+            return Ok(charged);
+        };
+        let git_dir = PathBuf::from(git_dir);
+        let Some(text) = read_ignore_file(&git_dir.join("commondir"))? else {
+            return Ok(charged);
+        };
+        let Some(common) = text.lines().next() else {
+            return Ok(charged);
+        };
+        let common = if common.starts_with('.') {
+            git_dir.join(common)
+        } else {
+            PathBuf::from(common)
+        };
+        common.join("info/exclude")
     };
-    check_ignore_file(dir, &common.join("info/exclude"))
+    Ok(charged + check_ignore_file(dir, &exclude, remaining - charged)?)
 }
 
 /// Checks the ignore file at `path`, read for `dir`: it must pass [`read_ignore_file`], no line
-/// may nest `{` deeper than [`MAX_BRACE_NESTING`], and its matcher must build (the crate drops
-/// every rule of a file whose matcher it fails to build, on a regex size limit). The build
-/// mirrors the crate's, one matcher per file; a line that is invalid on its own is left to the
-/// crate, which reports it with the file's path and applies the other lines.
-fn check_ignore_file(dir: &Path, path: &Path) -> Result<(), PathBuf> {
+/// may nest `{` deeper than [`MAX_BRACE_NESTING`], its size may not exceed `remaining` (what is
+/// left of the live ignore-rule budget), and its matcher must build (the crate drops every rule
+/// of a file whose matcher it fails to build, on a regex size limit). The build mirrors the
+/// crate's, one matcher per file, and is dropped at once; a line that is invalid on its own is
+/// left to the crate, which reports it with the file's path and applies the other lines.
+/// Returns the file's size in bytes (0 when there is none).
+fn check_ignore_file(dir: &Path, path: &Path, remaining: u64) -> Result<u64, PathBuf> {
     let Some(text) = read_ignore_file(path)? else {
-        return Ok(());
+        return Ok(0);
     };
+    let bytes = text.len() as u64;
+    // Before the build, so a file over the budget never costs a compile.
+    if bytes > remaining {
+        return Err(path.to_path_buf());
+    }
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
     // Comment lines are never compiled; checked before the build, which would overflow.
     if text
@@ -272,7 +310,38 @@ fn check_ignore_file(dir: &Path, path: &Path) -> Result<(), PathBuf> {
         // The crate skips an invalid line too.
         let _ = builder.add_line(None, line);
     }
-    builder.build().map(drop).map_err(|_| path.to_path_buf())
+    builder
+        .build()
+        .map(|_| bytes)
+        .map_err(|_| path.to_path_buf())
+}
+
+/// The live ignore-rule budget: the bytes of the ignore files accepted for the directories on
+/// the current path of the walk. The walk is depth first, so a directory at some depth leaves
+/// every directory charged at that depth or deeper. The root and its parents are charged at
+/// depth 0, which no directory below the root has, so they stay charged for the whole walk.
+#[derive(Debug, Default)]
+struct Budget {
+    /// The depth of each charged directory and its bytes, outermost first.
+    path: Vec<(usize, u64)>,
+}
+
+impl Budget {
+    /// Leaves the directories that a directory at `depth` is not under; returns the bytes left.
+    fn enter(&mut self, depth: usize) -> u64 {
+        while self.path.last().is_some_and(|&(d, _)| d > 0 && d >= depth) {
+            self.path.pop();
+        }
+        let used: u64 = self.path.iter().map(|&(_, bytes)| bytes).sum();
+        MAX_LIVE_IGNORE_BYTES.saturating_sub(used)
+    }
+
+    /// Charges `bytes` to the directory at `depth` just entered.
+    fn charge(&mut self, depth: usize, bytes: u64) {
+        if bytes > 0 {
+            self.path.push((depth, bytes));
+        }
+    }
 }
 
 /// The deepest `{` nesting of a glob line, scanned the way globset parses it: `\` escapes the
@@ -575,7 +644,80 @@ fn error_path(err: &ignore::Error) -> Option<&Path> {
 
 #[cfg(test)]
 mod tests {
-    use super::brace_nesting;
+    use super::*;
+
+    #[test]
+    fn path_less_crate_error_stops_the_walk() {
+        // A crate error naming no file (a matcher it failed to build, path unknown) fails
+        // closed: the walk stops and reports.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let mut walk = Walk {
+            inner: Some(WalkBuilder::new(&root).build()),
+            root,
+            pending: Arc::new(Mutex::new(Vec::new())),
+            queue: VecDeque::new(),
+            bad_ignore_files: HashSet::new(),
+            not_walked: Vec::new(),
+        };
+        walk.error(&ignore::Error::Glob {
+            glob: None,
+            err: "regex too big".to_string(),
+        });
+        assert!(walk.inner.is_none(), "the walk stops");
+        let all: Vec<Walked> = walk.collect();
+        assert!(!all.is_empty(), "a report is produced");
+        assert!(
+            all.iter().all(|w| matches!(
+                w,
+                Walked::Skipped {
+                    reason: SkipReason::BadIgnoreFile,
+                    ..
+                }
+            )),
+            "{all:?}"
+        );
+    }
+
+    #[test]
+    fn comment_lines_are_not_nesting_checked() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".ignore");
+        let braces = format!("#{}a{}\n", "{".repeat(101), "}".repeat(101));
+        fs::write(&path, &braces).unwrap();
+        assert_eq!(
+            check_ignore_file(dir.path(), &path, MAX_LIVE_IGNORE_BYTES),
+            Ok(braces.len() as u64)
+        );
+        fs::write(&path, &braces[1..]).unwrap();
+        assert_eq!(
+            check_ignore_file(dir.path(), &path, MAX_LIVE_IGNORE_BYTES),
+            Err(path.clone())
+        );
+    }
+
+    #[test]
+    fn budget_follows_the_current_path() {
+        let mut budget = Budget::default();
+        // The root and its parents, at depth 0.
+        assert_eq!(budget.enter(0), MAX_LIVE_IGNORE_BYTES);
+        budget.charge(0, 100);
+        budget.charge(0, 0);
+        assert_eq!(budget.enter(0), MAX_LIVE_IGNORE_BYTES - 100);
+        // a/ then a/b/: both charged.
+        assert_eq!(budget.enter(1), MAX_LIVE_IGNORE_BYTES - 100);
+        budget.charge(1, 10);
+        assert_eq!(budget.enter(2), MAX_LIVE_IGNORE_BYTES - 110);
+        budget.charge(2, 1);
+        assert_eq!(budget.enter(3), MAX_LIVE_IGNORE_BYTES - 111);
+        // a/c/ leaves a/b/; d/ leaves a/; the root stays charged.
+        assert_eq!(budget.enter(2), MAX_LIVE_IGNORE_BYTES - 110);
+        assert_eq!(budget.enter(1), MAX_LIVE_IGNORE_BYTES - 100);
+        // A directory with no ignore files charges nothing, and its child pops nothing above.
+        budget.charge(1, 0);
+        budget.charge(0, MAX_LIVE_IGNORE_BYTES);
+        assert_eq!(budget.enter(2), 0, "never below zero");
+    }
 
     #[test]
     fn brace_nesting_follows_globset() {
@@ -590,5 +732,14 @@ mod tests {
         assert_eq!(brace_nesting("[{{[}"), 2);
         // Inside a class `\` is a member, not an escape.
         assert_eq!(brace_nesting(r"[\]{a}"), 1);
+        // A stray `}` at depth 0 does not go below zero.
+        assert_eq!(brace_nesting("}{{"), 2);
+        // A negated class `[^}]` holds no brace.
+        assert_eq!(brace_nesting("{[^}]{a}}"), 2);
+        // A trailing `\` escapes nothing.
+        assert_eq!(brace_nesting("{a\\"), 1);
+        assert_eq!(brace_nesting("\\"), 0);
+        // Multibyte characters count as one.
+        assert_eq!(brace_nesting("{é{ü€}}"), 2);
     }
 }
