@@ -222,6 +222,21 @@ mod goal {
         ("cli_refresh__refresh_json", "refresh"),
     ];
 
+    /// Snapshots written by the active goal (#22): hidden from a build without the goal
+    /// feature (the `scan` schema they name does not exist until the goal is met).
+    const GOAL_SNAPS_22: &[&str] = &[
+        "cli_dry_run__scan_dry_run_json",
+        "cli_scan__scan_json",
+        "cli_scan__schema_list_json",
+    ];
+
+    #[cfg(feature = "goal")]
+    const GOAL_STDOUT_GOLDENS_22: &[(&str, &str)] = &[
+        ("cli_dry_run__scan_dry_run_json", "scan"),
+        ("cli_scan__scan_json", "scan"),
+        ("cli_scan__schema_list_json", "schema"),
+    ];
+
     /// Every stdout snapshot's row.
     #[allow(unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
@@ -235,6 +250,8 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_18);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_19);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_20);
+        #[cfg(feature = "goal")]
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_22);
         rows
     }
 
@@ -286,6 +303,11 @@ mod goal {
         {
             pending_20 = &[];
         }
+        let mut pending_22: &[&str] = GOAL_SNAPS_22;
+        #[cfg(feature = "goal")]
+        {
+            pending_22 = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -302,6 +324,7 @@ mod goal {
                 || pending_18.contains(&stem.as_str())
                 || pending_19.contains(&stem.as_str())
                 || pending_20.contains(&stem.as_str())
+                || pending_22.contains(&stem.as_str())
             {
                 continue;
             }
@@ -411,6 +434,8 @@ mod goal {
         assert!(goldens.len() >= 70, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 73, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 76, "found only {} goldens", goldens.len());
+        #[cfg(feature = "goal")]
+        assert!(goldens.len() >= 79, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
                 .unwrap_or_else(|| panic!("golden `{}` is not mapped to a schema", g.stem));
@@ -1766,6 +1791,272 @@ mod goal {
                 if valid { "accept" } else { "reject" }
             );
         }
+    }
+
+    /// #22: what the `scan` schema accepts and refuses: a real branch and a dry-run branch, every
+    /// key required, `additionalProperties: false`, the six skip reasons, exact counts.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn scan_schema_accepts_and_rejects() {
+        let record = |id: &str, missing: bool| {
+            json!({"id": id, "path": "/TMP/root/a.txt", "title": "a", "media_type": "text/plain",
+                "editable": true, "missing": missing, "stale": false, "types": [],
+                "tags": [], "byte_size": 6, "modified": "2026-10-20T14:02:11Z"})
+        };
+        let real = || {
+            json!({"schema_version": 1, "root": "/TMP/root",
+                "counts": {"added": 1, "refreshed": 1, "unchanged": 2, "missing": 1, "skipped": 1},
+                "media_types": {"text/plain": 1},
+                "added": [record("0192f0c4-0000-7000-8000-000000000901", false)],
+                "refreshed": [record("0192f0c4-0000-7000-8000-000000000902", false)],
+                "missing": [record("0192f0c4-0000-7000-8000-000000000904", true)],
+                "skipped": [{"path": "/TMP/root/big.bin", "reason": "too_large"}],
+                "truncated": false})
+        };
+        let dry = || {
+            let mut v = real();
+            v["dry_run"] = json!(true);
+            v["changes"] = json!([{"op": "add", "triple": "<a:b> <a:c> <a:d> ."}]);
+            v
+        };
+        let with = |base: Value, key: &str, value: Value| {
+            let mut v = base;
+            v[key] = value;
+            v
+        };
+        let without = |base: Value, key: &str| {
+            let mut v = base;
+            v.as_object_mut().unwrap().remove(key);
+            v
+        };
+        let in_counts = |key: &str, value: Option<Value>| {
+            let mut v = real();
+            match value {
+                Some(value) => v["counts"][key] = value,
+                None => {
+                    v["counts"].as_object_mut().unwrap().remove(key);
+                }
+            }
+            v
+        };
+        let skipped_with = |entry: Value| with(real(), "skipped", json!([entry]));
+        let v = validator("scan");
+        let mut cases: Vec<(String, Value, bool)> = vec![
+            ("real".into(), real(), true),
+            ("dry run".into(), dry(), true),
+            (
+                "dry run, no changes".into(),
+                with(with(real(), "dry_run", json!(true)), "changes", json!([])),
+                true,
+            ),
+            (
+                "empty".into(),
+                json!({"schema_version": 1, "root": "/TMP/root",
+                    "counts": {"added": 0, "refreshed": 0, "unchanged": 0, "missing": 0,
+                        "skipped": 0},
+                    "media_types": {}, "added": [], "refreshed": [], "missing": [],
+                    "skipped": [], "truncated": false}),
+                true,
+            ),
+            (
+                "truncated".into(),
+                with(real(), "truncated", json!(true)),
+                true,
+            ),
+            (
+                "counts beyond the listed".into(),
+                in_counts("added", Some(json!(5000))),
+                true,
+            ),
+        ];
+        for reason in [
+            "too_large",
+            "unreadable",
+            "not_regular",
+            "non_utf8",
+            "outside_root",
+            "bad_ignore_file",
+        ] {
+            cases.push((
+                format!("reason {reason}"),
+                skipped_with(json!({"path": "/p", "reason": reason})),
+                true,
+            ));
+        }
+        for key in [
+            "schema_version",
+            "root",
+            "counts",
+            "media_types",
+            "added",
+            "refreshed",
+            "missing",
+            "skipped",
+            "truncated",
+        ] {
+            cases.push((format!("no {key}"), without(real(), key), false));
+        }
+        for key in ["added", "refreshed", "unchanged", "missing", "skipped"] {
+            cases.push((format!("no counts.{key}"), in_counts(key, None), false));
+            cases.push((
+                format!("counts.{key} -1"),
+                in_counts(key, Some(json!(-1))),
+                false,
+            ));
+            cases.push((
+                format!("counts.{key} 1.5"),
+                in_counts(key, Some(json!(1.5))),
+                false,
+            ));
+            cases.push((
+                format!("counts.{key} string"),
+                in_counts(key, Some(json!("1"))),
+                false,
+            ));
+        }
+        cases.extend([
+            (
+                "counts extra key".to_string(),
+                in_counts("relinked", Some(json!(0))),
+                false,
+            ),
+            (
+                "extra key".to_string(),
+                with(real(), "total", json!(3)),
+                false,
+            ),
+            (
+                "version 2".to_string(),
+                with(real(), "schema_version", json!(2)),
+                false,
+            ),
+            (
+                "root not a string".to_string(),
+                with(real(), "root", json!(7)),
+                false,
+            ),
+            (
+                "media_types negative".to_string(),
+                with(real(), "media_types", json!({"text/plain": -1})),
+                false,
+            ),
+            (
+                "media_types string".to_string(),
+                with(real(), "media_types", json!({"text/plain": "1"})),
+                false,
+            ),
+            (
+                "media_types is a list".to_string(),
+                with(real(), "media_types", json!([])),
+                false,
+            ),
+            (
+                "truncated string".to_string(),
+                with(real(), "truncated", json!("false")),
+                false,
+            ),
+            (
+                "unknown reason".to_string(),
+                skipped_with(json!({"path": "/p", "reason": "hidden"})),
+                false,
+            ),
+            (
+                "skipped no reason".to_string(),
+                skipped_with(json!({"path": "/p"})),
+                false,
+            ),
+            (
+                "skipped no path".to_string(),
+                skipped_with(json!({"reason": "too_large"})),
+                false,
+            ),
+            (
+                "skipped extra key".to_string(),
+                skipped_with(json!({"path": "/p", "reason": "too_large", "size": 1})),
+                false,
+            ),
+            (
+                "skipped is a string".to_string(),
+                with(real(), "skipped", json!(["/p"])),
+                false,
+            ),
+            (
+                "added is not records".to_string(),
+                with(real(), "added", json!(["x"])),
+                false,
+            ),
+            (
+                "record minus stale".to_string(),
+                with(
+                    real(),
+                    "refreshed",
+                    json!([without(
+                        record("0192f0c4-0000-7000-8000-000000000902", false),
+                        "stale"
+                    )]),
+                ),
+                false,
+            ),
+            (
+                "dry_run alone".to_string(),
+                with(real(), "dry_run", json!(true)),
+                false,
+            ),
+            (
+                "changes alone".to_string(),
+                with(real(), "changes", json!([])),
+                false,
+            ),
+            (
+                "dry_run false".to_string(),
+                with(dry(), "dry_run", json!(false)),
+                false,
+            ),
+            (
+                "dry run, no changes key".to_string(),
+                without(dry(), "changes"),
+                false,
+            ),
+            (
+                "bad op".to_string(),
+                with(
+                    dry(),
+                    "changes",
+                    json!([{"op": "replace", "triple": "<a:b> <a:c> <a:d> ."}]),
+                ),
+                false,
+            ),
+            (
+                "refresh payload".to_string(),
+                json!({"schema_version": 1, "refreshed": [], "missing": [], "unchanged": 0}),
+                false,
+            ),
+        ]);
+        for (name, instance, valid) in cases {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema scan` should {} `{name}`: {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #22: `hali schema scan` is served, and `scan` is in the list in sorted place.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn scan_schema_is_listed() {
+        let listed = fetch_list();
+        assert_eq!(listed.len(), 25, "{listed:?}");
+        let at = listed
+            .iter()
+            .position(|n| n == "scan")
+            .expect("scan is listed");
+        assert_eq!(listed[at - 1], "relation remove");
+        assert_eq!(listed[at + 1], "schema");
+        assert!(listed.windows(2).all(|w| w[0] < w[1]), "sorted: {listed:?}");
+        assert_eq!(fetch("scan")["title"], "hali scan --json");
     }
 
     /// #18: what the `relate`, `unrelate` and `relation add|list|remove` schemas accept and

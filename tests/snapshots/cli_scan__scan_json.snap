@@ -1,0 +1,5 @@
+---
+source: tests/cli_scan.rs
+expression: out.stdout
+---
+{"schema_version":1,"root":"/TMP/root","counts":{"added":3,"refreshed":0,"unchanged":0,"missing":0,"skipped":1},"media_types":{"application/octet-stream":1,"text/plain":2},"added":[{"id":"018bcfe5-6801-710a-adec-89025cc1beeb","path":"/TMP/root/a.txt","title":"a","media_type":"text/plain","editable":true,"missing":false,"stale":false,"types":[],"tags":[],"byte_size":6,"modified":"2026-10-20T14:02:11Z"},{"id":"018bcfe5-6804-7099-ac6c-d7363ca585e7","path":"/TMP/root/b.txt","title":"b","media_type":"text/plain","editable":true,"missing":false,"stale":false,"types":[],"tags":[],"byte_size":5,"modified":"2026-10-20T14:02:11Z"},{"id":"018bcfe5-6806-7775-9c77-01564f619afc","path":"/TMP/root/n","title":"n","media_type":"application/octet-stream","editable":false,"missing":false,"stale":false,"types":[],"tags":[],"byte_size":4,"modified":"2026-10-20T14:02:11Z"}],"refreshed":[],"missing":[],"skipped":[{"path":"/TMP/root/big.txt","reason":"too_large"}],"truncated":false}
