@@ -164,9 +164,7 @@ mod goal {
     }
 
     fn opts() -> WalkOptions {
-        WalkOptions::new(false, false, vec![], vec![])
-            .ok()
-            .expect("default options are valid")
+        WalkOptions::new(false, false, vec![], vec![]).expect("default options are valid")
     }
 
     /// The whole walk, in a thread with a 30 s timeout: a walker that opens a FIFO hangs.
@@ -795,7 +793,6 @@ mod goal {
             strs(&["*.log", "/top", "a/**/b"]),
             vec![PathBuf::from("/d")],
         )
-        .ok()
         .expect("valid globs");
         assert!(ok.include_hidden && !ok.no_ignore);
         assert_eq!(ok.excludes, ["*.log", "/top", "a/**/b"]);
@@ -1338,13 +1335,11 @@ mod goal {
         );
     }
 
+    type SnapEntry = (String, u32, u64, i64, i64, u32, Option<PathBuf>);
+
     /// (relative path, kind, size, mtime ns, mode, link target) of everything under `dir`.
-    fn snapshot(dir: &Path) -> Vec<(String, u32, u64, i64, i64, u32, Option<PathBuf>)> {
-        fn go(
-            base: &Path,
-            dir: &Path,
-            out: &mut Vec<(String, u32, u64, i64, i64, u32, Option<PathBuf>)>,
-        ) {
+    fn snapshot(dir: &Path) -> Vec<SnapEntry> {
+        fn go(base: &Path, dir: &Path, out: &mut Vec<SnapEntry>) {
             let mut entries: Vec<_> = fs::read_dir(dir).unwrap().map(|e| e.unwrap()).collect();
             entries.sort_by_key(|e| e.file_name());
             for e in entries {
@@ -2107,7 +2102,6 @@ mod goal {
         write(&sb.root, "sub/target/t.txt", "x");
         write(&sb.root, "data/d.txt", "x");
         let options = WalkOptions::new(false, false, vec!["*.log".to_string()], vec![data])
-            .ok()
             .expect("valid options");
         let (got, skips) = outcome(&sb, options);
         assert_eq!(got, [".env", ".hid/h.txt", ".ignore", "a.txt"]);
@@ -2127,9 +2121,8 @@ mod goal {
         let sb = sandbox!();
         write(&sb.root, "a.txt", "x");
         write(&sb.root, "sub/b.txt", "x");
-        let options = WalkOptions::new(false, false, vec![], vec![sb.root.clone()])
-            .ok()
-            .expect("valid options");
+        let options =
+            WalkOptions::new(false, false, vec![], vec![sb.root.clone()]).expect("valid options");
         let (got, skips) = outcome(&sb, options);
         assert_eq!(got, ["a.txt", "sub/b.txt"]);
         assert!(skips.is_empty(), "{skips:?}");
