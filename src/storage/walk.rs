@@ -8,6 +8,11 @@
 //! read. Ignore files fail closed: one that fails the check, or whose rules would take the live
 //! ignore-rule budget (the bytes of ignore files accepted along the current path) over 512 KiB,
 //! is reported and its directory is not walked.
+//!
+//! Caller notes: [`walk`] checks the ignore files of the root and its parents when it is called,
+//! but the crate reads them at the first `next()`, so iterate at once. Do not call
+//! [`WalkOptions::new`] or [`walk`] on a thread with a tiny custom stack: a debug build aborts on
+//! a 100-level pattern on a 64 KiB stack (256 KiB is fine).
 
 use ignore::gitignore::GitignoreBuilder;
 use ignore::overrides::{Override, OverrideBuilder};
@@ -142,6 +147,9 @@ fn overrides(root: &Path, excludes: &[String]) -> Result<Override, String> {
 /// check or overflows the live ignore-rule budget, it is reported and nothing is walked: that
 /// is the one entry, unless the crate still drops the rules of a file changed after the check,
 /// when the fail-closed fallback reports every ignore file of the parents.
+///
+/// Iterate at once: the root's and parents' ignore files are checked here but read by the crate
+/// at the first `next()`. Needs a normal thread stack (see the module notes).
 ///
 /// Panics if `opts.excludes` holds a pattern that `WalkOptions::new` rejects.
 pub fn walk(root: &Path, opts: &WalkOptions) -> impl Iterator<Item = Walked> + use<> {
@@ -297,7 +305,8 @@ fn check_ignore_file(dir: &Path, path: &Path, remaining: u64) -> Result<u64, Pat
     if bytes > remaining {
         return Err(path.to_path_buf());
     }
-    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    // Every leading BOM, as the crate strips them; the charge above counts them.
+    let text = text.trim_start_matches('\u{feff}');
     // Comment lines are never compiled; checked before the build, which would overflow.
     if text
         .lines()
@@ -320,6 +329,8 @@ fn check_ignore_file(dir: &Path, path: &Path, remaining: u64) -> Result<u64, Pat
 /// the current path of the walk. The walk is depth first, so a directory at some depth leaves
 /// every directory charged at that depth or deeper. The root and its parents are charged at
 /// depth 0, which no directory below the root has, so they stay charged for the whole walk.
+/// The release by depth relies on the sequential walk (`WalkBuilder::build`); a parallel walk
+/// (`build_parallel`) would break it silently.
 #[derive(Debug, Default)]
 struct Budget {
     /// The depth of each charged directory and its bytes, outermost first.
@@ -715,8 +726,62 @@ mod tests {
         assert_eq!(budget.enter(1), MAX_LIVE_IGNORE_BYTES - 100);
         // A directory with no ignore files charges nothing, and its child pops nothing above.
         budget.charge(1, 0);
+        assert_eq!(budget.enter(2), MAX_LIVE_IGNORE_BYTES - 100);
+    }
+
+    #[test]
+    fn budget_saturates_at_zero() {
+        let mut budget = Budget::default();
+        budget.enter(0);
         budget.charge(0, MAX_LIVE_IGNORE_BYTES);
-        assert_eq!(budget.enter(2), 0, "never below zero");
+        assert_eq!(budget.enter(1), 0, "a full budget");
+        // The walk never charges more than is left; the bytes left still stop at zero.
+        budget.charge(0, 1);
+        assert_eq!(budget.enter(1), 0, "never below zero");
+    }
+
+    #[test]
+    fn every_leading_bom_is_stripped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".ignore");
+        let comment = format!("\u{feff}\u{feff}#{}a\n", "{".repeat(101));
+        fs::write(&path, &comment).unwrap();
+        assert_eq!(
+            check_ignore_file(dir.path(), &path, MAX_LIVE_IGNORE_BYTES),
+            Ok(comment.len() as u64),
+            "a comment after two BOMs, charged with them"
+        );
+        let nested = format!("\u{feff}\u{feff}{}a{}\n", "{".repeat(101), "}".repeat(101));
+        fs::write(&path, &nested).unwrap();
+        assert_eq!(
+            check_ignore_file(dir.path(), &path, MAX_LIVE_IGNORE_BYTES),
+            Err(path.clone())
+        );
+    }
+
+    #[test]
+    fn budget_is_checked_before_the_compile() {
+        // About 250 KB of distinct `a*bN.x` lines: its compile takes seconds in a debug build.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".ignore");
+        let mut text = String::new();
+        let mut n = 0;
+        while text.len() < 249_990 {
+            text.push_str(&format!("a*b{n}.x\n"));
+            n += 1;
+        }
+        fs::write(&path, &text).unwrap();
+        let bytes = text.len() as u64;
+        for remaining in [0, bytes - 1] {
+            let start = std::time::Instant::now();
+            assert_eq!(
+                check_ignore_file(dir.path(), &path, remaining),
+                Err(path.clone())
+            );
+            let took = start.elapsed();
+            assert!(took < std::time::Duration::from_secs(1), "{took:?}");
+        }
+        assert_eq!(check_ignore_file(dir.path(), &path, bytes), Ok(bytes));
     }
 
     #[test]
