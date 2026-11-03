@@ -43,7 +43,6 @@
 //! the long checkout path would overflow the 108-byte limit of a socket path. Nothing here
 //! runs `git`; a repository is a `.git` directory holding a `HEAD` file.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::storage::walk::{SkipReason, WalkOptions, Walked, walk};
     use std::ffi::{OsStr, OsString};
