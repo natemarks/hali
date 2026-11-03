@@ -1,0 +1,8 @@
+tests/core_scan.rs
+tests/cli_scan.rs
+tests/schema_contract.rs
+tests/support/mod.rs
+tests/fixtures/scan/
+tests/snapshots/cli_scan__scan_json.snap
+tests/snapshots/cli_scan__schema_list_json.snap
+tests/snapshots/cli_dry_run__scan_dry_run_json.snap
