@@ -911,7 +911,8 @@ mod goal {
         // The yielded paths are the real ones.
         for w in run(&sb.root, opts()) {
             if let Walked::File { path, .. } = w {
-                assert!(!path.contains("link") && !path.contains("in2"), "{path}");
+                let r = rel(&sb.root, &path);
+                assert!(!r.contains("link") && !r.contains("in2"), "{path}");
             }
         }
     }
@@ -1076,7 +1077,7 @@ mod goal {
             .filter_map(|w| match w {
                 Walked::File {
                     byte_size, path, ..
-                } if path.contains("ok") => Some(*byte_size),
+                } if rel(&sb.root, path).contains("ok") => Some(*byte_size),
                 _ => None,
             })
             .collect();
