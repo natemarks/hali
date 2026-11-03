@@ -8,7 +8,8 @@ set -uo pipefail
 # ignore-file candidates, the 256 KiB cap and the 100-level nesting bound, the build-failure rule,
 # the `.git` directory / file / commondir coverage, the accepted race, the parents and `!` lines,
 # the global-config gap (a FIFO at a config file, silent loss of global gitignore errors), the live
-# ignore-rule budget (512 KiB along the current path), the silent loss of rules when a file changes
+# ignore-rule budget (512 KiB along the current path, per directory that reads a file, the files of
+# one directory adding up), the CPU cost in deep trees, the caller notes, the silent loss of rules when a file changes
 # after the check, the root-is-the-data-dir note, the skip reasons, the one-level-listing note, and
 # the refused empty, whitespace-only and over-nested excludes; §15
 # pins `ignore` 0.4.34. The goal commit writes this text, so the check passes by design: it
@@ -44,9 +45,15 @@ need7 'also fails closed, reported at the candidate file.'
 need7 'A FIFO or a device named as an ignore file is therefore never opened.'
 need7 '**Live ignore-rule budget:**'
 need7 'keeps the compiled matcher of every ancestor directory alive while the walk is under it, so memory grows with depth'
-need7 'a running total of the bytes of ignore files accepted along the current path (the root'"'"'s parents included, each file counted once)'
+need7 'a running total of the bytes of ignore files accepted along the current path (the root'"'"'s parents included; a file is counted once for each directory that reads it, so an `info/exclude` shared by several worktrees is counted once per directory, which matches the crate; the files of one directory add up against the budget)'
 need7 'over 512 KiB (524,288 bytes) as skipped (`bad_ignore_file`, at that file); its directory is not walked, and for the root or a parent of the root, nothing is walked.'
 need7 'A file counts only while the walk is under its directory, so siblings are not charged for each other'"'"'s files.'
+need7 '**CPU in deep trees:** the `ignore` crate matches every entry against the matchers of every ancestor directory, so time grows with depth × files per level × ignore files'
+need7 'There is no depth cap. This is accepted: `hali scan` (#22) must include a time bound in its tests, and the follow-up that reads ignore files with hali'"'"'s own matcher, with a depth or live-matcher cap, is the fix.'
+need7 '**Caller notes:** `walk()` checks the ignore files of the root and its parents when it is called, but the `ignore` crate reads them at the first `next()`, so callers must iterate at once.'
+need7 '`WalkOptions::new` and `walk()` must not be called on a thread with a tiny custom stack (a debug build aborts on a 100-level pattern on a 64 KiB stack; 256 KiB is fine).'
+need7 'The budget assumes the sequential depth-first walk and would silently break under a parallel walk.'
+need7 'a world-writable parent such as `/tmp` that holds large ignore files can use the whole budget for every root below it.'
 need7 'a race remains, and it is not narrow: whoever controls the tree controls how wide it is'
 need7 'Those are denials of service.'
 need7 'If a file changes after the check, the crate also silently throws away I/O errors from ignore files, so a directory can be walked with none, or only the first lines, of its rules, and nothing is reported: rules can be lost silently. This is accepted.'

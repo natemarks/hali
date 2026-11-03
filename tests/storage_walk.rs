@@ -2168,20 +2168,35 @@ mod goal {
 
     #[test]
     fn ignore_budget_nested() {
-        // 8 nested directories, each with a ~250 KB accepted `.ignore`: the first two make
-        // ~500 KB, the third crosses 524,288. Unbounded, the crate holds all eight compiled
-        // matchers at once (gigabytes), so the capped child dies or hangs. Bounded, the walk
-        // ends cleanly with one `bad_ignore_file` at the file that crosses the budget, and
-        // nothing from that directory down is walked.
+        // 8 nested directories. `d1/.ignore` and `d2/.ignore` are comment-only files of exactly
+        // 262,144 bytes (charged, nothing to compile): together they use the whole 524,288
+        // budget, so the third file crosses it. `d3` to `d8` hold ~250 KB of `a*bN.x` lines,
+        // expensive to compile. Unbounded (or charged late, or released too early), the crate
+        // holds or compiles the expensive matchers (gigabytes, minutes), so the capped child
+        // dies or hangs. Bounded, the walk ends at once with one `bad_ignore_file` at `d3`'s
+        // file, before any expensive compile, and nothing from `d3` down is walked.
         let sb = sandbox!();
         write(&sb.root, "top.txt", "x");
         let mut dir = String::new();
         for i in 1..=8 {
             dir.push_str(&format!("d{i}/"));
             write(&sb.root, &format!("{dir}f.txt"), "x");
-            write(&sb.root, &format!("{dir}.ignore"), &expensive_ignore(i));
+            let text = if i <= 2 {
+                comments(262_144)
+            } else {
+                expensive_ignore(i)
+            };
+            write(&sb.root, &format!("{dir}.ignore"), &text);
         }
+        let started = std::time::Instant::now();
         let all = run_capped(&sb.root).unwrap_or_else(|e| panic!("nested case: {e}"));
+        // Measured at 0.05 s in a debug build; compiling `d3`'s ~250 KB file before rejecting
+        // it costs about 3.5 s, so a walker that checks the budget after the build fails here.
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the budget must be checked before compiling: {:?}",
+            started.elapsed()
+        );
         assert_eq!(
             sorted(files(&sb.root, &all)),
             ["d1/d2/f.txt", "d1/f.txt", "top.txt"]
@@ -2190,6 +2205,59 @@ mod goal {
             skipped(&sb.root, &all),
             [("d1/d2/d3/.ignore".to_string(), SkipReason::BadIgnoreFile)]
         );
+    }
+
+    #[test]
+    fn ignore_budget_same_dir() {
+        // The ignore files of ONE directory add up against the budget. Which of the directory's
+        // files is checked first is not part of the contract: the skip is at one of them.
+        let sb = sandbox!();
+        write(&sb.root, "outside.txt", "x");
+        write(&sb.root, "sub/x.txt", "x");
+        write(&sb.root, "sub/.ignore", &comments(262_144));
+        write(&sb.root, "sub/.haliignore", &comments(262_144));
+        write(&sb.root, "sub/.gitignore", &comments(2));
+        let all = run(&sb.root, opts());
+        assert_eq!(files(&sb.root, &all), ["outside.txt"]);
+        let skips = skipped_abs(&all);
+        assert_eq!(skips.len(), 1, "{skips:?}");
+        assert_eq!(skips[0].1, SkipReason::BadIgnoreFile);
+        let ours = ["sub/.ignore", "sub/.haliignore", "sub/.gitignore"]
+            .map(|f| path_str(&sb.root.join(f)));
+        assert!(ours.contains(&skips[0].0), "{skips:?}");
+
+        // Without the 2-byte file the directory holds exactly 524,288 bytes and is accepted.
+        fs::remove_file(sb.root.join("sub/.gitignore")).unwrap();
+        let all = run(&sb.root, opts());
+        assert_eq!(sorted(files(&sb.root, &all)), ["outside.txt", "sub/x.txt"]);
+        assert!(skipped_abs(&all).is_empty(), "{all:?}");
+    }
+
+    #[test]
+    fn ignore_budget_same_dir_info_exclude() {
+        // The same for `.git/info/exclude`: it is charged together with the directory's own
+        // ignore files.
+        let sb = sandbox!();
+        write(&sb.root, "outside.txt", "x");
+        write(&sb.root, "sub/x.txt", "x");
+        make_repo(&sb.root.join("sub"));
+        write(&sb.root, "sub/.git/info/exclude", &comments(262_144));
+        write(&sb.root, "sub/.ignore", &comments(262_144));
+        write(&sb.root, "sub/.haliignore", &comments(2));
+        let all = run(&sb.root, opts());
+        assert_eq!(files(&sb.root, &all), ["outside.txt"]);
+        let skips = skipped_abs(&all);
+        assert_eq!(skips.len(), 1, "{skips:?}");
+        assert_eq!(skips[0].1, SkipReason::BadIgnoreFile);
+        let ours = ["sub/.git/info/exclude", "sub/.ignore", "sub/.haliignore"]
+            .map(|f| path_str(&sb.root.join(f)));
+        assert!(ours.contains(&skips[0].0), "{skips:?}");
+
+        // Without the 2-byte file: exactly 524,288, accepted.
+        fs::remove_file(sb.root.join("sub/.haliignore")).unwrap();
+        let all = run(&sb.root, opts());
+        assert_eq!(sorted(files(&sb.root, &all)), ["outside.txt", "sub/x.txt"]);
+        assert!(skipped_abs(&all).is_empty(), "{all:?}");
     }
 
     #[test]
