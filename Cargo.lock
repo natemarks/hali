@@ -1888,9 +1888,9 @@ dependencies = [
 
 [[package]]
 name = "prefixmap"
-version = "0.3.35"
+version = "0.3.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5810cef5fef18478837e228bfb77ed397c0350c7cbdded20b25ddcc20372024"
+checksum = "65755d94d554bb15d8b01ec4bd480faa4f6f3eac24f4ed448b1d76b3cfc2fc6a"
 dependencies = [
  "colored",
  "indexmap",
@@ -2311,9 +2311,9 @@ dependencies = [
 
 [[package]]
 name = "rudof_config"
-version = "0.3.35"
+version = "0.3.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1d187d93fe162db5cc638e1be7e1f85761705e57b66abd8e15b64cc30636bd2"
+checksum = "2d61a0c4a22c970e09310f015b6b1b683a031defecf62ee92ab3a938fafe6f41"
 dependencies = [
  "dirs",
  "serde",
@@ -2323,9 +2323,9 @@ dependencies = [
 
 [[package]]
 name = "rudof_iri"
-version = "0.3.35"
+version = "0.3.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66765fa64c9d51b738f71f3ffed3e07c2abc8cacb0c64fd9a6630ac15cda334c"
+checksum = "967fa87f3419a12bcfe084711c9490cbcd717ddee74c7f15ade74a4e6c787794"
 dependencies = [
  "getrandom 0.3.4",
  "getrandom 0.4.3",
@@ -2341,9 +2341,9 @@ dependencies = [
 
 [[package]]
 name = "rudof_rdf"
-version = "0.3.35"
+version = "0.3.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bb1967dc1a7daf2090c090831e4af6a04b5f51d2b60fcaf3c8f15a6593737f6"
+checksum = "33295b1c63ccb8de586b218363b0d574a1f1878760a47deac6b18a477b80f8ee"
 dependencies = [
  "colored",
  "const_format",
@@ -2394,9 +2394,9 @@ dependencies = [
 
 [[package]]
 name = "rudof_viz"
-version = "0.3.35"
+version = "0.3.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21b0f6589a304ad1817def1a3b79d7c72a44f614461f7f566783d9d148a51f2b"
+checksum = "2872229d182dc508ae4dba532dfb48703c2231eb15f2922ccff81f67f290ab2b"
 dependencies = [
  "serde",
  "tempfile",
