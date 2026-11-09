@@ -20,7 +20,7 @@ oxigraph = { version = "=0.5.13", default-features = false }
 oxrdf = "=0.3.5"
 oxttl = "=0.2.5"
 percent-encoding = "=2.3.2"
-rudof_rdf = "=0.3.35"
+rudof_rdf = "=0.3.38"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.154", features = ["preserve_order"] }
 sha2 = "=0.11.1"
