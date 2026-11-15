@@ -106,6 +106,27 @@ enum Command {
         #[arg(long)]
         all: bool,
     },
+    /// Register the files under a directory, refresh changed ones and report vanished ones
+    Scan {
+        /// The Scan root: a directory (symlinks are resolved to the real path)
+        #[arg(value_name = "ROOT")]
+        root: OsString,
+        /// Walk hidden files and directories too
+        #[arg(long)]
+        include_hidden: bool,
+        /// Ignore .gitignore, .ignore, .haliignore, .git/info/exclude and the global gitignore
+        #[arg(long)]
+        no_ignore: bool,
+        /// Skip what matches this gitignore glob, relative to the root (repeatable)
+        #[arg(long = "exclude", value_name = "GLOB")]
+        excludes: Vec<String>,
+        /// Register no new file larger than this: bytes, or with B, KiB, MiB, GiB or TiB (default: 1GiB)
+        #[arg(long, value_name = "SIZE", value_parser = parse_max_size)]
+        max_size: Option<u64>,
+        /// Register only new files of this media type: `type/subtype` or `type/*` (repeatable)
+        #[arg(long = "media-type", value_name = "TYPE", value_parser = parse_media_pattern)]
+        media_types: Vec<resource::MediaPattern>,
+    },
     /// Relate Resource A to Resource B by a relation kind; only this direction is stored
     Relate {
         /// A path or a full UUID
@@ -375,6 +396,13 @@ fn parse_media_pattern(pattern: &str) -> Result<resource::MediaPattern, String> 
     resource::parse_media_pattern(pattern).map_err(|e| e.message)
 }
 
+/// Rejects bad `--max-size` values at parse time, so they are usage errors in clap's format.
+fn parse_max_size(size: &str) -> Result<u64, String> {
+    core::parse_size(size).ok_or_else(|| {
+        "use a whole number of bytes, optionally with B, KiB, MiB, GiB or TiB (such as 512MiB), up to 16 EiB".to_string()
+    })
+}
+
 /// Rejects bad `--fields` lists at parse time, so they are usage errors in clap's format.
 fn parse_fields(list: &str) -> Result<FieldList, String> {
     resource::parse_fields(list)
@@ -582,15 +610,19 @@ fn show_schema(cli: &Cli, words: &[String]) -> ExitCode {
 }
 
 fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), Error> {
-    let config = match paths::config_file(env) {
-        Ok(path) => match storage::read_text(&path) {
-            Ok(Some(text)) => core::config::parse(&text, &path)?,
+    let config_path = paths::config_file(env).ok();
+    let config = match &config_path {
+        Some(path) => match storage::read_text(path) {
+            Ok(Some(text)) => core::config::parse(&text, path)?,
             Ok(None) => core::config::Config::default(),
-            Err(_) => return Err(Error::config_invalid(&path, "cannot read it")),
+            Err(_) => return Err(Error::config_invalid(path, "cannot read it")),
         },
-        Err(paths::Unresolved) => core::config::Config::default(),
+        None => core::config::Config::default(),
     };
     let ctx = Context::new(&config.language, clock, ids);
+    if let Command::Scan { .. } = &cli.command {
+        return scan(cli, &ctx, &config, config_path.as_deref());
+    }
     // Usage errors come before the store is read.
     if let Command::Concept(ConceptCommand::Edit {
         add_alt,
@@ -1183,6 +1215,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             )?;
         }
         Command::Schema { .. } => unreachable!("handled before the store is loaded"),
+        Command::Scan { .. } => unreachable!("handled before the store is loaded"),
         Command::Describe { brief } => {
             let described = describe::describe(&ctx, &store, &dir.to_string_lossy(), *brief);
             if cli.json {
@@ -1279,19 +1312,257 @@ fn inspect_all(args: &[OsString]) -> Result<Vec<FileFacts>, Error> {
             storage::InspectError::Other => Error::not_a_regular_file(&real, "other"),
             storage::InspectError::Unreadable => Error::file_unreadable(&real),
         })?;
-        let name = Path::new(&real)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
-        files.push(FileFacts {
-            media_type: media_type::detect(name, &found.head),
-            path: real,
-            byte_size: found.byte_size,
-            modified: core::rfc3339(found.mtime),
-            sha256: found.sha256,
-        });
+        files.push(file_facts(real, found));
     }
     Ok(files)
+}
+
+/// What hashing a file at its real path found, with its detected media type.
+fn file_facts(real: String, found: storage::Inspected) -> FileFacts {
+    let name = Path::new(&real)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    FileFacts {
+        media_type: media_type::detect(name, &found.head),
+        byte_size: found.byte_size,
+        modified: core::rfc3339(found.mtime),
+        sha256: found.sha256,
+        path: real,
+    }
+}
+
+/// The size limit of new files when neither `--max-size` nor `[scan] max_size` sets one: 1 GiB.
+const DEFAULT_MAX_SIZE: u64 = 1 << 30;
+
+/// `hali scan` (spec §9.1 **Scan:**). Checks come in this order: the config's excludes
+/// (`CONFIG_INVALID`), the `--exclude` globs, the root (data dir refused), the store; then the
+/// walk, eagerly and on this thread, then hashing, one SHACL check and the write.
+fn scan(
+    cli: &Cli,
+    ctx: &Context,
+    config: &core::config::Config,
+    config_path: Option<&Path>,
+) -> Result<(), Error> {
+    use storage::walk::WalkOptions;
+    let Command::Scan {
+        root,
+        include_hidden,
+        no_ignore,
+        excludes,
+        max_size,
+        media_types,
+    } = &cli.command
+    else {
+        unreachable!("only called for scan");
+    };
+    if WalkOptions::new(false, false, config.scan.exclude.clone(), Vec::new()).is_err() {
+        return Err(Error::config_invalid(
+            config_path.unwrap_or(Path::new("config.toml")),
+            "[scan] exclude has a pattern that is not a gitignore glob, or starts with !",
+        ));
+    }
+    let mut all_excludes = config.scan.exclude.clone();
+    all_excludes.extend(excludes.iter().cloned());
+    let bad_exclude = |pattern: String| {
+        Error::usage(&format!(
+            "invalid --exclude pattern {pattern:?}: give a gitignore glob that does not start with !"
+        ))
+    };
+    WalkOptions::new(false, false, excludes.clone(), Vec::new()).map_err(bad_exclude)?;
+    let mut walk_options = WalkOptions::new(
+        *include_hidden || config.scan.include_hidden,
+        *no_ignore,
+        all_excludes,
+        Vec::new(),
+    )
+    .map_err(bad_exclude)?;
+
+    let root = paths::scan_root(root).map_err(|e| match e {
+        paths::RootError::NonUtf8 { path } => Error::non_utf8_path(&path),
+        paths::RootError::NotADirectory { path } => Error::usage(&format!(
+            "scan root {path} is not a directory; use hali add for a file"
+        )),
+        paths::RootError::Unreadable { path } => Error::file_unreadable(&path),
+    })?;
+    let dir = paths::data_dir(env).map_err(|_| Error::store_io(None))?;
+    let data = paths::real_dir(&dir);
+    if let Some(data) = &data
+        && Path::new(&root).starts_with(data)
+    {
+        return Err(Error::usage(&format!(
+            "scan root {root} is hali's data dir or inside it"
+        )));
+    }
+    let mut store = storage::load(&dir)?;
+
+    // A data dir under the root is never entered, so scan never catalogs its own store.
+    walk_options.prune = data.into_iter().collect();
+    let mut progress = Progress::new(!cli.json && progress_shown());
+    let mut walked = 0;
+    let entries: Vec<storage::walk::Walked> = storage::walk::walk(Path::new(&root), &walk_options)
+        .inspect(|_| {
+            walked += 1;
+            progress.update(walked, 0);
+        })
+        .collect();
+    let options = core::scan::ScanOptions {
+        root: root.clone(),
+        max_size: max_size
+            .or(config.scan.max_size)
+            .unwrap_or(DEFAULT_MAX_SIZE),
+        media_types: media_types.clone(),
+    };
+    let user = core::config::user_name(config, env);
+    let result = core::scan::scan(
+        ctx,
+        &mut store,
+        &options,
+        entries,
+        |p| storage::stat(Path::new(p)),
+        |p| {
+            use core::scan::Unhashable;
+            storage::inspect(Path::new(p))
+                .map(|found| file_facts(p.to_string(), found))
+                .map_err(|e| match e {
+                    storage::InspectError::Missing => Unhashable::Missing,
+                    storage::InspectError::Directory | storage::InspectError::Other => {
+                        Unhashable::NotRegular
+                    }
+                    storage::InspectError::Unreadable => Unhashable::Unreadable,
+                })
+        },
+        media_type::glob_type,
+        |seen, hashed| progress.update(seen, hashed),
+        &user,
+    );
+    progress.finish();
+    let mut done = result?;
+    let v = &mut done.value;
+    for record in v
+        .added
+        .iter_mut()
+        .chain(&mut v.refreshed)
+        .chain(&mut v.missing)
+    {
+        observe(record);
+    }
+
+    let output = ScanOutput {
+        schema_version: SCHEMA_VERSION,
+        root: &root,
+        scanned: &done.value,
+    };
+    let text = || {
+        let v = &done.value;
+        let c = &v.counts;
+        println!("root\t{}", printable(&root));
+        for (name, n) in [
+            ("added", c.added),
+            ("refreshed", c.refreshed),
+            ("unchanged", c.unchanged),
+            ("missing", c.missing),
+            ("skipped", c.skipped),
+        ] {
+            println!("{name}\t{n}");
+        }
+        for (media, n) in &v.media_types {
+            println!("media_type\t{}\t{n}", printable(media));
+        }
+        let [add, refresh] = if cli.dry_run {
+            ["would add", "would refresh"]
+        } else {
+            ["added", "refreshed"]
+        };
+        for r in &v.added {
+            println!("{add} resource {}", describe_record(r));
+        }
+        for r in &v.refreshed {
+            println!("{refresh} resource {}", describe_record(r));
+        }
+        for r in &v.missing {
+            println!("missing resource {}", describe_record(r));
+        }
+        for s in &v.skipped {
+            println!("skipped {} {}", s.reason, printable(&s.path));
+        }
+        if v.truncated {
+            println!("truncated\ttrue");
+        }
+    };
+    mutated(
+        cli,
+        &dir,
+        &store,
+        storage::File::Resources,
+        output,
+        &done.changes,
+        text,
+        None,
+    )
+}
+
+/// Whether to show progress: stderr is a terminal. A test-hooks build can be steered by
+/// `HALI_TEST_TTY=1|0`; a release build cannot.
+fn progress_shown() -> bool {
+    #[cfg(feature = "test-hooks")]
+    if let Some(forced) = env("HALI_TEST_TTY") {
+        return forced == "1";
+    }
+    std::io::stderr().is_terminal()
+}
+
+/// The `scanning: <seen> files, <hashed> hashed` line on stderr, rewritten in place at most 10
+/// times a second and cleared by `finish`. It names no file.
+struct Progress {
+    shown: bool,
+    drawn: Option<std::time::Instant>,
+    seen: usize,
+    hashed: usize,
+    width: usize,
+}
+
+impl Progress {
+    fn new(shown: bool) -> Progress {
+        Progress {
+            shown,
+            drawn: None,
+            seen: 0,
+            hashed: 0,
+            width: 0,
+        }
+    }
+
+    fn update(&mut self, seen: usize, hashed: usize) {
+        self.seen = self.seen.max(seen);
+        self.hashed = self.hashed.max(hashed);
+        let recent = self
+            .drawn
+            .is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(100));
+        if self.shown && !recent {
+            self.draw();
+        }
+    }
+
+    fn draw(&mut self) {
+        let line = format!("scanning: {} files, {} hashed", self.seen, self.hashed);
+        self.width = self.width.max(line.len());
+        let mut stderr = std::io::stderr();
+        let _ = write!(stderr, "\r{line}");
+        let _ = stderr.flush();
+        self.drawn = Some(std::time::Instant::now());
+    }
+
+    /// Shows the totals, then clears the line.
+    fn finish(&mut self) {
+        if !self.shown || self.drawn.is_none() {
+            return;
+        }
+        self.draw();
+        let mut stderr = std::io::stderr();
+        let _ = write!(stderr, "\r{}\r", " ".repeat(self.width));
+        let _ = stderr.flush();
+    }
 }
 
 /// Sets a record's `missing` and `stale` from `stat` on its path now.
@@ -1614,6 +1885,14 @@ struct RefreshedOutput<'a> {
     schema_version: u32,
     #[serde(flatten)]
     done: &'a resource::Refreshed,
+}
+
+#[derive(Serialize)]
+struct ScanOutput<'a> {
+    schema_version: u32,
+    root: &'a str,
+    #[serde(flatten)]
+    scanned: &'a core::scan::Scanned,
 }
 
 #[derive(Serialize)]

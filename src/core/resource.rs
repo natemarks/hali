@@ -142,7 +142,29 @@ pub fn add(
     title: Option<&str>,
     user_name: &str,
 ) -> Result<Mutation<Added>, Error> {
-    catalog(ctx, store, facts, title, &[], &[], user_name)
+    let mut all = add_all(
+        ctx,
+        store,
+        std::slice::from_ref(facts),
+        title,
+        &[],
+        &[],
+        user_name,
+    )?;
+    let (record, existing) = match all.value.added.pop() {
+        Some(record) => (record, false),
+        None => (
+            all.value
+                .existing
+                .pop()
+                .expect("one file is either added or existing"),
+            true,
+        ),
+    };
+    Ok(Mutation {
+        value: Added { record, existing },
+        changes: all.changes,
+    })
 }
 
 /// The triples that say what a file is: its size, mtime and checksum, with the Resource's link to
@@ -179,38 +201,35 @@ fn file_quads(
     ]
 }
 
-/// As `add`, typing a newly cataloged Resource with the Types `types` and tagging it with the
-/// Concepts `tags`.
-fn catalog(
+/// The quads that catalog `facts` as a new Resource typed with `types` and tagged with `tags`:
+/// mints the Resource and its catalog record (issued and modified `now`) and, if `person` is
+/// `None`, the user Person named `user_name`, which it then holds. `title` is normalised. Reads
+/// no store: the caller checks that the path is not cataloged yet.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn catalog_quads(
     ctx: &Context,
-    store: &mut Store,
     facts: &FileFacts,
     title: Option<&str>,
     types: &[NamedNode],
     tags: &[NamedNode],
+    person: &mut Option<NamedNode>,
     user_name: &str,
-) -> Result<Mutation<Added>, Error> {
-    let title = title.map(normalise_title).transpose()?;
-    if let Some(existing) = by_path(store, &facts.path) {
-        return Ok(Mutation {
-            value: Added {
-                record: record(ctx, store, &existing),
-                existing: true,
-            },
-            changes: Vec::new(),
-        });
-    }
-
+    now: &str,
+) -> Result<(NamedNode, Vec<Quad>), Error> {
     let resource = urn(&ctx.next_id());
     let catalog_record = urn(&ctx.next_id());
-    let (person, new_person) = match user(store) {
-        Some(person) => (person, false),
-        None => (urn(&ctx.next_id()), true),
+    let (person, new_person) = match person {
+        Some(person) => (person.clone(), false),
+        None => {
+            let minted = urn(&ctx.next_id());
+            *person = Some(minted.clone());
+            (minted, true)
+        }
     };
-    let title = title.unwrap_or_else(|| default_title(&facts.path));
+    let title = title.map_or_else(|| default_title(&facts.path), str::to_string);
     let url = NamedNode::new(file_url(&facts.path))
         .map_err(|_| Error::usage("the path does not make a valid file URL"))?;
-    let now = Literal::new_typed_literal(ctx.now(), xsd::DATE_TIME);
+    let now = Literal::new_typed_literal(now, xsd::DATE_TIME);
 
     let mut triples: Vec<(&NamedNode, NamedNodeRef<'_>, Term)> = vec![
         (&resource, named(rdf::TYPE.as_str()), iri(RESOURCE)),
@@ -272,21 +291,14 @@ fn catalog(
             .into_iter()
             .map(|(s, p, o)| Quad::new(s, p, o, graph.clone())),
     );
-    validate::guard(store, &quads, &[])?;
-    let changes = apply(store, &quads, &[]);
-    Ok(Mutation {
-        value: Added {
-            record: record(ctx, store, &resource),
-            existing: false,
-        },
-        changes,
-    })
+    Ok((resource, quads))
 }
 
 /// Catalogs several files, typing the newly cataloged ones with the Types `types` references and
-/// tagging them with the Concepts `tags` references, all or nothing: every reference is resolved
-/// first (Types, then tags), and on a later error the store may hold some of the files, and must
-/// not be saved. A path given twice counts once. The changes are sorted, without duplicates.
+/// tagging them with the Concepts `tags` references, in one mutation with one SHACL check: every
+/// reference is resolved first (Types, then tags), and on an error the store is untouched. A
+/// path given twice counts once; a cataloged one is returned as existing, unchanged. The changes
+/// are sorted, without duplicates.
 pub fn add_all(
     ctx: &Context,
     store: &mut Store,
@@ -298,28 +310,46 @@ pub fn add_all(
 ) -> Result<Mutation<AddedAll>, Error> {
     let types = resolve_types(ctx, store, types)?;
     let tags = resolve_tags(ctx, store, tags)?;
+    let title = title.map(normalise_title).transpose()?;
     let mut seen = BTreeSet::new();
-    let mut out = AddedAll {
-        added: Vec::new(),
-        existing: Vec::new(),
-    };
-    let mut changes = Vec::new();
+    let mut person = user(store);
+    let mut now = None;
+    let mut added = Vec::new();
+    let mut existing = Vec::new();
+    let mut quads = Vec::new();
     for facts in files {
         if !seen.insert(facts.path.as_str()) {
             continue;
         }
-        let one = catalog(ctx, store, facts, title, &types, &tags, user_name)?;
-        changes.extend(one.changes);
-        if one.value.existing {
-            out.existing.push(one.value.record);
-        } else {
-            out.added.push(one.value.record);
+        if let Some(found) = by_path(store, &facts.path) {
+            existing.push(found);
+            continue;
         }
+        let now: &String = now.get_or_insert_with(|| ctx.now());
+        let (resource, more) = catalog_quads(
+            ctx,
+            facts,
+            title.as_deref(),
+            &types,
+            &tags,
+            &mut person,
+            user_name,
+            now,
+        )?;
+        quads.extend(more);
+        added.push(resource);
     }
-    changes.sort();
-    changes.dedup();
+    let changes = if quads.is_empty() {
+        Vec::new()
+    } else {
+        validate::guard(store, &quads, &[])?;
+        apply(store, &quads, &[])
+    };
     Ok(Mutation {
-        value: out,
+        value: AddedAll {
+            added: added.iter().map(|r| record(ctx, store, r)).collect(),
+            existing: existing.iter().map(|r| record(ctx, store, r)).collect(),
+        },
         changes,
     })
 }
@@ -418,6 +448,17 @@ pub(crate) fn touch(
     added: &mut Vec<Quad>,
     removed: &mut Vec<Quad>,
 ) {
+    touch_at(store, resource, &ctx.now(), added, removed);
+}
+
+/// As `touch`, at `now`.
+pub(crate) fn touch_at(
+    store: &Store,
+    resource: &NamedNode,
+    now: &str,
+    added: &mut Vec<Quad>,
+    removed: &mut Vec<Quad>,
+) {
     let graph = File::Resources.graph();
     if let Some(c) = catalog_record_of(store, resource) {
         removed.extend(
@@ -433,7 +474,7 @@ pub(crate) fn touch(
         added.push(Quad::new(
             c,
             named(dcterms::MODIFIED),
-            Literal::new_typed_literal(ctx.now(), xsd::DATE_TIME),
+            Literal::new_typed_literal(now, xsd::DATE_TIME),
             graph,
         ));
     }
@@ -847,7 +888,7 @@ pub fn parse_media_pattern(pattern: &str) -> Result<MediaPattern, Error> {
 }
 
 impl MediaPattern {
-    fn matches(&self, media_type: &str) -> bool {
+    pub(crate) fn matches(&self, media_type: &str) -> bool {
         match media_type.split_once('/') {
             Some((t, s)) => t == self.type_ && self.subtype.as_deref().is_none_or(|w| w == s),
             None => false,
@@ -1222,7 +1263,7 @@ fn by_path(store: &Store, path: &str) -> Option<NamedNode> {
 }
 
 /// The user Person, if one is minted: the first `prov:Person`, by IRI.
-fn user(store: &Store) -> Option<NamedNode> {
+pub(crate) fn user(store: &Store) -> Option<NamedNode> {
     subjects(store, rdf::TYPE.as_str(), iri(prov::PERSON).as_ref())
         .into_iter()
         .next()
@@ -1252,12 +1293,8 @@ fn catalog_record_of(store: &Store, resource: &NamedNode) -> Option<NamedNode> {
 }
 
 /// The record of a Resource, as the store has it; `missing` and `stale` are left false.
-fn record(ctx: &Context, store: &Store, resource: &NamedNode) -> Record {
-    let url = first_iri(store, resource, dcat::DOWNLOAD_URL);
-    let path = url
-        .as_ref()
-        .map(|u| path_from_file_url(u.as_str()).unwrap_or_else(|| u.as_str().to_string()))
-        .unwrap_or_default();
+pub(crate) fn record(ctx: &Context, store: &Store, resource: &NamedNode) -> Record {
+    let path = recorded_path(store, resource);
     let media_type = first_iri(store, resource, dcat::MEDIA_TYPE)
         .and_then(|m| {
             m.as_str()
@@ -1305,6 +1342,14 @@ fn record(ctx: &Context, store: &Store, resource: &NamedNode) -> Record {
             .unwrap_or(0),
         modified: first_literal(store, resource, dcterms::MODIFIED).unwrap_or_default(),
     }
+}
+
+/// The path a Resource records: its `dcat:downloadURL` decoded, or the URL as is when it is not
+/// a `file:` URL hali can decode; empty when it has none.
+pub(crate) fn recorded_path(store: &Store, resource: &NamedNode) -> String {
+    first_iri(store, resource, dcat::DOWNLOAD_URL)
+        .map(|u| path_from_file_url(u.as_str()).unwrap_or_else(|| u.as_str().to_string()))
+        .unwrap_or_default()
 }
 
 /// A Concept's prefLabel in `language`, from any graph.
@@ -1358,7 +1403,7 @@ fn first_literal(store: &Store, subject: &NamedNode, predicate: &str) -> Option<
 }
 
 /// The named subjects with `predicate object` in resources.ttl, sorted by IRI.
-fn subjects(store: &Store, predicate: &str, object: TermRef<'_>) -> Vec<NamedNode> {
+pub(crate) fn subjects(store: &Store, predicate: &str, object: TermRef<'_>) -> Vec<NamedNode> {
     let graph = File::Resources.graph();
     let found: BTreeSet<String> = store
         .quads_for_pattern(
@@ -1412,7 +1457,7 @@ pub(crate) fn cataloged_count(store: &Store) -> usize {
     subjects(store, rdf::TYPE.as_str(), iri(RESOURCE).as_ref()).len()
 }
 
-fn iri(iri: &str) -> Term {
+pub(crate) fn iri(iri: &str) -> Term {
     NamedNode::new_unchecked(iri).into()
 }
 

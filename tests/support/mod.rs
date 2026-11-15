@@ -57,6 +57,9 @@ fn run_in_fresh_env(store: Option<&Path>, args: &[&str]) -> RunEnv {
         .env_clear()
         .env("XDG_CONFIG_HOME", &cfg)
         .env("HOME", &home)
+        // `scan` reads git's configuration (the walker's global gitignore): keep the host's out.
+        .env("GIT_CONFIG_GLOBAL", root.path().join("gitconfig"))
+        .env("GIT_CONFIG_SYSTEM", root.path().join("gitconfig-system"))
         .env("HALI_DATA_DIR", &data)
         .env("HALI_TEST_NOW", "2026-10-24T09:30:00Z")
         .env("HALI_TEST_ID_SEED", "1")

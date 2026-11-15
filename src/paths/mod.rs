@@ -115,6 +115,54 @@ pub fn real_path(arg: &OsStr) -> Result<String, PathError> {
     }
 }
 
+/// Why a path argument cannot be a Scan root.
+#[derive(Debug)]
+pub enum RootError {
+    /// The argument, or its real path, is not UTF-8 (shown lossily).
+    NonUtf8 { path: String },
+    /// Nothing is there, or not a directory: the real path if it resolves, else the argument
+    /// made absolute.
+    NotADirectory { path: String },
+    /// A directory that cannot be read, at its real path; or a path that cannot be resolved for
+    /// lack of permission, at the argument made absolute.
+    Unreadable { path: String },
+}
+
+/// The real path of a Scan root argument: made absolute against the current directory, symlinks
+/// resolved, UTF-8, a directory that can be read. Reads the directory's entries, nothing more.
+pub fn scan_root(arg: &OsStr) -> Result<String, RootError> {
+    let lossy = |p: &Path| p.to_string_lossy().into_owned();
+    let Some(text) = arg.to_str() else {
+        return Err(RootError::NonUtf8 {
+            path: lossy(&absolute(Path::new(arg))),
+        });
+    };
+    let real = std::fs::canonicalize(text).map_err(|e| {
+        let path = lossy(&absolute(Path::new(text)));
+        if e.kind() == std::io::ErrorKind::PermissionDenied {
+            RootError::Unreadable { path }
+        } else {
+            RootError::NotADirectory { path }
+        }
+    })?;
+    let Some(real_text) = real.to_str() else {
+        return Err(RootError::NonUtf8 { path: lossy(&real) });
+    };
+    let real_text = real_text.to_string();
+    if !real.is_dir() {
+        return Err(RootError::NotADirectory { path: real_text });
+    }
+    if std::fs::read_dir(&real).is_err() {
+        return Err(RootError::Unreadable { path: real_text });
+    }
+    Ok(real_text)
+}
+
+/// The real path of a directory, if it exists.
+pub fn real_dir(dir: &Path) -> Option<PathBuf> {
+    std::fs::canonicalize(dir).ok().filter(|p| p.is_dir())
+}
+
 /// The path a Resource reference names: its real path if it exists, else the argument made
 /// absolute against the current directory. `None` if that is not UTF-8.
 pub fn ref_path(arg: &str) -> Option<String> {

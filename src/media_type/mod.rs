@@ -28,6 +28,21 @@ pub fn detect(file_name: &str, head: &[u8]) -> String {
         })
 }
 
+/// The media type a file name alone gives (its glob match), lowercase `type/subtype`; `None`
+/// when the name matches no glob. A cheap pre-filter: it reads no content.
+pub fn glob_type(file_name: &str) -> Option<String> {
+    quietly(|| {
+        database()
+            .get_mime_types_from_file_name(file_name)
+            .into_iter()
+            .map(|m| m.essence_str().to_ascii_lowercase())
+            .next()
+            .filter(|m| m != "application/octet-stream")
+    })
+    .flatten()
+    .filter(|m| is_plain(m))
+}
+
 fn database() -> &'static SharedMimeInfo {
     static DB: OnceLock<SharedMimeInfo> = OnceLock::new();
     DB.get_or_init(SharedMimeInfo::new)
