@@ -1166,7 +1166,8 @@ mod goal {
         env.put("b.txt", b"bee\n");
         env.put("c.txt", b"see\n");
         let root = env.root_str();
-        let out = env.run(["scan", root.as_str()]);
+        // Seed 2 here: the dry-run helper mints with seed 1, which would repeat these ids.
+        let out = env.run_env(&[("HALI_TEST_ID_SEED", "2")], ["scan", root.as_str()]);
         assert_eq!(out.code, Some(0), "{}", out.stderr);
         env.put_at("a.txt", b"one two\n", PINNED_SECS + 100);
         std::fs::remove_file(env.root().join("c.txt")).unwrap();
@@ -1242,20 +1243,24 @@ mod goal {
         let root = env.root_str();
         let before = tree_print(&env.root());
 
-        let check = |what: &str, args: &[&str]| {
-            let out = env.run(args);
+        // Each run that mints new ids uses its own seed: a second process on the same seed
+        // repeats the first one's ids (see tests/cli_resource.rs).
+        let check = |what: &str, seed: &str, args: &[&str]| {
+            let out = env.run_env(&[("HALI_TEST_ID_SEED", seed)], args);
             assert_eq!(out.code, Some(0), "{what}: {}", out.stderr);
             assert_eq!(tree_print(&env.root()), before, "{what}: the tree changed");
         };
-        check("dry run", &["--dry-run", "scan", root.as_str()]);
-        check("real run", &["scan", root.as_str()]);
-        check("rescan", &["scan", root.as_str()]);
+        check("dry run", "1", &["--dry-run", "scan", root.as_str()]);
+        check("real run", "1", &["scan", root.as_str()]);
+        check("rescan", "1", &["scan", root.as_str()]);
         check(
             "everything",
+            "2",
             &["scan", root.as_str(), "--include-hidden", "--no-ignore"],
         );
         check(
             "dry run again",
+            "3",
             &["--json", "--dry-run", "scan", root.as_str()],
         );
         assert!(env.data().exists());
@@ -1385,7 +1390,7 @@ mod goal {
         let env = Env::new();
         env.put("vis.txt", b"v\n");
         env.put("x.log", b"l\n");
-        env.put(".ignore", b"[\n*.log\n");
+        env.put(".ignore", b"{bad\n*.log\n");
         let root = env.root_str();
         let v = ok_json(&env.run(["--json", "scan", root.as_str()]));
         assert_eq!(record_paths(&v["added"]), vec![format!("{root}/vis.txt")]);

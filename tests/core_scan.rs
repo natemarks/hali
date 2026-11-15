@@ -767,7 +767,7 @@ mod goal {
         let added = resource::add(
             &ctx(),
             &mut oracle,
-            &facts("/fixtures/refresh/new.txt", 3, &sha(1), "text/plain"),
+            &facts_of("/fixtures/refresh/new.txt").ok().unwrap(),
             None,
             "tester",
         )
