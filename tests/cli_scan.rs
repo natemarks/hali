@@ -506,6 +506,33 @@ mod goal {
         }
     }
 
+    #[test]
+    fn config_bad_exclude_pattern_is_config_invalid() {
+        for text in [
+            "[scan]\nexclude = [\"!x\"]\n",
+            "[scan]\nexclude = [\"{bad\"]\n",
+        ] {
+            let env = Env::new();
+            env.config(text);
+            let out = env.run(["scan", env.root_str().as_str()]);
+            assert_eq!(out.code, Some(3), "{text:?}: {}", out.stderr);
+            assert!(
+                out.stderr.contains("invalid config file"),
+                "{text:?}: {}",
+                out.stderr
+            );
+            assert!(
+                out.stderr.contains(
+                    "Fix the config file; only [user] name, [vocabulary] language and [scan] exclude, include_hidden and max_size are read."
+                ),
+                "{text:?}: {}",
+                out.stderr
+            );
+            assert_eq!(out.stdout, "");
+            assert!(!env.data().exists());
+        }
+    }
+
     // ---- criterion 2: the root -----------------------------------------------------------------
 
     #[test]
@@ -611,6 +638,27 @@ mod goal {
             assert_eq!(out.stdout, "");
             assert!(!env.data().exists());
         }
+    }
+
+    #[test]
+    fn root_under_unsearchable_parent_is_file_unreadable() {
+        if privileged() {
+            return;
+        }
+        let env = Env::new();
+        let parent = env.base.join("noaccess");
+        std::fs::create_dir_all(parent.join("root")).unwrap();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0)).unwrap();
+        let _restore = Restore(vec![parent.clone()]);
+        if std::fs::metadata(parent.join("root")).is_ok() {
+            return;
+        }
+        let out = env.run(["--json", "scan", parent.join("root").to_str().unwrap()]);
+        assert_eq!(out.code, Some(1), "{}", out.stderr);
+        let err: Value = serde_json::from_str(&out.stderr).unwrap();
+        assert_eq!(err["error"]["rule"], "FILE_UNREADABLE", "{err}");
+        assert_eq!(out.stdout, "");
+        assert!(!env.data().exists());
     }
 
     #[test]
@@ -1203,6 +1251,17 @@ mod goal {
             assert!(!tty.stderr.contains(secret), "{secret}: {:?}", tty.stderr);
         }
         assert!(!tty.stdout.contains("scanning"));
+        // The line is cleared at the end: carriage return, spaces, carriage return.
+        let cleared = tty
+            .stderr
+            .strip_suffix('\r')
+            .and_then(|rest| rest.rsplit_once('\r'))
+            .map(|(_, blanks)| blanks);
+        assert!(
+            cleared.is_some_and(|b| !b.is_empty() && b.chars().all(|c| c == ' ')),
+            "{:?}",
+            tty.stderr
+        );
 
         fresh(&env);
         let no_tty = env.run_env(&[("HALI_TEST_TTY", "0")], ["scan", root.as_str()]);

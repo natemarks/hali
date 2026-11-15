@@ -843,6 +843,77 @@ mod goal {
     }
 
     #[test]
+    fn vanished_after_stat_counts_as_missing() {
+        // `stat` sees EDITED (Stale) but `inspect` finds it gone: missing, not unchanged.
+        let mut store = hali::storage::load(&fixture("refresh")).unwrap();
+        let before = resources_ttl(&store);
+        let (result, _) = go(
+            &mut store,
+            &opts(ROOT, 1 << 30, &[]),
+            vec![],
+            stat_of,
+            |p| match p {
+                EDITED => Err(Unhashable::Missing),
+                other => facts_of(other),
+            },
+            no_glob,
+        );
+        let m = result.unwrap();
+        assert!(
+            paths(&m.value.missing).contains(&EDITED),
+            "{:?}",
+            m.value.missing
+        );
+        assert!(!paths(&m.value.refreshed).contains(&EDITED));
+        // GONE is missing by `stat`; EDITED joins it; TOUCHED is refreshed; SAME and SNEAKY
+        // are unchanged.
+        assert_eq!(m.value.counts.missing, 2);
+        assert_eq!(m.value.counts.unchanged, 2);
+        assert_eq!(m.value.counts.refreshed, 1);
+        assert!(m.value.skipped.is_empty());
+        assert_eq!(
+            resources_ttl(&store).contains("edited"),
+            before.contains("edited")
+        );
+        assert!(
+            m.changes.iter().all(|c| !c.triple.contains("edited.txt")),
+            "the vanished file's record is left alone"
+        );
+    }
+
+    #[test]
+    fn stale_refreshed_list_is_capped() {
+        // 101 Stale cataloged Resources: counts exact, 100 listed, `truncated`.
+        let mut store = empty_store();
+        let cataloged: Vec<FileFacts> = names("/c", 101)
+            .iter()
+            .enumerate()
+            .map(|(i, p)| facts(p, 1, &sha(i + 1), "text/plain"))
+            .collect();
+        resource::add_all(&ctx(), &mut store, &cataloged, None, &[], &[], "tester").unwrap();
+        let (result, _) = go(
+            &mut store,
+            &opts("/c", 1 << 30, &[]),
+            vec![],
+            |_| Some((2, 1_792_504_931)),
+            |p| {
+                Ok(FileFacts {
+                    modified: NEW.to_string(),
+                    ..facts(p, 2, &sha(1000), "text/plain")
+                })
+            },
+            no_glob,
+        );
+        let m = result.unwrap();
+        assert_eq!(m.value.counts.refreshed, 101);
+        assert_eq!(m.value.counts.unchanged, 0);
+        assert_eq!(m.value.refreshed.len(), 100);
+        assert_eq!(m.value.refreshed[0].path, "/c/f000.txt");
+        assert_eq!(m.value.refreshed[99].path, "/c/f099.txt");
+        assert!(m.value.truncated);
+    }
+
+    #[test]
     fn missing_and_prefix_rule() {
         // Resources whose recorded paths are, for the root `/r`: the root itself and files
         // under it (under the root); and look-alikes that are not (never stat'ed).

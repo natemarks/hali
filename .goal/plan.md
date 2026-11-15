@@ -36,6 +36,11 @@ Contract: issue #22 body, including "Contract addendum (re-groomed 2026-11-03)".
 | 26 | `--yes` accepted and ignored; stdin never read | `cli_scan::yes_ignored_stdin_unread` | exit 2 |
 | 27 | Store unchanged if the process dies mid-scan (FIFO git config blocks `walk()`; assert blocked; SIGKILL; data dir byte-identical) | `cli_scan::killed_mid_walk_store_unchanged` | "blocked" precondition fails |
 | 28 | 200-level tree with a `.gitignore` per directory under 15 s (debug), under a deadline | `cli_scan::deep_tree_time_bound` | exit 2 |
+| 29 | A bad `[scan] exclude` glob (`!x`, `{bad`) is `CONFIG_INVALID` (exit 3, new fix text), before any store access | `cli_scan::config_bad_exclude_pattern_is_config_invalid` | passes today; fails if the config glob check is removed |
+| 30 | A Stale cataloged file that `inspect` finds gone is `missing`, not `unchanged`; store unchanged | `core_scan::vanished_after_stat_counts_as_missing` | passes today; fails if counted unchanged |
+| 31 | 101 Stale cataloged Resources: counts exact, 100 listed in `refreshed`, `truncated` | `core_scan::stale_refreshed_list_is_capped` | passes today |
+| 32 | Progress line ends cleared (`\r`, spaces, `\r`) | `cli_scan::progress_only_on_tty` | passes today |
+| 33 | A root under a parent without search permission is `FILE_UNREADABLE` (exit 1), not `is not a directory` | `cli_scan::root_under_unsearchable_parent_is_file_unreadable` | exit 2 `USAGE` "is not a directory" |
 
 Test isolation (all `cli_scan` tests): roots under the system temp dir, never `target/`; data dir a sibling of the root; `HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` at temp paths with `env_clear`; short socket paths; assert no host `.gitignore`/`.ignore` in the temp parent. `tests/support/mod.rs::run_in_fresh_env` gains the two `GIT_CONFIG_*` lines (goal-owned edit).
 
