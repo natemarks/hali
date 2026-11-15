@@ -1,4 +1,5 @@
-//! The config file (spec §4.1). Only `[user] name` and `[vocabulary] language` are read so far.
+//! The config file (spec §4.1). Only `[user] name`, `[vocabulary] language` and the `[scan]`
+//! keys `exclude`, `include_hidden` and `max_size` are read so far.
 
 use super::Error;
 use oxigraph::model::Literal;
@@ -10,6 +11,19 @@ pub struct Config {
     pub language: String,
     /// The `foaf:name` of the user Person, if configured.
     pub user_name: Option<String>,
+    /// The `[scan]` table.
+    pub scan: ScanConfig,
+}
+
+/// What `hali scan` reads from the config file (spec §7).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ScanConfig {
+    /// Excludes in gitignore syntax, relative to the Scan root.
+    pub exclude: Vec<String>,
+    /// Walk hidden names too.
+    pub include_hidden: bool,
+    /// The largest file registered, in bytes.
+    pub max_size: Option<u64>,
 }
 
 impl Default for Config {
@@ -17,6 +31,7 @@ impl Default for Config {
         Config {
             language: "en".to_string(),
             user_name: None,
+            scan: ScanConfig::default(),
         }
     }
 }
@@ -25,6 +40,14 @@ impl Default for Config {
 struct Raw {
     user: Option<User>,
     vocabulary: Option<Vocabulary>,
+    scan: Option<Scan>,
+}
+
+#[derive(Deserialize)]
+struct Scan {
+    exclude: Option<Vec<String>>,
+    include_hidden: Option<bool>,
+    max_size: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -59,9 +82,28 @@ pub fn parse(text: &str, path: &Path) -> Result<Config, Error> {
             .to_string(),
         None => "en".to_string(),
     };
+    let scan = match raw.scan {
+        None => ScanConfig::default(),
+        Some(scan) => ScanConfig {
+            exclude: scan.exclude.unwrap_or_default(),
+            include_hidden: scan.include_hidden.unwrap_or(false),
+            max_size: scan
+                .max_size
+                .map(|size| {
+                    super::parse_size(&size).ok_or_else(|| {
+                        Error::config_invalid(
+                            path,
+                            "[scan] max_size is not a size such as 512MiB or 1GiB",
+                        )
+                    })
+                })
+                .transpose()?,
+        },
+    };
     Ok(Config {
         language,
         user_name,
+        scan,
     })
 }
 

@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hali scan --json",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "root": {"type": "string"},
+        "counts": {
+          "type": "object",
+          "properties": {
+            "added": {"type": "integer", "minimum": 0},
+            "refreshed": {"type": "integer", "minimum": 0},
+            "unchanged": {"type": "integer", "minimum": 0},
+            "missing": {"type": "integer", "minimum": 0},
+            "skipped": {"type": "integer", "minimum": 0}
+          },
+          "required": ["added", "refreshed", "unchanged", "missing", "skipped"],
+          "additionalProperties": false
+        },
+        "media_types": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+        "added": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+        "refreshed": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+        "missing": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {"type": "string"},
+              "reason": {"enum": ["too_large", "unreadable", "not_regular", "non_utf8", "outside_root", "bad_ignore_file"]}
+            },
+            "required": ["path", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "truncated": {"type": "boolean"}
+      },
+      "required": ["schema_version", "root", "counts", "media_types", "added", "refreshed", "missing", "skipped", "truncated"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "root": {"type": "string"},
+        "counts": {
+          "type": "object",
+          "properties": {
+            "added": {"type": "integer", "minimum": 0},
+            "refreshed": {"type": "integer", "minimum": 0},
+            "unchanged": {"type": "integer", "minimum": 0},
+            "missing": {"type": "integer", "minimum": 0},
+            "skipped": {"type": "integer", "minimum": 0}
+          },
+          "required": ["added", "refreshed", "unchanged", "missing", "skipped"],
+          "additionalProperties": false
+        },
+        "media_types": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+        "added": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+        "refreshed": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+        "missing": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {"type": "string"},
+              "reason": {"enum": ["too_large", "unreadable", "not_regular", "non_utf8", "outside_root", "bad_ignore_file"]}
+            },
+            "required": ["path", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "truncated": {"type": "boolean"},
+        "dry_run": {"const": true},
+        "changes": {"type": "array", "items": {"$ref": "#/$defs/change"}}
+      },
+      "required": ["schema_version", "root", "counts", "media_types", "added", "refreshed", "missing", "skipped", "truncated", "dry_run", "changes"],
+      "additionalProperties": false
+    }
+  ]
+}

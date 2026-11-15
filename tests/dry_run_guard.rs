@@ -39,6 +39,8 @@ const CASES: &[(&str, &str, &[&str])] = &[
     ("relation add", "relations", &["relation", "add", "guard-probe", "--parent", "dcterms:relation"]),
     ("relation list", "relations", &["relation", "list"]),
     ("relation remove", "relations", &["relation", "remove", "excerptOf"]),
+    // A root that exists in every checkout; scan never asks, so no --yes.
+    ("scan", "store", &["scan", "src/ontology"]),
     ("schema", "store", &["schema"]),
     ("show", "store", &["show", STORED]),
     ("type add", "store", &["type", "add", "GuardProbe"]),

@@ -47,6 +47,7 @@ mod goal {
                 "relation add",
                 "relation list",
                 "relation remove",
+                "scan",
                 "schema",
                 "show",
                 "type add",

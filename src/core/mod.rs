@@ -6,6 +6,7 @@ pub mod config;
 pub mod describe;
 pub mod relation;
 pub mod resource;
+pub mod scan;
 pub mod schema;
 pub mod types;
 pub mod validate;
@@ -15,6 +16,7 @@ use oxigraph::model::{NamedNode, Quad, TermRef, TripleRef};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -186,11 +188,13 @@ pub(crate) fn insert_all(store: &storage::Store, quads: &[Quad]) -> Vec<Change> 
 
 /// Removes the `remove` quads the store holds and that `add` does not put back, inserts the
 /// `add` quads it does not hold yet, and returns what changed, sorted and without duplicates.
-pub(crate) fn apply(store: &storage::Store, add: &[Quad], remove: &[Quad]) -> Vec<Change> {
+/// Linear in the number of quads, plus the sort.
+pub fn apply(store: &storage::Store, add: &[Quad], remove: &[Quad]) -> Vec<Change> {
     let held = |quad: &Quad| store.contains(quad).expect("reading the in-memory store");
+    let put_back: HashSet<&Quad> = add.iter().collect();
     let mut changes = Vec::new();
     for quad in remove {
-        if add.contains(quad) || !held(quad) {
+        if put_back.contains(quad) || !held(quad) {
             continue;
         }
         store
@@ -210,6 +214,30 @@ pub(crate) fn apply(store: &storage::Store, add: &[Quad], remove: &[Quad]) -> Ve
     changes.sort();
     changes.dedup();
     changes
+}
+
+/// A size as `--max-size` and `[scan] max_size` take it: `^[0-9]+(B|KiB|MiB|GiB|TiB)?$`, the
+/// suffix case-insensitive, no suffix meaning bytes; binary units only. `None` for anything
+/// else, or a size over `u64::MAX` bytes.
+pub fn parse_size(text: &str) -> Option<u64> {
+    let digits = text.bytes().take_while(u8::is_ascii_digit).count();
+    let (number, suffix) = text.split_at(digits);
+    if number.is_empty() {
+        return None;
+    }
+    let shift = match suffix.to_ascii_lowercase().as_str() {
+        "" | "b" => 0,
+        "kib" => 10,
+        "mib" => 20,
+        "gib" => 30,
+        "tib" => 40,
+        _ => return None,
+    };
+    let n: u64 = number.parse().ok()?;
+    if n.leading_zeros() < shift {
+        return None;
+    }
+    Some(n << shift)
 }
 
 fn change(op: Op, quad: &Quad) -> Change {
@@ -472,7 +500,9 @@ impl Error {
             format!("invalid config file {}: {reason}", path.display()),
             json!({"path": path.display().to_string()}),
         )
-        .fix("Fix the config file; only [user] name and [vocabulary] language are read.")
+        .fix(
+            "Fix the config file; only [user] name, [vocabulary] language and [scan] exclude, include_hidden and max_size are read.",
+        )
     }
 
     /// A destructive command was not confirmed: `declined` is true when the user answered no
