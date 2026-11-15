@@ -137,7 +137,6 @@ pub fn scan(
     let (mut seen, mut hashed) = (0, 0);
     let mut skipped: Vec<Skipped> = Vec::new();
     let mut new: Vec<FileFacts> = Vec::new();
-    let mut taken: HashSet<String> = HashSet::new();
     for entry in entries {
         seen += 1;
         match entry {
@@ -148,8 +147,8 @@ pub fn scan(
             Walked::File {
                 path, byte_size, ..
             } => {
-                if known.contains(path.as_str()) || taken.contains(&path) {
-                    // Cataloged, or already seen through a symlink.
+                if known.contains(path.as_str()) {
+                    // Cataloged.
                 } else if byte_size > options.max_size {
                     skipped.push(Skipped {
                         path,
@@ -165,7 +164,6 @@ pub fn scan(
                     match inspect(&path) {
                         Ok(facts) => {
                             if !ruled_out(&facts.media_type) {
-                                taken.insert(path);
                                 new.push(facts);
                             }
                         }

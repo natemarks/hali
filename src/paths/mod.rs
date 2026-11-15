@@ -123,7 +123,8 @@ pub enum RootError {
     /// Nothing is there, or not a directory: the real path if it resolves, else the argument
     /// made absolute.
     NotADirectory { path: String },
-    /// A directory that cannot be read, at its real path.
+    /// A directory that cannot be read, at its real path; or a path that cannot be resolved for
+    /// lack of permission, at the argument made absolute.
     Unreadable { path: String },
 }
 
@@ -136,8 +137,13 @@ pub fn scan_root(arg: &OsStr) -> Result<String, RootError> {
             path: lossy(&absolute(Path::new(arg))),
         });
     };
-    let real = std::fs::canonicalize(text).map_err(|_| RootError::NotADirectory {
-        path: lossy(&absolute(Path::new(text))),
+    let real = std::fs::canonicalize(text).map_err(|e| {
+        let path = lossy(&absolute(Path::new(text)));
+        if e.kind() == std::io::ErrorKind::PermissionDenied {
+            RootError::Unreadable { path }
+        } else {
+            RootError::NotADirectory { path }
+        }
     })?;
     let Some(real_text) = real.to_str() else {
         return Err(RootError::NonUtf8 { path: lossy(&real) });
