@@ -626,7 +626,7 @@ mod goal {
         // A root that cannot be read.
         let locked = env.base.join("locked");
         std::fs::create_dir(&locked).unwrap();
-        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0)).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
         let _restore = Restore(vec![locked.clone()]);
         if std::fs::read_dir(&locked).is_err() {
             let out = env.run(["--json", "scan", locked.to_str().unwrap()]);
@@ -646,7 +646,7 @@ mod goal {
         let env = Env::new();
         let parent = env.base.join("noaccess");
         std::fs::create_dir_all(parent.join("root")).unwrap();
-        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0)).unwrap();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o000)).unwrap();
         let _restore = Restore(vec![parent.clone()]);
         if std::fs::metadata(parent.join("root")).is_ok() {
             return;
@@ -745,8 +745,8 @@ mod goal {
         let secret = env.put("secret.txt", b"secret\n");
         env.put("locked/inner.txt", b"inner\n");
         let locked = env.root().join("locked");
-        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0)).unwrap();
-        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0)).unwrap();
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o000)).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
         let _restore = Restore(vec![secret.clone(), locked.clone()]);
         if std::fs::File::open(&secret).is_ok() {
             eprintln!("skipped: permission bits do not apply to this user");
@@ -805,7 +805,7 @@ mod goal {
             .set_len((1 << 30) + 1)
             .unwrap();
         // Skipped for its size, so never opened: mode 0 would make it `unreadable` otherwise.
-        std::fs::set_permissions(&sparse, std::fs::Permissions::from_mode(0)).unwrap();
+        std::fs::set_permissions(&sparse, std::fs::Permissions::from_mode(0o000)).unwrap();
         let _restore = Restore(vec![sparse.clone()]);
         let started = Instant::now();
         let out = env.exec(None, &[], 60, ["--json", "scan", env.root_str().as_str()]);

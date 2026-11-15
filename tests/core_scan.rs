@@ -987,7 +987,7 @@ mod goal {
             |p| Ok(facts(p, 1, &sha(p.len()), "text/plain")),
             no_glob,
         );
-        let err = result.err().expect("the extension shape is violated");
+        let err = result.expect_err("the extension shape is violated");
         assert_eq!(err.rule, "SHACL_VIOLATION");
         assert_eq!(err.exit_code(), 1);
         assert_eq!(err.details["total"], 2);
