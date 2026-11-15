@@ -230,7 +230,6 @@ mod goal {
         "cli_scan__schema_list_json",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_22: &[(&str, &str)] = &[
         ("cli_dry_run__scan_dry_run_json", "scan"),
         ("cli_scan__scan_json", "scan"),
@@ -250,7 +249,6 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_18);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_19);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_20);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_22);
         rows
     }
@@ -304,7 +302,6 @@ mod goal {
             pending_20 = &[];
         }
         let mut pending_22: &[&str] = GOAL_SNAPS_22;
-        #[cfg(feature = "goal")]
         {
             pending_22 = &[];
         }
@@ -434,7 +431,6 @@ mod goal {
         assert!(goldens.len() >= 70, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 73, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 76, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 79, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
@@ -1795,7 +1791,6 @@ mod goal {
 
     /// #22: what the `scan` schema accepts and refuses: a real branch and a dry-run branch, every
     /// key required, `additionalProperties: false`, the six skip reasons, exact counts.
-    #[cfg(feature = "goal")]
     #[test]
     fn scan_schema_accepts_and_rejects() {
         let record = |id: &str, missing: bool| {
@@ -2044,7 +2039,6 @@ mod goal {
     }
 
     /// #22: `hali schema scan` is served, and `scan` is in the list in sorted place.
-    #[cfg(feature = "goal")]
     #[test]
     fn scan_schema_is_listed() {
         let listed = fetch_list();

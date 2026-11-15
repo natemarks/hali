@@ -37,10 +37,8 @@
 //! the `[user] name and [vocabulary] language` fix text in tests/cli_error_text.rs, the help
 //! text snapshots that list subcommands, and the `scan` row of tests/dry_run_guard.rs.
 
-#[cfg(feature = "goal")]
 mod support;
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::Value;

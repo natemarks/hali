@@ -61,7 +61,6 @@
 //! /fixtures/refresh/{same,edited,touched,gone,sneaky}.txt) and
 //! tests/fixtures/scan/needs-description (a shape every Resource violates).
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::config;
     use hali::core::resource::{self, FileFacts, Target, parse_media_pattern};
