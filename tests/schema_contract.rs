@@ -268,7 +268,6 @@ mod goal {
         "cli_scan__scan_prune_json",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_24: &[(&str, &str)] = &[
         ("cli_dry_run__scan_prune_dry_run_json", "scan"),
         ("cli_scan__scan_moves_json", "scan"),
@@ -290,12 +289,10 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_20);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_22);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_21);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_24);
         // The goldens #24 rewrites are hidden without the goal feature (see `goldens`), and so
         // are their rows.
         let mut hidden_24: &[&str] = GOAL_SNAPS_24;
-        #[cfg(feature = "goal")]
         {
             hidden_24 = &[];
         }
@@ -360,7 +357,6 @@ mod goal {
             pending_21 = &[];
         }
         let mut pending_24: &[&str] = GOAL_SNAPS_24;
-        #[cfg(feature = "goal")]
         {
             pending_24 = &[];
         }
@@ -493,9 +489,7 @@ mod goal {
         assert!(goldens.len() >= 73, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 76, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 79, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 85, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 89, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
@@ -1863,7 +1857,6 @@ mod goal {
     /// every key required, `additionalProperties: false`, the six skip reasons, exact counts
     /// (eight keys), the `relinked`, `ambiguous` and `pruned` lists, 100 entries at most in each
     /// list and 1 to 10 candidates.
-    #[cfg(feature = "goal")]
     #[test]
     fn scan_schema_accepts_and_rejects() {
         let record = |id: &str, missing: bool| {

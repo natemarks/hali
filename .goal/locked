@@ -1,9 +1,0 @@
-tests/core_scan.rs
-tests/cli_scan.rs
-tests/schema_contract.rs
-tests/snapshots/cli_scan__scan_json.snap
-tests/snapshots/cli_dry_run__scan_dry_run_json.snap
-tests/snapshots/cli_scan__scan_moves_json.snap
-tests/snapshots/cli_scan__scan_prune_json.snap
-tests/snapshots/cli_dry_run__scan_prune_dry_run_json.snap
-tests/snapshots/cli_scan__prune_confirmation_required_json_envelope.snap

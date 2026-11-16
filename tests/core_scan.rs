@@ -1243,7 +1243,6 @@ mod goal {
     ///     resources.ttl; an inbound relation held only in extensions.ttl is `SHACL_VIOLATION`.
     ///     No file is opened for it.
     ///   - Moves, refreshes, prunes and adds are one mutation with one SHACL check.
-    #[cfg(feature = "goal")]
     mod moves_and_prune {
         use super::*;
         use hali::core::relink;

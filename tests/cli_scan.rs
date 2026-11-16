@@ -57,7 +57,6 @@ mod goal {
     const NOW: &str = "2026-10-24T09:30:00Z";
     const PINNED_SECS: u64 = 1_792_504_931; // 2026-10-20T14:02:11Z
     const R1: &str = "018bcfe5-6801-710a-adec-89025cc1beeb";
-    #[cfg(feature = "goal")]
     const R2: &str = "018bcfe5-6804-7099-ac6c-d7363ca585e7";
 
     struct Env {
@@ -232,7 +231,6 @@ mod goal {
         }
 
         /// The output with the temp dir shown as `/TMP`.
-        #[cfg(feature = "goal")]
         fn clean(&self, text: &str) -> String {
             text.replace(self.base.to_str().unwrap(), "/TMP")
         }
@@ -1030,7 +1028,6 @@ mod goal {
         env.put("big.txt", b"this is far too big\n");
     }
 
-    #[cfg(feature = "goal")]
     #[test]
     fn scan_json() {
         let env = Env::new();
@@ -1049,7 +1046,6 @@ mod goal {
         });
     }
 
-    #[cfg(feature = "goal")]
     #[test]
     fn scan_dry_run_json() {
         let env = Env::new();
@@ -1070,7 +1066,6 @@ mod goal {
         });
     }
 
-    #[cfg(feature = "goal")]
     #[test]
     fn scan_text() {
         let env = Env::new();
@@ -1613,7 +1608,6 @@ mod goal {
     ///   --prune [--force] --yes`, each value POSIX single-quoted when it needs it.
     /// - `--force` without `--prune` is a usage error (exit 2) raised before the config and the
     ///   store: `--force is for --prune; a scan without --prune forgets nothing`.
-    #[cfg(feature = "goal")]
     mod moves_and_prune {
         use super::*;
 
