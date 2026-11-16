@@ -1005,7 +1005,8 @@ mod types {
     fn add_type_dry_run_matches() {
         let dir = tempfile::tempdir().unwrap();
         let path = std::fs::canonicalize(dir.path()).unwrap().join("a.txt");
-        std::fs::write(&path, b"hello\n").unwrap();
+        // Not the content of the fixture's Resources, whose files are gone: no POSSIBLE_MOVE.
+        std::fs::write(&path, b"notes\n").unwrap();
         let path = path.to_str().unwrap();
         let store = fixture("types");
 

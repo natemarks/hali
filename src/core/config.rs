@@ -1,5 +1,5 @@
-//! The config file (spec §4.1). Only `[user] name`, `[vocabulary] language` and the `[scan]`
-//! keys `exclude`, `include_hidden` and `max_size` are read so far.
+//! The config file (spec §4.1). Only `[user] name`, `[vocabulary] language`, `[files] dir` and
+//! the `[scan]` keys `exclude`, `include_hidden` and `max_size` are read so far.
 
 use super::Error;
 use oxigraph::model::Literal;
@@ -13,6 +13,8 @@ pub struct Config {
     pub user_name: Option<String>,
     /// The `[scan]` table.
     pub scan: ScanConfig,
+    /// `[files] dir`, as written (a leading `~` is not expanded here).
+    pub files_dir: Option<String>,
 }
 
 /// What `hali scan` reads from the config file (spec §7).
@@ -32,6 +34,7 @@ impl Default for Config {
             language: "en".to_string(),
             user_name: None,
             scan: ScanConfig::default(),
+            files_dir: None,
         }
     }
 }
@@ -41,6 +44,12 @@ struct Raw {
     user: Option<User>,
     vocabulary: Option<Vocabulary>,
     scan: Option<Scan>,
+    files: Option<Files>,
+}
+
+#[derive(Deserialize)]
+struct Files {
+    dir: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -104,6 +113,7 @@ pub fn parse(text: &str, path: &Path) -> Result<Config, Error> {
         language,
         user_name,
         scan,
+        files_dir: raw.files.and_then(|f| f.dir),
     })
 }
 

@@ -24,6 +24,62 @@ pub fn config_file(env: impl Fn(&str) -> Option<String>) -> Result<PathBuf, Unre
     xdg_dir(&env, "XDG_CONFIG_HOME", ".config").map(|base| base.join("hali/config.toml"))
 }
 
+/// The most bytes of `user-dirs.dirs` read: it holds a few short lines.
+const MAX_USER_DIRS: u64 = 64 * 1024;
+
+/// `files.dir` (spec §4): the first one defined of `configured` (`[files] dir`, a leading `~`
+/// being `$HOME`), `$XDG_DOCUMENTS_DIR/hali` from `$XDG_CONFIG_HOME/user-dirs.dirs` (a value of
+/// `"$HOME/…"` or an absolute path), and `$HOME/Documents/hali`. `None` when the one defined
+/// cannot be resolved (`~` or `$HOME` without `HOME`). Nothing is checked to exist.
+pub fn files_dir(
+    env: impl Fn(&str) -> Option<String>,
+    configured: Option<&str>,
+) -> Option<PathBuf> {
+    let home = || non_empty(&env, "HOME").map(PathBuf::from);
+    if let Some(dir) = configured {
+        return match dir.strip_prefix('~') {
+            Some("") => home(),
+            Some(rest) if rest.starts_with('/') => home().map(|h| h.join(&rest[1..])),
+            _ => Some(PathBuf::from(dir)),
+        };
+    }
+    if let Some(documents) = user_dirs_documents(&env) {
+        return Some(documents.join("hali"));
+    }
+    home().map(|h| h.join("Documents/hali"))
+}
+
+/// `XDG_DOCUMENTS_DIR` of `user-dirs.dirs` (the last assignment), if the file sets one hali can
+/// read: `"$HOME"`, `"$HOME/…"` or an absolute path, in double quotes or bare.
+fn user_dirs_documents(env: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    use std::io::Read;
+    let path = xdg_dir(env, "XDG_CONFIG_HOME", ".config")
+        .ok()?
+        .join("user-dirs.dirs");
+    let mut text = String::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(MAX_USER_DIRS)
+        .read_to_string(&mut text)
+        .ok()?;
+    let value = text
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("XDG_DOCUMENTS_DIR="))
+        .next_back()?
+        .trim();
+    let value = value
+        .strip_prefix('"')
+        .and_then(|v| v.strip_suffix('"'))
+        .unwrap_or(value);
+    match value.strip_prefix("$HOME") {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => {
+            non_empty(env, "HOME").map(|home| PathBuf::from(format!("{home}{rest}")))
+        }
+        Some(_) => None,
+        None => Some(PathBuf::from(value)).filter(|p| p.is_absolute()),
+    }
+}
+
 /// An XDG base dir: the variable if it is absolute, else `$HOME/<fallback>`.
 fn xdg_dir(
     env: &impl Fn(&str) -> Option<String>,

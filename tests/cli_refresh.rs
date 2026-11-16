@@ -849,6 +849,7 @@ mod goal {
                 "relation add",
                 "relation list",
                 "relation remove",
+                "relink",
                 "scan",
                 "schema",
                 "show",
@@ -859,7 +860,7 @@ mod goal {
                 "validate"
             ])
         );
-        assert_eq!(v["schemas"].as_array().unwrap().len(), 25);
+        assert_eq!(v["schemas"].as_array().unwrap().len(), 26);
         let out = env.run(["schema", "refresh"]);
         assert_eq!(out.code, Some(0), "{}", out.stderr);
         assert_eq!(out.stderr, "");

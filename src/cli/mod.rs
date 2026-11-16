@@ -51,6 +51,9 @@ enum Command {
         /// Tag new Resources with this Concept (a slug or a label; repeatable)
         #[arg(long = "tag", value_name = "CONCEPT")]
         tags: Vec<String>,
+        /// Catalog a file as a new Resource even when it has the content of a Missing Resource
+        #[arg(long)]
+        new: bool,
     },
     /// Manage the Concepts of the topics scheme
     #[command(subcommand)]
@@ -138,6 +141,21 @@ enum Command {
         /// A path or a full UUID
         #[arg(value_name = "B")]
         to: String,
+    },
+    /// Repair Missing Resources: search roots for their files, or record where one moved
+    Relink {
+        /// With PATH: a path or a full UUID of the Resource that moved
+        #[arg(value_name = "REF")]
+        reference: Option<String>,
+        /// With REF: the file the Resource is now (symlinks are resolved to the real path)
+        #[arg(value_name = "PATH")]
+        path: Option<OsString>,
+        /// Search this directory instead of the default root (repeatable)
+        #[arg(long = "root", value_name = "DIR")]
+        roots: Vec<OsString>,
+        /// With REF and PATH: relink even when the content differs, and record the new content
+        #[arg(long)]
+        force: bool,
     },
     /// Print the core ontology version, the store path, the counts and the vocabulary
     Describe {
@@ -623,6 +641,9 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
     if let Command::Scan { .. } = &cli.command {
         return scan(cli, &ctx, &config, config_path.as_deref());
     }
+    if let Command::Relink { .. } = &cli.command {
+        return relink(cli, &ctx, &config);
+    }
     // Usage errors come before the store is read.
     if let Command::Concept(ConceptCommand::Edit {
         add_alt,
@@ -641,11 +662,15 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             title,
             types,
             tags,
+            new,
         } => {
             if title.is_some() && paths.len() > 1 {
                 return Err(Error::usage("--title takes exactly one path"));
             }
             let files = inspect_all(paths)?;
+            if !new {
+                resource::check_moves(&store, &files, |p| storage::stat(Path::new(p)))?;
+            }
             let user = core::config::user_name(&config, env);
             let mut added = resource::add_all(
                 &ctx,
@@ -795,7 +820,10 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                     Err(storage::InspectError::Missing | storage::InspectError::Directory) => {
                         Ok(resource::Seen::Missing)
                     }
-                    Err(storage::InspectError::Other) => Err(Error::not_a_regular_file(p, "other")),
+                    // `inspect` has no limit, so it is never TooLarge.
+                    Err(storage::InspectError::Other | storage::InspectError::TooLarge) => {
+                        Err(Error::not_a_regular_file(p, "other"))
+                    }
                     Err(storage::InspectError::Unreadable) => Err(Error::file_unreadable(p)),
                 },
             )?;
@@ -1215,7 +1243,9 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             )?;
         }
         Command::Schema { .. } => unreachable!("handled before the store is loaded"),
-        Command::Scan { .. } => unreachable!("handled before the store is loaded"),
+        Command::Scan { .. } | Command::Relink { .. } => {
+            unreachable!("handled before the store is loaded")
+        }
         Command::Describe { brief } => {
             let described = describe::describe(&ctx, &store, &dir.to_string_lossy(), *brief);
             if cli.json {
@@ -1309,7 +1339,10 @@ fn inspect_all(args: &[OsString]) -> Result<Vec<FileFacts>, Error> {
         let found = storage::inspect(Path::new(&real)).map_err(|e| match e {
             storage::InspectError::Missing => Error::not_a_regular_file(&real, "missing"),
             storage::InspectError::Directory => Error::not_a_regular_file(&real, "directory"),
-            storage::InspectError::Other => Error::not_a_regular_file(&real, "other"),
+            // `inspect` has no limit, so it is never TooLarge.
+            storage::InspectError::Other | storage::InspectError::TooLarge => {
+                Error::not_a_regular_file(&real, "other")
+            }
             storage::InspectError::Unreadable => Error::file_unreadable(&real),
         })?;
         files.push(file_facts(real, found));
@@ -1426,9 +1459,10 @@ fn scan(
                 .map(|found| file_facts(p.to_string(), found))
                 .map_err(|e| match e {
                     storage::InspectError::Missing => Unhashable::Missing,
-                    storage::InspectError::Directory | storage::InspectError::Other => {
-                        Unhashable::NotRegular
-                    }
+                    // `inspect` has no limit, so it is never TooLarge.
+                    storage::InspectError::Directory
+                    | storage::InspectError::Other
+                    | storage::InspectError::TooLarge => Unhashable::NotRegular,
                     storage::InspectError::Unreadable => Unhashable::Unreadable,
                 })
         },
@@ -1499,6 +1533,213 @@ fn scan(
         &done.changes,
         text,
         None,
+    )
+}
+
+/// `hali relink` (spec §9.1 **Relink:**). Usage errors and the roots come before the store is
+/// read. A search walks the roots on this thread, hashes only files with the size of a Missing
+/// Resource (each read capped at that size + 1) and never asks; an explicit relink asks only
+/// under `--force` when the content differs.
+fn relink(cli: &Cli, ctx: &Context, config: &core::config::Config) -> Result<(), Error> {
+    let Command::Relink {
+        reference,
+        path,
+        roots,
+        force,
+    } = &cli.command
+    else {
+        unreachable!("only called for relink");
+    };
+    match (reference, path) {
+        (Some(_), None) => return Err(Error::usage("relink <ref> needs the <path> of the file")),
+        (Some(_), Some(_)) if !roots.is_empty() => {
+            return Err(Error::usage(
+                "--root is for a search; it cannot be given with <ref> <path>",
+            ));
+        }
+        (None, _) if *force => {
+            return Err(Error::usage(
+                "--force is for relink <ref> <path>; a search never forces",
+            ));
+        }
+        _ => {}
+    }
+    let dir = paths::data_dir(env).map_err(|_| Error::store_io(None))?;
+    if let (Some(reference), Some(path)) = (reference, path) {
+        return relink_explicit(cli, ctx, &dir, reference, path, *force);
+    }
+
+    let mut searched: Vec<String> = Vec::new();
+    if roots.is_empty() {
+        // The default root: the files.dir chain; an unusable one is skipped silently.
+        let usable = paths::files_dir(env, config.files_dir.as_deref())
+            .and_then(|d| paths::scan_root(d.as_os_str()).ok());
+        searched.extend(usable);
+    } else {
+        for root in roots {
+            let real = paths::scan_root(root).map_err(|e| match e {
+                paths::RootError::NonUtf8 { path } => Error::non_utf8_path(&path),
+                paths::RootError::NotADirectory { path } => {
+                    Error::usage(&format!("relink root {path} is not a directory"))
+                }
+                paths::RootError::Unreadable { path } => Error::file_unreadable(&path),
+            })?;
+            if !searched.contains(&real) {
+                searched.push(real);
+            }
+        }
+    }
+    let mut store = storage::load(&dir)?;
+    // hali's own data dir is never searched.
+    let options = storage::walk::WalkOptions::new(
+        false,
+        false,
+        Vec::new(),
+        paths::real_dir(&dir).into_iter().collect(),
+    )
+    .expect("no excludes to check");
+    let mut done = core::relink::search(
+        ctx,
+        &mut store,
+        &searched,
+        |root| storage::walk::walk(Path::new(root), &options).collect(),
+        |p| storage::stat(Path::new(p)),
+        |p, cap| {
+            storage::inspect_bounded(Path::new(p), cap)
+                .ok()
+                .map(|found| resource::Hashed {
+                    byte_size: found.byte_size,
+                    modified: core::rfc3339(found.mtime),
+                    sha256: found.sha256,
+                })
+        },
+    )?;
+    let v = &mut done.value;
+    for record in v
+        .relinked
+        .iter_mut()
+        .map(|r| &mut r.resource)
+        .chain(v.ambiguous.iter_mut().map(|a| &mut a.resource))
+        .chain(&mut v.unmatched)
+    {
+        observe(record);
+    }
+    let output = SearchOutput {
+        schema_version: SCHEMA_VERSION,
+        roots: &searched,
+        searched: &done.value,
+    };
+    let text = || {
+        let v = &done.value;
+        for root in &searched {
+            println!("root\t{}", printable(root));
+        }
+        for r in &v.relinked {
+            println!(
+                "{} {}",
+                relink_verb(cli),
+                describe_move(&r.resource, &r.from)
+            );
+        }
+        for a in &v.ambiguous {
+            println!("ambiguous resource {}", describe_record(&a.resource));
+            for c in &a.candidates {
+                println!("candidate {}", printable(c));
+            }
+        }
+        for r in &v.unmatched {
+            println!("unmatched resource {}", describe_record(r));
+        }
+        let c = &v.counts;
+        println!(
+            "counts\t{} relinked, {} ambiguous, {} unmatched",
+            c.relinked, c.ambiguous, c.unmatched
+        );
+        if v.truncated {
+            println!("truncated\ttrue");
+        }
+    };
+    mutated(
+        cli,
+        &dir,
+        &store,
+        storage::File::Resources,
+        output,
+        &done.changes,
+        text,
+        None,
+    )
+}
+
+/// `hali relink <ref> <path> [--force]`: the reference, then the file, then the content check;
+/// only a forced relink of other content asks (spec §9.8).
+fn relink_explicit(
+    cli: &Cli,
+    ctx: &Context,
+    dir: &Path,
+    reference: &str,
+    path: &OsString,
+    force: bool,
+) -> Result<(), Error> {
+    let mut store = storage::load(dir)?;
+    let id = resource::resolve_ref(&store, reference, paths::ref_path)?;
+    let file = inspect_all(std::slice::from_ref(path))?.remove(0);
+    let hashed = resource::Hashed {
+        byte_size: file.byte_size,
+        modified: file.modified,
+        sha256: file.sha256,
+    };
+    let mut done = core::relink::explicit(ctx, &mut store, &id, &file.path, &hashed, force)?;
+    observe(&mut done.value.resource);
+    let v = &done.value;
+    let output = ExplicitOutput {
+        schema_version: SCHEMA_VERSION,
+        explicit: v,
+    };
+    let text = || {
+        println!(
+            "{} {}",
+            relink_verb(cli),
+            describe_move(&v.resource, &v.from)
+        )
+    };
+    let confirmation = Confirmation {
+        command: "relink",
+        question: format!("relink resource {}", describe_record(&v.resource)),
+        retry: format!(
+            "hali relink {} {} --force --yes",
+            core::shell_quote(&v.resource.id),
+            core::positional(&v.resource.path)
+        ),
+    };
+    mutated(
+        cli,
+        dir,
+        &store,
+        storage::File::Resources,
+        output,
+        &done.changes,
+        text,
+        v.refreshed.then_some(&confirmation),
+    )
+}
+
+fn relink_verb(cli: &Cli) -> &'static str {
+    if cli.dry_run {
+        "would relink resource"
+    } else {
+        "relinked resource"
+    }
+}
+
+/// `<id> "<title>" <old path> -> <new path>`, safe to print.
+fn describe_move(record: &Record, from: &str) -> String {
+    format!(
+        "{} \"{}\" {} -> {}",
+        printable(&record.id),
+        printable(&record.title),
+        printable(from),
+        printable(&record.path)
     )
 }
 
@@ -1885,6 +2126,21 @@ struct RefreshedOutput<'a> {
     schema_version: u32,
     #[serde(flatten)]
     done: &'a resource::Refreshed,
+}
+
+#[derive(Serialize)]
+struct SearchOutput<'a> {
+    schema_version: u32,
+    roots: &'a [String],
+    #[serde(flatten)]
+    searched: &'a core::relink::Searched,
+}
+
+#[derive(Serialize)]
+struct ExplicitOutput<'a> {
+    schema_version: u32,
+    #[serde(flatten)]
+    explicit: &'a core::relink::Explicit,
 }
 
 #[derive(Serialize)]

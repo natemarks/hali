@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hali relink --json",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "roots": {"type": "array", "items": {"type": "string"}},
+        "counts": {
+          "type": "object",
+          "properties": {
+            "relinked": {"type": "integer", "minimum": 0},
+            "ambiguous": {"type": "integer", "minimum": 0},
+            "unmatched": {"type": "integer", "minimum": 0}
+          },
+          "required": ["relinked", "ambiguous", "unmatched"],
+          "additionalProperties": false
+        },
+        "relinked": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "resource": {"$ref": "#/$defs/resource"},
+              "from": {"type": "string"}
+            },
+            "required": ["resource", "from"],
+            "additionalProperties": false
+          }
+        },
+        "ambiguous": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "resource": {"$ref": "#/$defs/resource"},
+              "candidates": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "string"}}
+            },
+            "required": ["resource", "candidates"],
+            "additionalProperties": false
+          }
+        },
+        "unmatched": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "truncated": {"type": "boolean"}
+      },
+      "required": ["schema_version", "roots", "counts", "relinked", "ambiguous", "unmatched", "truncated"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "roots": {"type": "array", "items": {"type": "string"}},
+        "counts": {
+          "type": "object",
+          "properties": {
+            "relinked": {"type": "integer", "minimum": 0},
+            "ambiguous": {"type": "integer", "minimum": 0},
+            "unmatched": {"type": "integer", "minimum": 0}
+          },
+          "required": ["relinked", "ambiguous", "unmatched"],
+          "additionalProperties": false
+        },
+        "relinked": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "resource": {"$ref": "#/$defs/resource"},
+              "from": {"type": "string"}
+            },
+            "required": ["resource", "from"],
+            "additionalProperties": false
+          }
+        },
+        "ambiguous": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "resource": {"$ref": "#/$defs/resource"},
+              "candidates": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "string"}}
+            },
+            "required": ["resource", "candidates"],
+            "additionalProperties": false
+          }
+        },
+        "unmatched": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "truncated": {"type": "boolean"},
+        "dry_run": {"const": true},
+        "changes": {"type": "array", "items": {"$ref": "#/$defs/change"}}
+      },
+      "required": ["schema_version", "roots", "counts", "relinked", "ambiguous", "unmatched", "truncated", "dry_run", "changes"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "resource": {"$ref": "#/$defs/resource"},
+        "from": {"type": "string"},
+        "refreshed": {"type": "boolean"}
+      },
+      "required": ["schema_version", "resource", "from", "refreshed"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "resource": {"$ref": "#/$defs/resource"},
+        "from": {"type": "string"},
+        "refreshed": {"type": "boolean"},
+        "dry_run": {"const": true},
+        "changes": {"type": "array", "items": {"$ref": "#/$defs/change"}}
+      },
+      "required": ["schema_version", "resource", "from", "refreshed", "dry_run", "changes"],
+      "additionalProperties": false
+    }
+  ]
+}

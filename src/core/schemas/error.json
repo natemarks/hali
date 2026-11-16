@@ -282,6 +282,38 @@
               }
             }
           }
+        },
+        {
+          "if": {"properties": {"rule": {"const": "POSSIBLE_MOVE"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "path": {"type": "string"},
+                  "resources": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+                },
+                "required": ["path", "resources"]
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"rule": {"const": "HASH_MISMATCH"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "resource": {"type": "string"},
+                  "path": {"type": "string"},
+                  "expected": {"type": "string"},
+                  "actual": {"type": "string"}
+                },
+                "required": ["resource", "path", "expected", "actual"]
+              }
+            }
+          }
         }
       ]
     }
