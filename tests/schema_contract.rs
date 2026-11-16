@@ -275,7 +275,7 @@ mod goal {
     ];
 
     /// Every stdout snapshot's row.
-    #[allow(unused_mut)]
+    #[allow(unused_assignments, unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
         let mut rows = STDOUT_GOLDENS.to_vec();
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS);
