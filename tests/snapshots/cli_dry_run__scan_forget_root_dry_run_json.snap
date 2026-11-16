@@ -1,0 +1,5 @@
+---
+source: tests/cli_scan_roots.rs
+expression: out.stdout
+---
+{"schema_version":1,"root":{"root":"/TMP/a","include_hidden":false,"no_ignore":false,"exclude":["*.tmp"],"max_size":10,"media_types":[]},"dry_run":true,"changes":[]}

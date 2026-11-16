@@ -274,6 +274,25 @@ mod goal {
         ("cli_scan__scan_prune_json", "scan"),
     ];
 
+    /// Snapshots written by the active goal (#23): hidden from a build without the goal feature
+    /// (the `scan` schema they name accepts the bare scan, `--list` and `--forget-root` outputs
+    /// only when the goal is met).
+    const GOAL_SNAPS_23: &[&str] = &[
+        "cli_dry_run__scan_forget_root_dry_run_json",
+        "cli_scan_roots__bare_prune_confirmation_required_json_envelope",
+        "cli_scan_roots__bare_scan_json",
+        "cli_scan_roots__forget_root_json",
+        "cli_scan_roots__scan_list_json",
+    ];
+
+    #[cfg(feature = "goal")]
+    const GOAL_STDOUT_GOLDENS_23: &[(&str, &str)] = &[
+        ("cli_dry_run__scan_forget_root_dry_run_json", "scan"),
+        ("cli_scan_roots__bare_scan_json", "scan"),
+        ("cli_scan_roots__forget_root_json", "scan"),
+        ("cli_scan_roots__scan_list_json", "scan"),
+    ];
+
     /// Every stdout snapshot's row.
     #[allow(unused_assignments, unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
@@ -290,6 +309,8 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_22);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_21);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_24);
+        #[cfg(feature = "goal")]
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_23);
         // The goldens #24 rewrites are hidden without the goal feature (see `goldens`), and so
         // are their rows.
         let mut hidden_24: &[&str] = GOAL_SNAPS_24;
@@ -360,6 +381,11 @@ mod goal {
         {
             pending_24 = &[];
         }
+        let mut pending_23: &[&str] = GOAL_SNAPS_23;
+        #[cfg(feature = "goal")]
+        {
+            pending_23 = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -379,6 +405,7 @@ mod goal {
                 || pending_22.contains(&stem.as_str())
                 || pending_21.contains(&stem.as_str())
                 || pending_24.contains(&stem.as_str())
+                || pending_23.contains(&stem.as_str())
             {
                 continue;
             }
@@ -491,6 +518,8 @@ mod goal {
         assert!(goldens.len() >= 79, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 85, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 89, "found only {} goldens", goldens.len());
+        #[cfg(feature = "goal")]
+        assert!(goldens.len() >= 94, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
                 .unwrap_or_else(|| panic!("golden `{}` is not mapped to a schema", g.stem));
@@ -556,6 +585,11 @@ mod goal {
         // `cli_dry_run__scan_prune_dry_run_json` is the dry run of `scan --prune` (#24): the
         // `scan` schema, not a command called `scan prune`.
         if command == "scan_prune" {
+            return "scan".to_string();
+        }
+        // `cli_dry_run__scan_forget_root_dry_run_json` is the dry run of `scan --forget-root`
+        // (#23): the `scan` schema too.
+        if command == "scan_forget_root" {
             return "scan".to_string();
         }
         command.replace('_', " ")
@@ -2241,6 +2275,276 @@ mod goal {
                 false,
             ),
         ]);
+        for (name, instance, valid) in cases {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema scan` should {} `{name}`: {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #23: the `scan` schema also covers the three outputs of the remembered roots: a bare scan
+    /// (`roots` and `unavailable` where `root` was), `--list` and `--forget-root` (real and
+    /// dry-run). `scan <root>` keeps its shape and `schema_version` stays 1.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn scan_schema_covers_remembered_roots() {
+        let entry = || {
+            json!({"root": "/TMP/a", "include_hidden": false, "no_ignore": true,
+                "exclude": ["*.tmp"], "max_size": null, "media_types": ["text/*"]})
+        };
+        let bare = || {
+            json!({"schema_version": 1, "roots": ["/TMP/a", "/TMP/b"],
+                "unavailable": [{"root": "/TMP/gone", "reason": "no such directory"}],
+                "counts": {"added": 0, "refreshed": 0, "relinked": 0, "ambiguous": 0,
+                    "unchanged": 0, "missing": 0, "pruned": 0, "skipped": 0},
+                "media_types": {}, "added": [], "refreshed": [], "relinked": [],
+                "ambiguous": [], "missing": [], "pruned": [], "skipped": [],
+                "truncated": false})
+        };
+        let with = |mut v: Value, key: &str, value: Value| {
+            v[key] = value;
+            v
+        };
+        let without = |mut v: Value, key: &str| {
+            v.as_object_mut().unwrap().remove(key);
+            v
+        };
+        let list = || json!({"schema_version": 1, "roots": [entry()]});
+        let forget = || json!({"schema_version": 1, "root": entry()});
+        let entry_with = |key: &str, value: Value| with(entry(), key, value);
+        let v = validator("scan");
+        let cases: Vec<(String, Value, bool)> = vec![
+            ("bare".into(), bare(), true),
+            (
+                "bare, nothing remembered".into(),
+                with(with(bare(), "roots", json!([])), "unavailable", json!([])),
+                true,
+            ),
+            (
+                "bare dry run".into(),
+                with(with(bare(), "dry_run", json!(true)), "changes", json!([])),
+                true,
+            ),
+            (
+                "bare with root".into(),
+                with(bare(), "root", json!("/TMP/a")),
+                false,
+            ),
+            ("bare without roots".into(), without(bare(), "roots"), false),
+            (
+                "bare without unavailable".into(),
+                without(bare(), "unavailable"),
+                false,
+            ),
+            (
+                "bare without counts".into(),
+                without(bare(), "counts"),
+                false,
+            ),
+            (
+                "roots not strings".into(),
+                with(bare(), "roots", json!([1])),
+                false,
+            ),
+            (
+                "roots a string".into(),
+                with(bare(), "roots", json!("/TMP/a")),
+                false,
+            ),
+            (
+                "unavailable a string".into(),
+                with(bare(), "unavailable", json!("x")),
+                false,
+            ),
+            (
+                "unavailable without reason".into(),
+                with(bare(), "unavailable", json!([{"root": "/TMP/gone"}])),
+                false,
+            ),
+            (
+                "unavailable without root".into(),
+                with(bare(), "unavailable", json!([{"reason": "gone"}])),
+                false,
+            ),
+            (
+                "unavailable extra key".into(),
+                with(
+                    bare(),
+                    "unavailable",
+                    json!([{"root": "/TMP/gone", "reason": "gone", "path": "/p"}]),
+                ),
+                false,
+            ),
+            (
+                "unavailable reason a number".into(),
+                with(
+                    bare(),
+                    "unavailable",
+                    json!([{"root": "/TMP/gone", "reason": 1}]),
+                ),
+                false,
+            ),
+            (
+                "bare extra key".into(),
+                with(bare(), "extra", json!(1)),
+                false,
+            ),
+            (
+                "bare version 2".into(),
+                with(bare(), "schema_version", json!(2)),
+                false,
+            ),
+            ("list".into(), list(), true),
+            (
+                "list, empty".into(),
+                json!({"schema_version": 1, "roots": []}),
+                true,
+            ),
+            (
+                "list, two entries".into(),
+                json!({"schema_version": 1, "roots": [entry(), entry_with("max_size", json!(1024))]}),
+                true,
+            ),
+            (
+                "list extra key".into(),
+                with(list(), "extra", json!(1)),
+                false,
+            ),
+            (
+                "list version 2".into(),
+                with(list(), "schema_version", json!(2)),
+                false,
+            ),
+            (
+                "list without roots".into(),
+                json!({"schema_version": 1}),
+                false,
+            ),
+            (
+                "list entry as string".into(),
+                json!({"schema_version": 1, "roots": ["/TMP/a"]}),
+                false,
+            ),
+            ("forget".into(), forget(), true),
+            (
+                "forget dry run".into(),
+                with(with(forget(), "dry_run", json!(true)), "changes", json!([])),
+                true,
+            ),
+            (
+                "forget, max_size a number".into(),
+                with(forget(), "root", entry_with("max_size", json!(5))),
+                true,
+            ),
+            (
+                "forget without root".into(),
+                json!({"schema_version": 1}),
+                false,
+            ),
+            (
+                "forget root a string".into(),
+                with(forget(), "root", json!("/TMP/a")),
+                false,
+            ),
+            (
+                "forget extra key".into(),
+                with(forget(), "extra", json!(1)),
+                false,
+            ),
+            (
+                "forget dry run without changes".into(),
+                with(forget(), "dry_run", json!(true)),
+                false,
+            ),
+            (
+                "forget changes not empty".into(),
+                with(
+                    with(forget(), "dry_run", json!(true)),
+                    "changes",
+                    json!([{"op": "add", "triple": "<a:b> <a:c> <a:d> ."}]),
+                ),
+                false,
+            ),
+            (
+                "entry without root".into(),
+                with(forget(), "root", without(entry(), "root")),
+                false,
+            ),
+            (
+                "entry without include_hidden".into(),
+                with(forget(), "root", without(entry(), "include_hidden")),
+                false,
+            ),
+            (
+                "entry without no_ignore".into(),
+                with(forget(), "root", without(entry(), "no_ignore")),
+                false,
+            ),
+            (
+                "entry without exclude".into(),
+                with(forget(), "root", without(entry(), "exclude")),
+                false,
+            ),
+            (
+                "entry without max_size".into(),
+                with(forget(), "root", without(entry(), "max_size")),
+                false,
+            ),
+            (
+                "entry without media_types".into(),
+                with(forget(), "root", without(entry(), "media_types")),
+                false,
+            ),
+            (
+                "entry extra key".into(),
+                with(forget(), "root", entry_with("extra", json!(1))),
+                false,
+            ),
+            (
+                "max_size a string".into(),
+                with(forget(), "root", entry_with("max_size", json!("1KiB"))),
+                false,
+            ),
+            (
+                "max_size negative".into(),
+                with(forget(), "root", entry_with("max_size", json!(-1))),
+                false,
+            ),
+            (
+                "max_size fractional".into(),
+                with(forget(), "root", entry_with("max_size", json!(1.5))),
+                false,
+            ),
+            (
+                "include_hidden a string".into(),
+                with(forget(), "root", entry_with("include_hidden", json!("no"))),
+                false,
+            ),
+            (
+                "exclude a string".into(),
+                with(forget(), "root", entry_with("exclude", json!("*.tmp"))),
+                false,
+            ),
+            (
+                "exclude holds a number".into(),
+                with(forget(), "root", entry_with("exclude", json!([1]))),
+                false,
+            ),
+            (
+                "media_types a string".into(),
+                with(forget(), "root", entry_with("media_types", json!("text/*"))),
+                false,
+            ),
+            (
+                "root a number".into(),
+                with(forget(), "root", entry_with("root", json!(1))),
+                false,
+            ),
+        ];
         for (name, instance, valid) in cases {
             let errs = problems(&v, &instance);
             assert_eq!(

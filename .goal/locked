@@ -1,0 +1,12 @@
+tests/core_roots.rs
+tests/core_scan_roots.rs
+tests/paths_state.rs
+tests/storage_roots.rs
+tests/cli_scan_roots.rs
+tests/cli_scan.rs
+tests/schema_contract.rs
+tests/snapshots/cli_scan_roots__bare_scan_json.snap
+tests/snapshots/cli_scan_roots__scan_list_json.snap
+tests/snapshots/cli_scan_roots__forget_root_json.snap
+tests/snapshots/cli_dry_run__scan_forget_root_dry_run_json.snap
+tests/snapshots/cli_scan_roots__bare_prune_confirmation_required_json_envelope.snap
