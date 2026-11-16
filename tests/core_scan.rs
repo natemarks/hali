@@ -694,6 +694,16 @@ mod goal {
 
     // ---- cataloged Resources under the root ----------------------------------------------------
 
+    /// `facts_of`, but `new.txt` has a content of its own (size 3), so it matches no Missing
+    /// Resource of the fixture (`gone.txt` has the size and hash of `hello\n`) and is not a move.
+    fn facts_with_new(path: &str) -> Result<FileFacts, Unhashable> {
+        if path.ends_with("new.txt") {
+            Ok(facts(path, 3, &sha(3), "text/plain"))
+        } else {
+            facts_of(path)
+        }
+    }
+
     #[test]
     fn refreshes_stale_under_root_only() {
         let mut store = hali::storage::load(&fixture("refresh")).unwrap();
@@ -710,7 +720,7 @@ mod goal {
             &opts(ROOT, 1 << 30, &[]),
             entries,
             stat_of,
-            facts_of,
+            facts_with_new,
             no_glob,
         );
         let m = result.unwrap();
@@ -766,7 +776,7 @@ mod goal {
         let added = resource::add(
             &ctx(),
             &mut oracle,
-            &facts_of("/fixtures/refresh/new.txt").ok().unwrap(),
+            &facts_with_new("/fixtures/refresh/new.txt").ok().unwrap(),
             None,
             "tester",
         )
@@ -1189,5 +1199,1141 @@ mod goal {
         assert!(!store.contains(&quad(0)).unwrap());
         assert!(store.contains(&quad(x)).unwrap());
         assert!(store.contains(&quad(y)).unwrap());
+    }
+
+    // ---- moves and --prune (#24, spec §9.1 **Scan:**) -----------------------------------------
+
+    /// Goal tests for moves and pruning during a scan (#24).
+    ///
+    /// Assumed API (D14 of the approved plan; the implementer follows it).
+    ///
+    /// Module `hali::core::scan`:
+    ///   `pub enum Prune { Off, On, Forced }`: `Off` forgets nothing; `On` forgets what `forget`
+    ///       would forget; `Forced` is `--prune --force`.
+    ///   `scan_with(&Context, &mut Store, &ScanOptions, Prune, entries, stat, inspect, glob_type,
+    ///       progress, user_name) -> Result<Mutation<Scanned>, Error>`: `scan` with `Prune`
+    ///       before `entries`; `scan(...)` keeps its signature and is `scan_with(.., Prune::Off,
+    ///       ..)`.
+    ///   `Counts` gains `relinked`, `ambiguous` and `pruned`: `added, refreshed, relinked,
+    ///       ambiguous, unchanged, missing, pruned, skipped`, always exact.
+    ///   `Scanned` gains `relinked: Vec<relink::Relinked>`, `ambiguous: Vec<relink::Ambiguous>`
+    ///       and `pruned: Vec<Record>`: `counts, media_types, added, refreshed, relinked,
+    ///       ambiguous, missing, pruned, skipped, truncated`. Every list is in byte order of the
+    ///       record's path (the new path for a relinked one), at most 100 entries; `candidates`
+    ///       at most 10, in byte order; `truncated` covers every list. `missing` is the
+    ///       Resources under the root still cataloged and Missing after the run (ambiguous ones
+    ///       and ones `--prune` kept included). `pruned` holds the records as they were.
+    ///
+    /// What `scan_with` does beyond `scan`:
+    ///   - A new file that would be registered (not too large, not ruled out by the media type,
+    ///     hashed, non-empty) and has the byte size and SHA-256 of exactly one Missing Resource
+    ///     (store-wide, outside the root too), with no other Missing Resource having its content,
+    ///     is a move: the Resource's `dcat:downloadURL` and `dcterms:modified` are replaced as
+    ///     `relink::explicit` replaces them and its catalog record's `dcterms:modified` is set to
+    ///     now; the file is not registered and takes no id. Resources outside the root are
+    ///     `stat`ed (once) only when a new file has their size and SHA-256.
+    ///   - Otherwise (several candidates, or several Missing Resources with that content) the
+    ///     Resource is ambiguous: nothing changes, its candidate files are not registered and it
+    ///     is never pruned.
+    ///   - An empty file and a Missing Resource recorded empty never match.
+    ///   - `Prune::On`: every Resource under the root still Missing after the moves and not
+    ///     ambiguous is forgotten as `forget` forgets it, except one with an inbound relation
+    ///     (from any Resource, in any graph, a pruned one included), which is kept (it stays in
+    ///     `missing`). `Prune::Forced` forgets those too and removes their inbound triples from
+    ///     resources.ttl; an inbound relation held only in extensions.ttl is `SHACL_VIOLATION`.
+    ///     No file is opened for it.
+    ///   - Moves, refreshes, prunes and adds are one mutation with one SHACL check.
+    mod moves_and_prune {
+        use super::*;
+        use hali::core::relink;
+        use hali::core::scan::Prune;
+
+        /// The mtime (seconds) that matches `OLD`.
+        const PINNED: i64 = 1_792_504_931;
+        const SETUP_NOW: &str = "2026-10-21T08:00:00Z";
+        const F1: &str = "0192f0c4-0000-7000-8000-000000000201";
+        const F2: &str = "0192f0c4-0000-7000-8000-000000000202";
+        const F3: &str = "0192f0c4-0000-7000-8000-000000000203";
+        const RELATIONS: &str = "/fixtures/relations";
+
+        /// A context for building the store a scan starts from: other ids (a scan mints from
+        /// seed 1) and another clock (a relink touches a catalog record with the scan's).
+        fn setup_ctx() -> Context {
+            Context::new(
+                "en",
+                Box::new(FixedClock::new(SETUP_NOW)),
+                Box::new(SeededIdGen::new(100)),
+            )
+        }
+
+        /// Catalogs these files; returns their records, in order.
+        fn catalog_facts(store: &mut Store, files: &[FileFacts]) -> Vec<resource::Record> {
+            resource::add_all(&setup_ctx(), store, files, None, &[], &[], "tester")
+                .unwrap()
+                .value
+                .added
+        }
+
+        /// Catalogs `(path, byte size, sha(i))` text files, mtime `OLD`.
+        fn catalog(store: &mut Store, items: &[(&str, u64, usize)]) -> Vec<resource::Record> {
+            let files: Vec<FileFacts> = items
+                .iter()
+                .map(|(p, size, i)| facts(p, *size, &sha(*i), "text/plain"))
+                .collect();
+            catalog_facts(store, &files)
+        }
+
+        /// `stat` that sees exactly these files, as recorded (not Stale).
+        fn stat_in(present: &'static [(&'static str, u64)]) -> impl Fn(&str) -> Option<(u64, i64)> {
+            move |p| {
+                present
+                    .iter()
+                    .find(|(q, _)| *q == p)
+                    .map(|(_, size)| (*size, PINNED))
+            }
+        }
+
+        /// Runs `scan_with` with logging fakes.
+        fn run(
+            store: &mut Store,
+            options: &ScanOptions,
+            prune: Prune,
+            entries: Vec<Walked>,
+            stat: impl Fn(&str) -> Option<(u64, i64)>,
+            inspect: impl Fn(&str) -> Result<FileFacts, Unhashable>,
+            glob: impl Fn(&str) -> Option<String>,
+        ) -> (Result<Mutation<Scanned>, Error>, Calls) {
+            let stats = RefCell::new(Vec::new());
+            let inspects = RefCell::new(Vec::new());
+            let result = scan::scan_with(
+                &ctx(),
+                store,
+                options,
+                prune,
+                entries,
+                |p: &str| {
+                    stats.borrow_mut().push(p.to_string());
+                    stat(p)
+                },
+                |p: &str| {
+                    inspects.borrow_mut().push(p.to_string());
+                    inspect(p)
+                },
+                glob,
+                |_: usize, _: usize| {},
+                "tester",
+            );
+            (result, (stats.into_inner(), inspects.into_inner()))
+        }
+
+        /// added, refreshed, relinked, ambiguous, unchanged, missing, pruned, skipped.
+        fn tally(c: &scan::Counts) -> [usize; 8] {
+            [
+                c.added,
+                c.refreshed,
+                c.relinked,
+                c.ambiguous,
+                c.unchanged,
+                c.missing,
+                c.pruned,
+                c.skipped,
+            ]
+        }
+
+        fn ids(records: &[resource::Record]) -> Vec<&str> {
+            records.iter().map(|r| r.id.as_str()).collect()
+        }
+
+        fn moves(scanned: &Scanned) -> Vec<(&str, &str)> {
+            scanned
+                .relinked
+                .iter()
+                .map(|r| (r.from.as_str(), r.resource.path.as_str()))
+                .collect()
+        }
+
+        fn moved_facts(path: &str, size: u64, sha_index: usize) -> FileFacts {
+            FileFacts {
+                modified: NEW.to_string(),
+                ..facts(path, size, &sha(sha_index), "text/plain")
+            }
+        }
+
+        /// Row 1: A one-to-one move is relinked exactly as `relink::explicit` writes it.
+        #[test]
+        fn relinks_a_one_to_one_move() {
+            let build = || {
+                let mut store = empty_store();
+                let records = catalog(&mut store, &[("/r/old/a.txt", 5, 5), ("/r/keep.txt", 6, 6)]);
+                (store, records)
+            };
+            let (mut store, records) = build();
+            let a = records[0].id.clone();
+            let (result, (stats, inspects)) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::Off,
+                vec![file("/r/keep.txt", 6), file("/r/new/a.txt", 5)],
+                stat_in(&[("/r/keep.txt", 6)]),
+                |p| match p {
+                    "/r/new/a.txt" => Ok(moved_facts(p, 5, 5)),
+                    _ => Err(Unhashable::Missing),
+                },
+                no_glob,
+            );
+            let m = result.unwrap();
+
+            // The oracle: `relink::explicit` of the same file on an identical store.
+            let (mut oracle_store, _) = build();
+            let oracle = relink::explicit(
+                &ctx(),
+                &mut oracle_store,
+                &a,
+                "/r/new/a.txt",
+                &resource::Hashed {
+                    byte_size: 5,
+                    modified: NEW.to_string(),
+                    sha256: sha(5),
+                },
+                false,
+            )
+            .unwrap();
+            assert_eq!(resources_ttl(&store), resources_ttl(&oracle_store));
+            assert_eq!(m.changes, oracle.changes);
+            assert!(!m.changes.is_empty());
+            assert_sorted(&m);
+
+            let v = &m.value;
+            assert_eq!(moves(v), vec![("/r/old/a.txt", "/r/new/a.txt")]);
+            assert_eq!(v.relinked[0].resource.id, a);
+            assert_eq!(v.relinked[0].resource.modified, NEW);
+            assert!(v.added.is_empty() && v.ambiguous.is_empty() && v.pruned.is_empty());
+            assert!(v.missing.is_empty(), "a relinked Resource is not missing");
+            assert!(v.media_types.is_empty(), "only added Resources are counted");
+            assert_eq!(tally(&v.counts), [0, 0, 1, 0, 1, 0, 0, 0]);
+            // The file was hashed (it is a candidate) and registered nowhere; every Resource
+            // under the root is `stat`ed once, the missing one not again for the match.
+            assert_eq!(inspects, strings(&["/r/new/a.txt"]));
+            assert_eq!(sorted(stats), strings(&["/r/keep.txt", "/r/old/a.txt"]));
+            assert!(!resources_ttl(&store).contains("file:///r/old/a.txt"));
+        }
+
+        /// Row 2: A Missing Resource outside the root is matched too, and Resources outside the
+        /// root are `stat`ed only when a new file has their size and SHA-256.
+        #[test]
+        fn matches_missing_resources_outside_the_root() {
+            let mut store = empty_store();
+            let records = catalog(
+                &mut store,
+                &[
+                    ("/o/x.txt", 5, 5), // Missing; a new file has its content
+                    ("/o/y.txt", 6, 6), // Missing; no new file has its content
+                    ("/o/z.txt", 7, 7), // present; a new file has its content
+                    ("/r/w.txt", 8, 8), // under the root, present
+                ],
+            );
+            let x = records[0].id.clone();
+            let (result, (stats, inspects)) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::Off,
+                vec![
+                    file("/r/w.txt", 8),
+                    file("/r/n1.txt", 5),
+                    file("/r/n2.txt", 7),
+                    file("/r/n3.txt", 9),
+                ],
+                stat_in(&[("/o/z.txt", 7), ("/r/w.txt", 8)]),
+                |p| match p {
+                    "/r/n1.txt" => Ok(moved_facts(p, 5, 5)),
+                    "/r/n2.txt" => Ok(facts(p, 7, &sha(7), "text/plain")),
+                    _ => Ok(facts(p, 9, &sha(9), "text/plain")),
+                },
+                no_glob,
+            );
+            let m = result.unwrap();
+            let v = &m.value;
+            assert_eq!(moves(v), vec![("/o/x.txt", "/r/n1.txt")]);
+            assert_eq!(v.relinked[0].resource.id, x);
+            // The present Resource's content is no move: the copy is registered as usual.
+            assert_eq!(paths(&v.added), vec!["/r/n2.txt", "/r/n3.txt"]);
+            assert!(
+                v.missing.is_empty(),
+                "/o/y.txt is outside the root: not listed"
+            );
+            assert_eq!(tally(&v.counts), [2, 0, 1, 0, 1, 0, 0, 0]);
+            assert_eq!(
+                sorted(inspects),
+                strings(&["/r/n1.txt", "/r/n2.txt", "/r/n3.txt"])
+            );
+            // Outside the root only x (Missing, matched) and z (a new file has its content) are
+            // `stat`ed, once each; y never is.
+            assert_eq!(
+                sorted(stats),
+                strings(&["/o/x.txt", "/o/z.txt", "/r/w.txt"])
+            );
+            let ttl = resources_ttl(&store);
+            assert!(ttl.contains("file:///r/n1.txt") && !ttl.contains("file:///o/x.txt"));
+            assert!(ttl.contains("file:///o/y.txt"), "y is untouched");
+            assert_sorted(&m);
+        }
+
+        /// Row 3: Several matches: nothing changes, no candidate is registered, nothing is pruned.
+        #[test]
+        fn several_candidates_change_nothing() {
+            let build = || {
+                let mut store = empty_store();
+                let records = catalog(&mut store, &[("/r/a.txt", 5, 5), ("/r/c.txt", 8, 8)]);
+                (store, records)
+            };
+            // 11 files with the content of a.txt, in reverse byte order.
+            let candidates: Vec<String> = (0..11).map(|i| format!("/r/m{i:02}.txt")).collect();
+            let entries =
+                || -> Vec<Walked> { candidates.iter().rev().map(|p| file(p, 5)).collect() };
+            let inspect = |p: &str| Ok(facts(p, 5, &sha(5), "text/plain"));
+
+            // Off: nothing at all changes.
+            let (mut store, records) = build();
+            let a = records[0].id.clone();
+            let before = resources_ttl(&store);
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::Off,
+                entries(),
+                |_| None,
+                inspect,
+                no_glob,
+            );
+            let m = result.unwrap();
+            assert!(m.changes.is_empty());
+            assert_eq!(resources_ttl(&store), before);
+            let v = &m.value;
+            assert!(v.relinked.is_empty() && v.added.is_empty() && v.pruned.is_empty());
+            assert_eq!(v.ambiguous.len(), 1);
+            assert_eq!(v.ambiguous[0].resource.id, a);
+            assert_eq!(v.ambiguous[0].resource.path, "/r/a.txt");
+            // 11 candidates, at most 10 listed, the first ten in byte order.
+            assert_eq!(v.ambiguous[0].candidates, candidates[..10].to_vec());
+            assert_eq!(paths(&v.missing), vec!["/r/a.txt", "/r/c.txt"]);
+            assert_eq!(tally(&v.counts), [0, 0, 0, 1, 0, 2, 0, 0]);
+
+            // On: the ambiguous Resource is never pruned, the plain Missing one is.
+            let (mut store, records) = build();
+            let c = records[1].id.clone();
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::On,
+                entries(),
+                |_| None,
+                inspect,
+                no_glob,
+            );
+            let m = result.unwrap();
+            let v = &m.value;
+            assert_eq!(v.ambiguous.len(), 1);
+            assert_eq!(ids(&v.pruned), vec![c.as_str()]);
+            assert_eq!(paths(&v.missing), vec!["/r/a.txt"]);
+            assert_eq!(tally(&v.counts), [0, 0, 0, 1, 0, 1, 1, 0]);
+            let ttl = resources_ttl(&store);
+            assert!(ttl.contains("file:///r/a.txt") && !ttl.contains("file:///r/c.txt"));
+            assert!(!ttl.contains("m00.txt"), "no candidate is registered");
+
+            // Two Missing Resources with one file's content: both are ambiguous, the file is
+            // not registered.
+            let mut store = empty_store();
+            catalog(&mut store, &[("/r/a1.txt", 5, 5), ("/r/a2.txt", 5, 5)]);
+            let before = resources_ttl(&store);
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::On,
+                vec![file("/r/one.txt", 5)],
+                |_| None,
+                inspect,
+                no_glob,
+            );
+            let m = result.unwrap();
+            let v = &m.value;
+            assert_eq!(
+                v.ambiguous
+                    .iter()
+                    .map(|a| (a.resource.path.as_str(), a.candidates.clone()))
+                    .collect::<Vec<_>>(),
+                vec![
+                    ("/r/a1.txt", strings(&["/r/one.txt"])),
+                    ("/r/a2.txt", strings(&["/r/one.txt"]))
+                ]
+            );
+            assert!(v.relinked.is_empty() && v.added.is_empty() && v.pruned.is_empty());
+            assert_eq!(tally(&v.counts), [0, 0, 0, 2, 0, 2, 0, 0]);
+            assert!(m.changes.is_empty());
+            assert_eq!(resources_ttl(&store), before);
+        }
+
+        /// Row 4: What is never a move candidate: empty files, a Missing Resource recorded empty, a
+        /// file over the size limit, one the media type patterns rule out, one that cannot be
+        /// hashed; and content only present Resources have is registered as usual.
+        #[test]
+        fn what_is_never_a_move_candidate() {
+            let mut store = empty_store();
+            catalog(
+                &mut store,
+                &[
+                    ("/r/e-old", 0, 0),              // recorded empty
+                    ("/r/huge-old.bin", 1000, 1000), // its file is too large
+                    ("/r/pic-old.png", 8, 8),        // its file is ruled out by name
+                    ("/r/blob-old", 9, 9),           // its file is ruled out by content
+                    ("/r/locked-old.txt", 10, 10),   // its file cannot be read
+                    ("/r/present.txt", 11, 11),      // present
+                    ("/o/q.txt", 12, 12),            // present, outside the root
+                ],
+            );
+            let entries = vec![
+                file("/r/e-new", 0),
+                file("/r/huge.bin", 1000),
+                file("/r/pic.png", 8),
+                file("/r/noext9", 9),
+                file("/r/locked.txt", 10),
+                file("/r/copy.txt", 11),
+                file("/r/copyq.txt", 12),
+            ];
+            let (result, (_, inspects)) = run(
+                &mut store,
+                &opts("/r", 100, &["text/*"]),
+                Prune::Off,
+                entries,
+                stat_in(&[("/r/present.txt", 11), ("/o/q.txt", 12)]),
+                |p| match p {
+                    "/r/e-new" => Ok(facts(p, 0, &sha(0), "text/plain")),
+                    "/r/noext9" => Ok(facts(p, 9, &sha(9), "application/octet-stream")),
+                    "/r/locked.txt" => Err(Unhashable::Unreadable),
+                    "/r/copy.txt" => Ok(facts(p, 11, &sha(11), "text/plain")),
+                    "/r/copyq.txt" => Ok(facts(p, 12, &sha(12), "text/plain")),
+                    other => panic!("{other} must not be opened"),
+                },
+                glob_by_extension,
+            );
+            let m = result.unwrap();
+            let v = &m.value;
+            assert!(v.relinked.is_empty() && v.ambiguous.is_empty() && v.pruned.is_empty());
+            // The empty file and both copies of present content are registered as usual.
+            assert_eq!(
+                paths(&v.added),
+                vec!["/r/copy.txt", "/r/copyq.txt", "/r/e-new"]
+            );
+            assert_eq!(
+                skips(v),
+                vec![
+                    ("/r/huge.bin", "too_large"),
+                    ("/r/locked.txt", "unreadable")
+                ]
+            );
+            assert_eq!(
+                paths(&v.missing),
+                vec![
+                    "/r/blob-old",
+                    "/r/e-old",
+                    "/r/huge-old.bin",
+                    "/r/locked-old.txt",
+                    "/r/pic-old.png"
+                ]
+            );
+            assert_eq!(tally(&v.counts), [3, 0, 0, 0, 1, 5, 0, 2]);
+            // Too large and ruled out by name: never opened.
+            assert_eq!(
+                sorted(inspects),
+                strings(&[
+                    "/r/copy.txt",
+                    "/r/copyq.txt",
+                    "/r/e-new",
+                    "/r/locked.txt",
+                    "/r/noext9"
+                ])
+            );
+        }
+
+        /// Row 5: Relinks, refreshes and adds are one mutation; ids go to registered files only, in
+        /// path order.
+        #[test]
+        fn moves_refreshes_and_adds_in_one_mutation() {
+            let moved = "/fixtures/refresh/m-moved.txt";
+            let a_new = "/fixtures/refresh/a-new.txt";
+            let z_new = "/fixtures/refresh/z-new.txt";
+            let inspect = |p: &str| match p {
+                p if p == a_new => Ok(facts(p, 3, &sha(3), "text/plain")),
+                p if p == z_new => Ok(facts(p, 4, &sha(4), "text/plain")),
+                p if p == moved => Ok(moved_facts_hello(p)),
+                other => facts_of(other),
+            };
+            fn moved_facts_hello(p: &str) -> FileFacts {
+                FileFacts {
+                    modified: NEW.to_string(),
+                    ..facts(p, 6, SHA_HELLO, "text/plain")
+                }
+            }
+            let mut store = hali::storage::load(&fixture("refresh")).unwrap();
+            let (result, _) = run(
+                &mut store,
+                &opts(ROOT, 1 << 30, &[]),
+                Prune::Off,
+                vec![
+                    file(SAME, 6),
+                    file(EDITED, 12),
+                    file(TOUCHED, 6),
+                    file(z_new, 4),
+                    file(moved, 6),
+                    file(a_new, 3),
+                ],
+                stat_of,
+                inspect,
+                no_glob,
+            );
+            let m = result.unwrap();
+            let v = &m.value;
+            assert_eq!(moves(v), vec![(GONE, moved)]);
+            assert_eq!(v.relinked[0].resource.id, R4);
+            assert_eq!(paths(&v.added), vec![a_new, z_new]);
+            assert_eq!(ids(&v.refreshed), vec![R2, R3]);
+            assert_eq!(tally(&v.counts), [2, 2, 1, 0, 2, 0, 0, 0]);
+
+            // The oracle: `refresh --all`, `relink::explicit` and `add` of the registered files,
+            // on a copy, each with the same fakes.
+            let mut oracle = hali::storage::load(&fixture("refresh")).unwrap();
+            let refreshed = resource::refresh(&ctx(), &mut oracle, &Target::All, stat_of, |p| {
+                let f = facts_of(p).ok().unwrap();
+                Ok(resource::Seen::Hashed(resource::Hashed {
+                    byte_size: f.byte_size,
+                    modified: f.modified,
+                    sha256: f.sha256,
+                }))
+            })
+            .unwrap();
+            let relinked = relink::explicit(
+                &ctx(),
+                &mut oracle,
+                R4,
+                moved,
+                &resource::Hashed {
+                    byte_size: 6,
+                    modified: NEW.to_string(),
+                    sha256: SHA_HELLO.to_string(),
+                },
+                false,
+            )
+            .unwrap();
+            let added = resource::add_all(
+                &ctx(),
+                &mut oracle,
+                &[
+                    facts(a_new, 3, &sha(3), "text/plain"),
+                    facts(z_new, 4, &sha(4), "text/plain"),
+                ],
+                None,
+                &[],
+                &[],
+                "tester",
+            )
+            .unwrap();
+            let mut want: Vec<_> = refreshed
+                .changes
+                .into_iter()
+                .chain(relinked.changes)
+                .chain(added.changes)
+                .collect();
+            want.sort();
+            want.dedup();
+            assert_eq!(m.changes, want);
+            assert_eq!(
+                triples(&resources_ttl(&store)),
+                triples(&resources_ttl(&oracle))
+            );
+            assert_sorted(&m);
+        }
+
+        /// Row 6: Without prune nothing is forgotten, and `scan` is `scan_with` with `Prune::Off`.
+        #[test]
+        fn prune_off_forgets_nothing() {
+            let mut store = hali::storage::load(&fixture("forget")).unwrap();
+            let before = resources_ttl(&store);
+            let (result, _) = run(
+                &mut store,
+                &opts("/fixtures/forget", 1 << 30, &[]),
+                Prune::Off,
+                vec![],
+                |_| None,
+                |_| Err(Unhashable::Missing),
+                no_glob,
+            );
+            let m = result.unwrap();
+            assert!(m.changes.is_empty());
+            assert_eq!(resources_ttl(&store), before);
+            let v = &m.value;
+            assert!(v.pruned.is_empty());
+            assert_eq!(
+                paths(&v.missing),
+                vec![
+                    "/fixtures/forget/one.txt",
+                    "/fixtures/forget/three.txt",
+                    "/fixtures/forget/two.txt"
+                ]
+            );
+            assert_eq!(tally(&v.counts), [0, 0, 0, 0, 0, 3, 0, 0]);
+
+            let mut plain = hali::storage::load(&fixture("forget")).unwrap();
+            let old = scan::scan(
+                &ctx(),
+                &mut plain,
+                &opts("/fixtures/forget", 1 << 30, &[]),
+                Vec::<Walked>::new(),
+                |_| None,
+                |_: &str| Err(Unhashable::Missing),
+                no_glob,
+                |_, _| {},
+                "tester",
+            )
+            .unwrap();
+            assert_eq!(old.value, m.value);
+            assert_eq!(old.changes, m.changes);
+            assert_eq!(resources_ttl(&plain), before);
+        }
+
+        /// Row 7: With prune, the Missing Resources under the root are forgotten as `forget`
+        /// forgets them; a shared format node goes only when no Resource uses it; outside the
+        /// root nothing is pruned; no file is opened.
+        #[test]
+        fn prune_forgets_like_forget() {
+            let build = || {
+                let mut store = hali::storage::load(&fixture("forget")).unwrap();
+                catalog(&mut store, &[("/elsewhere/x.txt", 6, 77)]);
+                store
+            };
+            let options = opts("/fixtures/forget", 1 << 30, &[]);
+            let forgot = |store: &mut Store, id: &str, force: bool| {
+                resource::forget(&ctx(), store, id, force).unwrap()
+            };
+
+            // On: F3 relates to F2, so F2 keeps an inbound relation (from a Resource that is
+            // pruned too: it still blocks). F1 and F3 go; the format node stays, F2 uses it.
+            let mut store = build();
+            let (result, (stats, inspects)) = run(
+                &mut store,
+                &options,
+                Prune::On,
+                vec![],
+                |_| None,
+                |p| panic!("{p}: no file is opened to prune"),
+                no_glob,
+            );
+            let m = result.unwrap();
+            let mut oracle = build();
+            let one = forgot(&mut oracle, F1, false);
+            let three = forgot(&mut oracle, F3, false);
+            assert_eq!(resources_ttl(&store), resources_ttl(&oracle));
+            let v = &m.value;
+            assert_eq!(ids(&v.pruned), vec![F1, F3]);
+            assert_eq!(v.pruned[0], one.value);
+            assert_eq!(v.pruned[1], three.value);
+            assert_eq!(v.pruned[0].path, "/fixtures/forget/one.txt");
+            assert_eq!(ids(&v.missing), vec![F2], "F2 is kept, so still missing");
+            assert_eq!(tally(&v.counts), [0, 0, 0, 0, 0, 1, 2, 0]);
+            assert!(inspects.is_empty());
+            assert_eq!(
+                sorted(stats),
+                strings(&[
+                    "/fixtures/forget/one.txt",
+                    "/fixtures/forget/three.txt",
+                    "/fixtures/forget/two.txt"
+                ]),
+                "each Resource under the root once, none outside"
+            );
+            assert!(resources_ttl(&store).contains("text/x-forget"));
+            assert!(resources_ttl(&store).contains("file:///elsewhere/x.txt"));
+            let want: Vec<_> = {
+                let mut c: Vec<_> = one.changes.into_iter().chain(three.changes).collect();
+                c.sort();
+                c.dedup();
+                c
+            };
+            assert_eq!(m.changes, want);
+            assert!(m.changes.iter().all(|c| c.op == Op::Remove));
+            assert_sorted(&m);
+
+            // Forced: all three go; with the last user of the format node, the node goes too.
+            let mut store = build();
+            let (result, _) = run(
+                &mut store,
+                &options,
+                Prune::Forced,
+                vec![],
+                |_| None,
+                |p| panic!("{p}: no file is opened to prune"),
+                no_glob,
+            );
+            let m = result.unwrap();
+            let mut oracle = build();
+            forgot(&mut oracle, F3, false);
+            forgot(&mut oracle, F2, false);
+            forgot(&mut oracle, F1, false);
+            assert_eq!(resources_ttl(&store), resources_ttl(&oracle));
+            let v = &m.value;
+            assert_eq!(ids(&v.pruned), vec![F1, F3, F2], "in path order");
+            assert!(v.missing.is_empty());
+            assert_eq!(tally(&v.counts), [0, 0, 0, 0, 0, 0, 3, 0]);
+            assert!(!resources_ttl(&store).contains("text/x-forget"));
+            assert!(resources_ttl(&store).contains("file:///elsewhere/x.txt"));
+        }
+
+        /// Row 8: An inbound relation (in any graph, from a Resource that is pruned too) keeps a
+        /// Resource unless `Forced`, which removes it; one held only in extensions.ttl is
+        /// `SHACL_VIOLATION` under `Forced`, with nothing written.
+        #[test]
+        fn prune_skips_inbound_relations_unless_forced() {
+            // r1..r5: r1 is related to by r3 and r4, r2 by r1 and r4, r3 by r5 (extensions.ttl
+            // only), r4 and r5 by nobody.
+            let (r1, r2, r3, r4, r5) = (
+                "0192f0c4-0000-7000-8000-000000000701",
+                "0192f0c4-0000-7000-8000-000000000702",
+                "0192f0c4-0000-7000-8000-000000000703",
+                "0192f0c4-0000-7000-8000-000000000704",
+                "0192f0c4-0000-7000-8000-000000000705",
+            );
+            let load = || hali::storage::load(&fixture("relations")).unwrap();
+            let options = opts(RELATIONS, 1 << 30, &[]);
+            let all_missing = |_: &str| None;
+            let forgot = |store: &mut Store, id: &str, force: bool| {
+                resource::forget(&ctx(), store, id, force).unwrap();
+            };
+
+            // (a) Everything is Missing, On: r4 and r5 have no inbound relation and go; r1, r2
+            // and r3 are kept, though what relates to r1, r2 and r3 is pruned too.
+            let mut store = load();
+            let (result, _) = run(
+                &mut store,
+                &options,
+                Prune::On,
+                vec![],
+                all_missing,
+                |_| Err(Unhashable::Missing),
+                no_glob,
+            );
+            let m = result.unwrap();
+            let mut oracle = load();
+            forgot(&mut oracle, r4, false);
+            forgot(&mut oracle, r5, false);
+            assert_eq!(resources_ttl(&store), resources_ttl(&oracle));
+            let v = &m.value;
+            assert_eq!(ids(&v.pruned), vec![r4, r5]);
+            assert_eq!(ids(&v.missing), vec![r1, r2, r3]);
+            assert_eq!(tally(&v.counts), [0, 0, 0, 0, 0, 3, 2, 0]);
+
+            // (b) Forced while r5 is present: r3 is related to only by r5, in extensions.ttl,
+            // which `Forced` cannot remove: the store would not conform, nothing is written.
+            let mut store = load();
+            let before = resources_ttl(&store);
+            let (result, _) = run(
+                &mut store,
+                &options,
+                Prune::Forced,
+                vec![],
+                stat_in(&[("/fixtures/relations/r5.txt", 6)]),
+                |_| Err(Unhashable::Missing),
+                no_glob,
+            );
+            let err = result.expect_err("an extensions-only inbound relation");
+            assert_eq!(err.rule, "SHACL_VIOLATION");
+            assert_eq!(err.exit_code(), 1);
+            assert_eq!(resources_ttl(&store), before, "the store is untouched");
+
+            // (c) r3 and r5 are present, On: r4 goes; r1 (related to by the present r3) and r2
+            // (by r1, kept) stay.
+            const PRESENT: &[(&str, u64)] = &[
+                ("/fixtures/relations/r3.txt", 6),
+                ("/fixtures/relations/r5.txt", 6),
+            ];
+            let mut store = load();
+            let (result, _) = run(
+                &mut store,
+                &options,
+                Prune::On,
+                vec![],
+                stat_in(PRESENT),
+                |_| Err(Unhashable::Missing),
+                no_glob,
+            );
+            let m = result.unwrap();
+            let mut oracle = load();
+            forgot(&mut oracle, r4, false);
+            assert_eq!(resources_ttl(&store), resources_ttl(&oracle));
+            let v = &m.value;
+            assert_eq!(ids(&v.pruned), vec![r4]);
+            assert_eq!(ids(&v.missing), vec![r1, r2]);
+            assert_eq!(tally(&v.counts), [0, 0, 0, 0, 2, 2, 1, 0]);
+
+            // (d) The same, Forced: r1, r2 and r4 go, and the triples that point at r1 and r2
+            // are removed from resources.ttl; r3 and r5 stay.
+            let mut store = load();
+            let (result, _) = run(
+                &mut store,
+                &options,
+                Prune::Forced,
+                vec![],
+                stat_in(PRESENT),
+                |_| Err(Unhashable::Missing),
+                no_glob,
+            );
+            let m = result.unwrap();
+            let mut oracle = load();
+            forgot(&mut oracle, r1, true);
+            forgot(&mut oracle, r2, true);
+            forgot(&mut oracle, r4, true);
+            assert_eq!(resources_ttl(&store), resources_ttl(&oracle));
+            let v = &m.value;
+            assert_eq!(ids(&v.pruned), vec![r1, r2, r4]);
+            assert!(v.missing.is_empty());
+            assert_eq!(tally(&v.counts), [0, 0, 0, 0, 2, 0, 3, 0]);
+            let ttl = resources_ttl(&store);
+            assert!(ttl.contains(r3) && ttl.contains(r5));
+            for gone in [r1, r2, r4] {
+                assert!(!ttl.contains(gone), "{gone} is still in resources.ttl");
+            }
+        }
+
+        /// Row 9: One SHACL check over the refresh, the relink, the prune and the adds together: a
+        /// violation writes nothing and lists every Resource the final store has.
+        #[test]
+        fn one_shacl_check_with_moves_and_prune() {
+            let build = || {
+                let mut store = empty_store();
+                let records = catalog(
+                    &mut store,
+                    &[
+                        ("/r/a.txt", 5, 5), // moves
+                        ("/r/b.txt", 6, 6), // is refreshed
+                        ("/r/u.txt", 7, 7), // unchanged
+                        ("/r/c.txt", 8, 8), // is pruned
+                    ],
+                );
+                (store, records)
+            };
+            let entries = || {
+                vec![
+                    file("/r/b.txt", 9),
+                    file("/r/u.txt", 7),
+                    file("/r/d1.txt", 1),
+                    file("/r/d2.txt", 2),
+                    file("/r/m/a.txt", 5),
+                ]
+            };
+            let inspect = |p: &str| match p {
+                "/r/b.txt" => Ok(moved_facts(p, 9, 9)),
+                "/r/m/a.txt" => Ok(moved_facts(p, 5, 5)),
+                "/r/d1.txt" => Ok(facts(p, 1, &sha(1), "text/plain")),
+                "/r/d2.txt" => Ok(facts(p, 2, &sha(2), "text/plain")),
+                other => panic!("{other} must not be opened"),
+            };
+            // b.txt differs in size (Stale), u.txt is as recorded, a.txt and c.txt are gone.
+            let stat = |p: &str| match p {
+                "/r/b.txt" => Some((9, PINNED)),
+                "/r/u.txt" => Some((7, PINNED)),
+                _ => None,
+            };
+
+            // Without the extension shape the scenario goes through.
+            let (mut store, _) = build();
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::On,
+                entries(),
+                stat,
+                inspect,
+                no_glob,
+            );
+            let m = result.unwrap();
+            assert_eq!(tally(&m.value.counts), [2, 1, 1, 0, 1, 0, 1, 0]);
+
+            // With a shape every Resource violates: one check, over the final store.
+            let (mut store, records) = build();
+            let c = records[3].id.clone();
+            let shaped = hali::storage::load(&fixture("scan/needs-description")).unwrap();
+            let extension: Vec<Quad> = shaped
+                .iter()
+                .map(|q| q.unwrap())
+                .filter(|q| {
+                    matches!(&q.graph_name, oxigraph::model::GraphName::NamedNode(g)
+                        if g.as_str() == hali::storage::EXTENSIONS_GRAPH)
+                })
+                .collect();
+            assert!(!extension.is_empty());
+            for q in &extension {
+                store.insert(q).unwrap();
+            }
+            let before = resources_ttl(&store);
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::On,
+                entries(),
+                stat,
+                inspect,
+                no_glob,
+            );
+            let err = result.expect_err("the extension shape is violated");
+            assert_eq!(err.rule, "SHACL_VIOLATION");
+            assert_eq!(err.exit_code(), 1);
+            // a (relinked), b (refreshed), u, d1 and d2: five Resources in the final store, and
+            // not c, which the same mutation forgets.
+            assert_eq!(err.details["total"], 5);
+            let focus: BTreeSet<&str> = err.details["violations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v["focus_node"].as_str().unwrap())
+                .collect();
+            assert_eq!(focus.len(), 5, "{focus:?}");
+            assert!(
+                focus.iter().all(|f| !f.contains(&c)),
+                "c is pruned in the same mutation: {focus:?}"
+            );
+            assert_eq!(resources_ttl(&store), before, "the store is untouched");
+        }
+
+        /// The three new lists are capped at 100 and `truncated` covers each; the counts stay
+        /// exact; the order is the record's path (the new path for a relinked Resource).
+        #[test]
+        fn caps_cover_the_new_lists() {
+            let old: Vec<FileFacts> = (0..101)
+                .map(|i| facts(&format!("/r/old/f{i:03}.txt"), 2, &sha(i + 1), "text/plain"))
+                .collect();
+
+            // 101 relinked: the new paths run the other way round.
+            let mut store = empty_store();
+            catalog_facts(&mut store, &old);
+            let entries: Vec<Walked> = (0..101)
+                .map(|i| file(&format!("/r/new/g{:03}.txt", 100 - i), 2))
+                .collect();
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::Off,
+                entries,
+                |_| None,
+                |p| {
+                    let i: usize = 100 - p["/r/new/g".len()..][..3].parse::<usize>().unwrap();
+                    Ok(facts(p, 2, &sha(i + 1), "text/plain"))
+                },
+                no_glob,
+            );
+            let m = result.unwrap();
+            assert_eq!(m.value.counts.relinked, 101);
+            assert_eq!(m.value.relinked.len(), 100);
+            assert_eq!(
+                (
+                    m.value.relinked[0].resource.path.as_str(),
+                    m.value.relinked[0].from.as_str()
+                ),
+                ("/r/new/g000.txt", "/r/old/f100.txt")
+            );
+            assert_eq!(m.value.relinked[99].resource.path, "/r/new/g099.txt");
+            assert!(m.value.truncated);
+
+            // 101 ambiguous, two candidate files each.
+            let mut store = empty_store();
+            catalog_facts(&mut store, &old);
+            let entries: Vec<Walked> = (0..101)
+                .flat_map(|i| [format!("/r/x/{i:03}b.txt"), format!("/r/x/{i:03}a.txt")])
+                .map(|p| file(&p, 2))
+                .collect();
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::On,
+                entries,
+                |_| None,
+                |p| {
+                    let i: usize = p["/r/x/".len()..][..3].parse().unwrap();
+                    Ok(facts(p, 2, &sha(i + 1), "text/plain"))
+                },
+                no_glob,
+            );
+            let m = result.unwrap();
+            assert_eq!(m.value.counts.ambiguous, 101);
+            assert_eq!(m.value.counts.pruned, 0);
+            assert_eq!(m.value.ambiguous.len(), 100);
+            assert_eq!(m.value.ambiguous[0].resource.path, "/r/old/f000.txt");
+            assert_eq!(
+                m.value.ambiguous[0].candidates,
+                strings(&["/r/x/000a.txt", "/r/x/000b.txt"])
+            );
+            assert!(m.value.truncated);
+
+            // 101 pruned.
+            let mut store = empty_store();
+            catalog_facts(&mut store, &old);
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::On,
+                vec![],
+                |_| None,
+                |_| Err(Unhashable::Missing),
+                no_glob,
+            );
+            let m = result.unwrap();
+            assert_eq!(m.value.counts.pruned, 101);
+            assert_eq!(m.value.counts.missing, 0);
+            assert_eq!(m.value.pruned.len(), 100);
+            assert_eq!(m.value.pruned[0].path, "/r/old/f000.txt");
+            assert_eq!(m.value.pruned[99].path, "/r/old/f099.txt");
+            assert!(m.value.truncated);
+            assert!(!resources_ttl(&store).contains("/r/old/"));
+        }
+
+        /// Row 25: An ambiguous Resource is never pruned, not even with `Forced`; a plain
+        /// Missing one is.
+        #[test]
+        fn ambiguous_is_never_pruned_even_forced() {
+            let mut store = empty_store();
+            let records = catalog(&mut store, &[("/r/a.txt", 5, 5), ("/r/c.txt", 8, 8)]);
+            let a = records[0].id.clone();
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::Forced,
+                vec![file("/r/m1.txt", 5), file("/r/m2.txt", 5)],
+                |_| None,
+                |p| Ok(facts(p, 5, &sha(5), "text/plain")),
+                no_glob,
+            );
+            let m = result.unwrap();
+            let v = &m.value;
+            assert_eq!(v.ambiguous.len(), 1);
+            assert_eq!(v.ambiguous[0].resource.id, a);
+            assert_eq!(paths(&v.pruned), vec!["/r/c.txt"]);
+            assert_eq!(paths(&v.missing), vec!["/r/a.txt"]);
+            assert!(v.added.is_empty() && v.relinked.is_empty());
+            assert_eq!(tally(&v.counts), [0, 0, 0, 1, 0, 1, 1, 0]);
+            let ttl = resources_ttl(&store);
+            assert!(ttl.contains("file:///r/a.txt") && !ttl.contains("file:///r/c.txt"));
+        }
+
+        /// Row 27: `truncated` covers `ambiguous`: 101 ambiguous Resources outside the root, so
+        /// `missing` (under the root) is empty and no other list is long.
+        #[test]
+        fn truncated_covers_ambiguous() {
+            let old: Vec<FileFacts> = (0..101)
+                .map(|i| facts(&format!("/o/f{i:03}.txt"), 2, &sha(i + 1), "text/plain"))
+                .collect();
+            let mut store = empty_store();
+            catalog_facts(&mut store, &old);
+            let entries: Vec<Walked> = (0..101)
+                .flat_map(|i| [format!("/r/x/{i:03}b.txt"), format!("/r/x/{i:03}a.txt")])
+                .map(|p| file(&p, 2))
+                .collect();
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::Off,
+                entries,
+                |_| None,
+                |p| {
+                    let i: usize = p["/r/x/".len()..][..3].parse().unwrap();
+                    Ok(facts(p, 2, &sha(i + 1), "text/plain"))
+                },
+                no_glob,
+            );
+            let m = result.unwrap();
+            let v = &m.value;
+            assert_eq!(v.counts.ambiguous, 101);
+            assert_eq!(v.counts.missing, 0);
+            assert_eq!(v.ambiguous.len(), 100);
+            assert!(v.truncated);
+        }
+
+        /// Row 28a: A new file with the content of a present Resource and of one Missing
+        /// Resource relinks the Missing one, and is not registered.
+        #[test]
+        fn content_of_a_present_and_a_missing_resource_relinks() {
+            let mut store = empty_store();
+            let records = catalog(&mut store, &[("/r/p.txt", 5, 5), ("/r/q.txt", 5, 5)]);
+            let q = records[1].id.clone();
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::Off,
+                vec![file("/r/n.txt", 5), file("/r/p.txt", 5)],
+                stat_in(&[("/r/p.txt", 5)]),
+                |p| Ok(moved_facts(p, 5, 5)),
+                no_glob,
+            );
+            let m = result.unwrap();
+            let v = &m.value;
+            assert_eq!(moves(v), vec![("/r/q.txt", "/r/n.txt")]);
+            assert_eq!(v.relinked[0].resource.id, q);
+            assert!(v.added.is_empty() && v.ambiguous.is_empty() && v.missing.is_empty());
+            assert!(!resources_ttl(&store).contains("file:///r/q.txt"));
+        }
+
+        /// Row 28b: A pruned Resource's non-IANA format node, with a new file of the same
+        /// format added in the same run, keeps its `a dcterms:MediaType` triple.
+        #[test]
+        fn pruned_format_node_kept_when_an_added_file_uses_it() {
+            let mut store = empty_store();
+            catalog_facts(
+                &mut store,
+                &[facts("/r/old.txt", 5, &sha(5), "text/x-forget")],
+            );
+            assert!(resources_ttl(&store).contains("media-types/text/x-forget"));
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::On,
+                vec![file("/r/new.txt", 6)],
+                |_| None,
+                |p| Ok(facts(p, 6, &sha(6), "text/x-forget")),
+                no_glob,
+            );
+            let m = result.unwrap();
+            assert_eq!(paths(&m.value.pruned), vec!["/r/old.txt"]);
+            assert_eq!(paths(&m.value.added), vec!["/r/new.txt"]);
+            let ttl = resources_ttl(&store);
+            assert!(ttl.contains("media-types/text/x-forget> a dcterms:MediaType"));
+            assert!(
+                !m.changes
+                    .iter()
+                    .any(|c| c.op == Op::Remove && c.triple.contains("x-forget> <")),
+                "the type triple is put back, not removed: {:?}",
+                m.changes
+            );
+        }
+
+        /// Row 28c: Ambiguous Resources outside the root are listed in `ambiguous` and in
+        /// neither `missing` nor `pruned`, even forced.
+        #[test]
+        fn ambiguous_outside_the_root_is_only_ambiguous() {
+            let mut store = empty_store();
+            let records = catalog(&mut store, &[("/o/a.txt", 5, 5)]);
+            let a = records[0].id.clone();
+            let before = resources_ttl(&store);
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::Forced,
+                vec![file("/r/m1.txt", 5), file("/r/m2.txt", 5)],
+                |_| None,
+                |p| Ok(facts(p, 5, &sha(5), "text/plain")),
+                no_glob,
+            );
+            let m = result.unwrap();
+            let v = &m.value;
+            assert_eq!(v.ambiguous.len(), 1);
+            assert_eq!(v.ambiguous[0].resource.id, a);
+            assert!(v.missing.is_empty() && v.pruned.is_empty() && v.added.is_empty());
+            assert_eq!(tally(&v.counts), [0, 0, 0, 1, 0, 0, 0, 0]);
+            assert!(m.changes.is_empty());
+            assert_eq!(resources_ttl(&store), before);
+        }
     }
 }

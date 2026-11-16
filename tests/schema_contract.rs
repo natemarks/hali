@@ -255,8 +255,27 @@ mod goal {
         ("cli_relink__schema_list_json", "schema"),
     ];
 
+    /// Snapshots written or rewritten by the active goal (#24): hidden from a build without the
+    /// goal feature (the `scan` schema they name gains `relinked`, `ambiguous`, `pruned` and
+    /// the `counts` keys only when the goal is met; the first two exist already and are
+    /// rewritten with the new keys).
+    const GOAL_SNAPS_24: &[&str] = &[
+        "cli_dry_run__scan_dry_run_json",
+        "cli_dry_run__scan_prune_dry_run_json",
+        "cli_scan__prune_confirmation_required_json_envelope",
+        "cli_scan__scan_json",
+        "cli_scan__scan_moves_json",
+        "cli_scan__scan_prune_json",
+    ];
+
+    const GOAL_STDOUT_GOLDENS_24: &[(&str, &str)] = &[
+        ("cli_dry_run__scan_prune_dry_run_json", "scan"),
+        ("cli_scan__scan_moves_json", "scan"),
+        ("cli_scan__scan_prune_json", "scan"),
+    ];
+
     /// Every stdout snapshot's row.
-    #[allow(unused_mut)]
+    #[allow(unused_assignments, unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
         let mut rows = STDOUT_GOLDENS.to_vec();
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS);
@@ -270,6 +289,14 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_20);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_22);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_21);
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_24);
+        // The goldens #24 rewrites are hidden without the goal feature (see `goldens`), and so
+        // are their rows.
+        let mut hidden_24: &[&str] = GOAL_SNAPS_24;
+        {
+            hidden_24 = &[];
+        }
+        rows.retain(|(stem, _)| !hidden_24.contains(stem));
         rows
     }
 
@@ -329,6 +356,10 @@ mod goal {
         {
             pending_21 = &[];
         }
+        let mut pending_24: &[&str] = GOAL_SNAPS_24;
+        {
+            pending_24 = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -347,6 +378,7 @@ mod goal {
                 || pending_20.contains(&stem.as_str())
                 || pending_22.contains(&stem.as_str())
                 || pending_21.contains(&stem.as_str())
+                || pending_24.contains(&stem.as_str())
             {
                 continue;
             }
@@ -458,6 +490,7 @@ mod goal {
         assert!(goldens.len() >= 76, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 79, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 85, "found only {} goldens", goldens.len());
+        assert!(goldens.len() >= 89, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
                 .unwrap_or_else(|| panic!("golden `{}` is not mapped to a schema", g.stem));
@@ -520,6 +553,11 @@ mod goal {
             panic!("{stem}: a dry-run golden is named cli_dry_run__<command>_dry_run...")
         });
         let command = rest.split("_dry_run").next().unwrap();
+        // `cli_dry_run__scan_prune_dry_run_json` is the dry run of `scan --prune` (#24): the
+        // `scan` schema, not a command called `scan prune`.
+        if command == "scan_prune" {
+            return "scan".to_string();
+        }
         command.replace('_', " ")
     }
 
@@ -1815,8 +1853,10 @@ mod goal {
         }
     }
 
-    /// #22: what the `scan` schema accepts and refuses: a real branch and a dry-run branch, every
-    /// key required, `additionalProperties: false`, the six skip reasons, exact counts.
+    /// #22, #24: what the `scan` schema accepts and refuses: a real branch and a dry-run branch,
+    /// every key required, `additionalProperties: false`, the six skip reasons, exact counts
+    /// (eight keys), the `relinked`, `ambiguous` and `pruned` lists, 100 entries at most in each
+    /// list and 1 to 10 candidates.
     #[test]
     fn scan_schema_accepts_and_rejects() {
         let record = |id: &str, missing: bool| {
@@ -1826,11 +1866,17 @@ mod goal {
         };
         let real = || {
             json!({"schema_version": 1, "root": "/TMP/root",
-                "counts": {"added": 1, "refreshed": 1, "unchanged": 2, "missing": 1, "skipped": 1},
+                "counts": {"added": 1, "refreshed": 1, "relinked": 1, "ambiguous": 1,
+                    "unchanged": 2, "missing": 1, "pruned": 1, "skipped": 1},
                 "media_types": {"text/plain": 1},
                 "added": [record("0192f0c4-0000-7000-8000-000000000901", false)],
                 "refreshed": [record("0192f0c4-0000-7000-8000-000000000902", false)],
+                "relinked": [{"resource": record("0192f0c4-0000-7000-8000-000000000905", false),
+                    "from": "/TMP/root/old.txt"}],
+                "ambiguous": [{"resource": record("0192f0c4-0000-7000-8000-000000000906", true),
+                    "candidates": ["/TMP/root/x.txt", "/TMP/root/y.txt"]}],
                 "missing": [record("0192f0c4-0000-7000-8000-000000000904", true)],
+                "pruned": [record("0192f0c4-0000-7000-8000-000000000907", true)],
                 "skipped": [{"path": "/TMP/root/big.bin", "reason": "too_large"}],
                 "truncated": false})
         };
@@ -1861,6 +1907,30 @@ mod goal {
             v
         };
         let skipped_with = |entry: Value| with(real(), "skipped", json!([entry]));
+        let relinked_with = |entry: Value| with(real(), "relinked", json!([entry]));
+        let ambiguous_with = |entry: Value| with(real(), "ambiguous", json!([entry]));
+        let listed = |key: &str, n: usize| {
+            let one = match key {
+                "relinked" => {
+                    json!({"resource": record("0192f0c4-0000-7000-8000-000000000905", false),
+                    "from": "/TMP/root/old.txt"})
+                }
+                "ambiguous" => {
+                    json!({"resource": record("0192f0c4-0000-7000-8000-000000000906", true),
+                    "candidates": ["/TMP/root/x.txt"]})
+                }
+                "skipped" => json!({"path": "/p", "reason": "too_large"}),
+                _ => record("0192f0c4-0000-7000-8000-000000000901", false),
+            };
+            with(real(), key, Value::Array(vec![one; n]))
+        };
+        let candidates = |n: usize| {
+            let paths: Vec<String> = (0..n).map(|i| format!("/TMP/root/c{i:02}.txt")).collect();
+            ambiguous_with(
+                json!({"resource": record("0192f0c4-0000-7000-8000-000000000906", true),
+                "candidates": paths}),
+            )
+        };
         let v = validator("scan");
         let mut cases: Vec<(String, Value, bool)> = vec![
             ("real".into(), real(), true),
@@ -1873,11 +1943,117 @@ mod goal {
             (
                 "empty".into(),
                 json!({"schema_version": 1, "root": "/TMP/root",
-                    "counts": {"added": 0, "refreshed": 0, "unchanged": 0, "missing": 0,
-                        "skipped": 0},
-                    "media_types": {}, "added": [], "refreshed": [], "missing": [],
-                    "skipped": [], "truncated": false}),
+                    "counts": {"added": 0, "refreshed": 0, "relinked": 0, "ambiguous": 0,
+                        "unchanged": 0, "missing": 0, "pruned": 0, "skipped": 0},
+                    "media_types": {}, "added": [], "refreshed": [], "relinked": [],
+                    "ambiguous": [], "missing": [], "pruned": [], "skipped": [],
+                    "truncated": false}),
                 true,
+            ),
+            ("100 relinked".into(), listed("relinked", 100), true),
+            ("100 ambiguous".into(), listed("ambiguous", 100), true),
+            ("100 pruned".into(), listed("pruned", 100), true),
+            ("100 added".into(), listed("added", 100), true),
+            ("10 candidates".into(), candidates(10), true),
+            ("1 candidate".into(), candidates(1), true),
+            ("101 relinked".into(), listed("relinked", 101), false),
+            ("101 ambiguous".into(), listed("ambiguous", 101), false),
+            ("101 pruned".into(), listed("pruned", 101), false),
+            ("101 added".into(), listed("added", 101), false),
+            ("101 refreshed".into(), listed("refreshed", 101), false),
+            ("101 missing".into(), listed("missing", 101), false),
+            ("101 skipped".into(), listed("skipped", 101), false),
+            ("11 candidates".into(), candidates(11), false),
+            ("no candidates".into(), candidates(0), false),
+            (
+                "relinked entry".into(),
+                relinked_with(
+                    json!({"resource": record("0192f0c4-0000-7000-8000-000000000905", false),
+                    "from": "/TMP/root/old.txt"}),
+                ),
+                true,
+            ),
+            (
+                "relinked without from".into(),
+                relinked_with(
+                    json!({"resource": record("0192f0c4-0000-7000-8000-000000000905", false)}),
+                ),
+                false,
+            ),
+            (
+                "relinked without resource".into(),
+                relinked_with(json!({"from": "/TMP/root/old.txt"})),
+                false,
+            ),
+            (
+                "relinked extra key".into(),
+                relinked_with(
+                    json!({"resource": record("0192f0c4-0000-7000-8000-000000000905", false),
+                    "from": "/TMP/root/old.txt", "to": "/p"}),
+                ),
+                false,
+            ),
+            (
+                "relinked from a number".into(),
+                relinked_with(
+                    json!({"resource": record("0192f0c4-0000-7000-8000-000000000905", false),
+                    "from": 7}),
+                ),
+                false,
+            ),
+            (
+                "relinked is a record".into(),
+                with(
+                    real(),
+                    "relinked",
+                    json!([record("0192f0c4-0000-7000-8000-000000000905", false)]),
+                ),
+                false,
+            ),
+            (
+                "ambiguous without candidates".into(),
+                ambiguous_with(
+                    json!({"resource": record("0192f0c4-0000-7000-8000-000000000906", true)}),
+                ),
+                false,
+            ),
+            (
+                "ambiguous without resource".into(),
+                ambiguous_with(json!({"candidates": ["/p"]})),
+                false,
+            ),
+            (
+                "ambiguous extra key".into(),
+                ambiguous_with(
+                    json!({"resource": record("0192f0c4-0000-7000-8000-000000000906", true),
+                    "candidates": ["/p"], "total": 3}),
+                ),
+                false,
+            ),
+            (
+                "candidates not strings".into(),
+                ambiguous_with(
+                    json!({"resource": record("0192f0c4-0000-7000-8000-000000000906", true),
+                    "candidates": [1]}),
+                ),
+                false,
+            ),
+            (
+                "pruned is not records".into(),
+                with(real(), "pruned", json!(["x"])),
+                false,
+            ),
+            (
+                "pruned record minus stale".into(),
+                with(
+                    real(),
+                    "pruned",
+                    json!([without(
+                        record("0192f0c4-0000-7000-8000-000000000907", true),
+                        "stale"
+                    )]),
+                ),
+                false,
             ),
             (
                 "truncated".into(),
@@ -1911,13 +2087,25 @@ mod goal {
             "media_types",
             "added",
             "refreshed",
+            "relinked",
+            "ambiguous",
             "missing",
+            "pruned",
             "skipped",
             "truncated",
         ] {
             cases.push((format!("no {key}"), without(real(), key), false));
         }
-        for key in ["added", "refreshed", "unchanged", "missing", "skipped"] {
+        for key in [
+            "added",
+            "refreshed",
+            "relinked",
+            "ambiguous",
+            "unchanged",
+            "missing",
+            "pruned",
+            "skipped",
+        ] {
             cases.push((format!("no counts.{key}"), in_counts(key, None), false));
             cases.push((
                 format!("counts.{key} -1"),
@@ -1938,7 +2126,7 @@ mod goal {
         cases.extend([
             (
                 "counts extra key".to_string(),
-                in_counts("relinked", Some(json!(0))),
+                in_counts("total", Some(json!(0))),
                 false,
             ),
             (

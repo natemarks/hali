@@ -1,0 +1,5 @@
+---
+source: tests/cli_scan.rs
+expression: out.stdout
+---
+{"schema_version":1,"root":"/TMP/root","counts":{"added":0,"refreshed":0,"relinked":0,"ambiguous":0,"unchanged":1,"missing":1,"pruned":1,"skipped":0},"media_types":{},"added":[],"refreshed":[],"relinked":[],"ambiguous":[],"missing":[{"id":"018bcfe5-6801-7758-b5de-1c9756cebfc8","path":"/TMP/root/b.txt","title":"b","media_type":"text/plain","editable":true,"missing":true,"stale":false,"types":[],"tags":[],"byte_size":5,"modified":"2026-10-20T14:02:11Z"}],"pruned":[{"id":"018bcfe5-6801-710a-adec-89025cc1beeb","path":"/TMP/root/a.txt","title":"a","media_type":"text/plain","editable":true,"missing":true,"stale":false,"types":[],"tags":[],"byte_size":6,"modified":"2026-10-20T14:02:11Z"}],"skipped":[],"truncated":false}

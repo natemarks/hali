@@ -12,19 +12,50 @@
           "properties": {
             "added": {"type": "integer", "minimum": 0},
             "refreshed": {"type": "integer", "minimum": 0},
+            "relinked": {"type": "integer", "minimum": 0},
+            "ambiguous": {"type": "integer", "minimum": 0},
             "unchanged": {"type": "integer", "minimum": 0},
             "missing": {"type": "integer", "minimum": 0},
+            "pruned": {"type": "integer", "minimum": 0},
             "skipped": {"type": "integer", "minimum": 0}
           },
-          "required": ["added", "refreshed", "unchanged", "missing", "skipped"],
+          "required": ["added", "refreshed", "relinked", "ambiguous", "unchanged", "missing", "pruned", "skipped"],
           "additionalProperties": false
         },
         "media_types": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
-        "added": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
-        "refreshed": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
-        "missing": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+        "added": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "refreshed": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "relinked": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "resource": {"$ref": "#/$defs/resource"},
+              "from": {"type": "string"}
+            },
+            "required": ["resource", "from"],
+            "additionalProperties": false
+          }
+        },
+        "ambiguous": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "resource": {"$ref": "#/$defs/resource"},
+              "candidates": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "string"}}
+            },
+            "required": ["resource", "candidates"],
+            "additionalProperties": false
+          }
+        },
+        "missing": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "pruned": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
         "skipped": {
           "type": "array",
+          "maxItems": 100,
           "items": {
             "type": "object",
             "properties": {
@@ -37,7 +68,7 @@
         },
         "truncated": {"type": "boolean"}
       },
-      "required": ["schema_version", "root", "counts", "media_types", "added", "refreshed", "missing", "skipped", "truncated"],
+      "required": ["schema_version", "root", "counts", "media_types", "added", "refreshed", "relinked", "ambiguous", "missing", "pruned", "skipped", "truncated"],
       "additionalProperties": false
     },
     {
@@ -50,19 +81,50 @@
           "properties": {
             "added": {"type": "integer", "minimum": 0},
             "refreshed": {"type": "integer", "minimum": 0},
+            "relinked": {"type": "integer", "minimum": 0},
+            "ambiguous": {"type": "integer", "minimum": 0},
             "unchanged": {"type": "integer", "minimum": 0},
             "missing": {"type": "integer", "minimum": 0},
+            "pruned": {"type": "integer", "minimum": 0},
             "skipped": {"type": "integer", "minimum": 0}
           },
-          "required": ["added", "refreshed", "unchanged", "missing", "skipped"],
+          "required": ["added", "refreshed", "relinked", "ambiguous", "unchanged", "missing", "pruned", "skipped"],
           "additionalProperties": false
         },
         "media_types": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
-        "added": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
-        "refreshed": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
-        "missing": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+        "added": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "refreshed": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "relinked": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "resource": {"$ref": "#/$defs/resource"},
+              "from": {"type": "string"}
+            },
+            "required": ["resource", "from"],
+            "additionalProperties": false
+          }
+        },
+        "ambiguous": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "resource": {"$ref": "#/$defs/resource"},
+              "candidates": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "string"}}
+            },
+            "required": ["resource", "candidates"],
+            "additionalProperties": false
+          }
+        },
+        "missing": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "pruned": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
         "skipped": {
           "type": "array",
+          "maxItems": 100,
           "items": {
             "type": "object",
             "properties": {
@@ -77,7 +139,7 @@
         "dry_run": {"const": true},
         "changes": {"type": "array", "items": {"$ref": "#/$defs/change"}}
       },
-      "required": ["schema_version", "root", "counts", "media_types", "added", "refreshed", "missing", "skipped", "truncated", "dry_run", "changes"],
+      "required": ["schema_version", "root", "counts", "media_types", "added", "refreshed", "relinked", "ambiguous", "missing", "pruned", "skipped", "truncated", "dry_run", "changes"],
       "additionalProperties": false
     }
   ]

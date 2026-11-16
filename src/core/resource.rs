@@ -381,7 +381,7 @@ pub fn check_moves(
 }
 
 /// The Resources that record this byte size and SHA-256.
-fn with_content(store: &Store, byte_size: u64, sha256: &str) -> Vec<NamedNode> {
+pub(crate) fn with_content(store: &Store, byte_size: u64, sha256: &str) -> Vec<NamedNode> {
     let value = Literal::new_typed_literal(sha256, xsd::HEX_BINARY);
     subjects(store, spdx::CHECKSUM_VALUE, value.as_ref().into())
         .iter()
@@ -665,23 +665,7 @@ pub fn forget(
     let resource = known(store, id)?;
     let was = record(ctx, store, &resource);
     if !force {
-        let kinds = relation::kinds(store);
-        let inbound: HashSet<(NamedNode, NamedNode)> = store
-            .quads_for_pattern(None, None, Some(resource.as_ref().into()), None)
-            .filter_map(|q| {
-                let q = q.expect("reading the in-memory store");
-                match q.subject {
-                    NamedOrBlankNode::NamedNode(s)
-                        if s != resource
-                            && kinds.contains(&q.predicate)
-                            && is_resource(store, &s) =>
-                    {
-                        Some((s, q.predicate))
-                    }
-                    _ => None,
-                }
-            })
-            .collect();
+        let inbound = inbound(store, &resource);
         if !inbound.is_empty() {
             let from: HashSet<&NamedNode> = inbound.iter().map(|(s, _)| s).collect();
             return Err(Error::forget_blocked_by_relations(
@@ -691,6 +675,45 @@ pub fn forget(
             ));
         }
     }
+    let removed = forget_quads(store, &resource, &HashSet::from([resource.clone()]));
+
+    validate::guard(store, &[], &removed)?;
+    let changes = apply(store, &[], &removed);
+    Ok(Mutation {
+        value: was,
+        changes,
+    })
+}
+
+/// The relations other Resources hold to `resource`, in any graph: (subject, relation kind).
+pub(crate) fn inbound(store: &Store, resource: &NamedNode) -> HashSet<(NamedNode, NamedNode)> {
+    let kinds = relation::kinds(store);
+    store
+        .quads_for_pattern(None, None, Some(resource.as_ref().into()), None)
+        .filter_map(|q| {
+            let q = q.expect("reading the in-memory store");
+            match q.subject {
+                NamedOrBlankNode::NamedNode(s)
+                    if s != *resource && kinds.contains(&q.predicate) && is_resource(store, &s) =>
+                {
+                    Some((s, q.predicate))
+                }
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+/// The quads, in resources.ttl only, that forgetting `resource` removes: the Resource, its own
+/// checksum node, every catalog record, every triple that points at it, and the `a
+/// dcterms:MediaType` triple of its non-IANA format when no Resource outside `leaving` (the
+/// Resources forgotten in the same mutation, `resource` among them) uses that format. Sorted,
+/// without duplicates.
+pub(crate) fn forget_quads(
+    store: &Store,
+    resource: &NamedNode,
+    leaving: &HashSet<NamedNode>,
+) -> Vec<Quad> {
     let graph = File::Resources.graph();
     let quads_of = |s: Option<&NamedNode>, o: Option<TermRef<'_>>| -> Vec<Quad> {
         store
@@ -704,23 +727,23 @@ pub fn forget(
             .collect()
     };
 
-    let mut removed = quads_of(Some(&resource), None);
+    let mut removed = quads_of(Some(resource), None);
     // Only the Resource's own checksum node goes; a link to any other node is just a triple of
     // the Resource.
-    let own_node = checksum_node(&resource);
-    if has(store, &resource, spdx::CHECKSUM, own_node.as_ref().into()) {
+    let own_node = checksum_node(resource);
+    if has(store, resource, spdx::CHECKSUM, own_node.as_ref().into()) {
         removed.extend(quads_of(Some(&own_node), None));
     }
-    for c in catalog_records_of(store, &resource) {
+    for c in catalog_records_of(store, resource) {
         removed.extend(quads_of(Some(&c), None));
     }
     removed.extend(quads_of(None, Some(resource.as_ref().into())));
-    let format = first_iri(store, &resource, dcterms::FORMAT)
+    let format = first_iri(store, resource, dcterms::FORMAT)
         .filter(|f| f.as_str().starts_with(HALI_MEDIA_TYPES));
     if let Some(format) = format {
         let shared = subjects(store, dcterms::FORMAT, format.as_ref().into())
             .into_iter()
-            .any(|r| r != resource && is_resource(store, &r));
+            .any(|r| !leaving.contains(&r) && is_resource(store, &r));
         if !shared {
             removed.extend(
                 store
@@ -736,13 +759,7 @@ pub fn forget(
     }
     removed.sort_by_cached_key(ToString::to_string);
     removed.dedup();
-
-    validate::guard(store, &[], &removed)?;
-    let changes = apply(store, &[], &removed);
-    Ok(Mutation {
-        value: was,
-        changes,
-    })
+    removed
 }
 
 /// Which Resources `refresh` considers.
@@ -945,6 +962,18 @@ pub fn parse_media_pattern(pattern: &str) -> Result<MediaPattern, Error> {
         type_: type_.to_ascii_lowercase(),
         subtype,
     })
+}
+
+impl std::fmt::Display for MediaPattern {
+    /// `type/subtype` or `type/*`, lowercase.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}/{}",
+            self.type_,
+            self.subtype.as_deref().unwrap_or("*")
+        )
+    }
 }
 
 impl MediaPattern {

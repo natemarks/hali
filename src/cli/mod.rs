@@ -129,6 +129,12 @@ enum Command {
         /// Register only new files of this media type: `type/subtype` or `type/*` (repeatable)
         #[arg(long = "media-type", value_name = "TYPE", value_parser = parse_media_pattern)]
         media_types: Vec<resource::MediaPattern>,
+        /// Forget the Missing Resources under the root (asks first; files are never touched)
+        #[arg(long)]
+        prune: bool,
+        /// With --prune: forget them even when other Resources relate to them, removing those relations too
+        #[arg(long)]
+        force: bool,
     },
     /// Relate Resource A to Resource B by a relation kind; only this direction is stored
     Relate {
@@ -628,6 +634,16 @@ fn show_schema(cli: &Cli, words: &[String]) -> ExitCode {
 }
 
 fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), Error> {
+    if let Command::Scan {
+        prune: false,
+        force: true,
+        ..
+    } = &cli.command
+    {
+        return Err(Error::usage(
+            "--force is for --prune; a scan without --prune forgets nothing",
+        ));
+    }
     let config_path = paths::config_file(env).ok();
     let config = match &config_path {
         Some(path) => match storage::read_text(path) {
@@ -1385,6 +1401,8 @@ fn scan(
         excludes,
         max_size,
         media_types,
+        prune,
+        force,
     } = &cli.command
     else {
         unreachable!("only called for scan");
@@ -1447,10 +1465,16 @@ fn scan(
         media_types: media_types.clone(),
     };
     let user = core::config::user_name(config, env);
-    let result = core::scan::scan(
+    let pruning = match (*prune, *force) {
+        (false, _) => core::scan::Prune::Off,
+        (true, false) => core::scan::Prune::On,
+        (true, true) => core::scan::Prune::Forced,
+    };
+    let result = core::scan::scan_with(
         ctx,
         &mut store,
         &options,
+        pruning,
         entries,
         |p| storage::stat(Path::new(p)),
         |p| {
@@ -1477,7 +1501,10 @@ fn scan(
         .added
         .iter_mut()
         .chain(&mut v.refreshed)
+        .chain(v.relinked.iter_mut().map(|r| &mut r.resource))
+        .chain(v.ambiguous.iter_mut().map(|a| &mut a.resource))
         .chain(&mut v.missing)
+        .chain(&mut v.pruned)
     {
         observe(record);
     }
@@ -1494,8 +1521,11 @@ fn scan(
         for (name, n) in [
             ("added", c.added),
             ("refreshed", c.refreshed),
+            ("relinked", c.relinked),
+            ("ambiguous", c.ambiguous),
             ("unchanged", c.unchanged),
             ("missing", c.missing),
+            ("pruned", c.pruned),
             ("skipped", c.skipped),
         ] {
             println!("{name}\t{n}");
@@ -1503,10 +1533,10 @@ fn scan(
         for (media, n) in &v.media_types {
             println!("media_type\t{}\t{n}", printable(media));
         }
-        let [add, refresh] = if cli.dry_run {
-            ["would add", "would refresh"]
+        let [add, refresh, forget] = if cli.dry_run {
+            ["would add", "would refresh", "would forget"]
         } else {
-            ["added", "refreshed"]
+            ["added", "refreshed", "forgot"]
         };
         for r in &v.added {
             println!("{add} resource {}", describe_record(r));
@@ -1514,8 +1544,24 @@ fn scan(
         for r in &v.refreshed {
             println!("{refresh} resource {}", describe_record(r));
         }
+        for r in &v.relinked {
+            println!(
+                "{} {}",
+                relink_verb(cli),
+                describe_move(&r.resource, &r.from)
+            );
+        }
+        for a in &v.ambiguous {
+            println!("ambiguous resource {}", describe_record(&a.resource));
+            for c in &a.candidates {
+                println!("candidate {}", printable(c));
+            }
+        }
         for r in &v.missing {
             println!("missing resource {}", describe_record(r));
+        }
+        for r in &v.pruned {
+            println!("{forget} resource {}", describe_record(r));
         }
         for s in &v.skipped {
             println!("skipped {} {}", s.reason, printable(&s.path));
@@ -1524,6 +1570,42 @@ fn scan(
             println!("truncated\ttrue");
         }
     };
+    // Only a scan that would forget something asks; the retry repeats the flags given.
+    let confirmation = (done.value.counts.pruned > 0).then(|| {
+        let mut retry = format!("hali scan {}", core::shell_quote(&root));
+        if *include_hidden {
+            retry.push_str(" --include-hidden");
+        }
+        if *no_ignore {
+            retry.push_str(" --no-ignore");
+        }
+        for glob in excludes {
+            retry.push_str(&format!(" --exclude={}", core::shell_quote(glob)));
+        }
+        if let Some(bytes) = max_size {
+            retry.push_str(&format!(" --max-size={bytes}"));
+        }
+        for pattern in media_types {
+            retry.push_str(&format!(
+                " --media-type={}",
+                core::shell_quote(&pattern.to_string())
+            ));
+        }
+        retry.push_str(" --prune");
+        if *force {
+            retry.push_str(" --force");
+        }
+        retry.push_str(" --yes");
+        Confirmation {
+            command: "scan",
+            question: format!(
+                "forget {} missing resources under {}",
+                done.value.counts.pruned,
+                printable(&root)
+            ),
+            retry,
+        }
+    });
     mutated(
         cli,
         &dir,
@@ -1532,7 +1614,7 @@ fn scan(
         output,
         &done.changes,
         text,
-        None,
+        confirmation.as_ref(),
     )
 }
 

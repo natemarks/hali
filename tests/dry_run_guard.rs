@@ -41,8 +41,8 @@ const CASES: &[(&str, &str, &[&str])] = &[
     ("relation remove", "relations", &["relation", "remove", "excerptOf"]),
     // A root that exists in every checkout; a search never asks, so no --yes.
     ("relink", "store", &["relink", "--root", "src/ontology"]),
-    // A root that exists in every checkout; scan never asks, so no --yes.
-    ("scan", "store", &["scan", "src/ontology"]),
+    // A root that exists in every checkout; a dry run never asks, so no --yes, even with --prune.
+    ("scan", "store", &["scan", "src/ontology", "--prune", "--force"]),
     ("schema", "store", &["schema"]),
     ("show", "store", &["show", STORED]),
     ("type add", "store", &["type", "add", "GuardProbe"]),

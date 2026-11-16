@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 const MAX_LISTED: usize = 100;
 
 /// At most this many candidates are listed for an ambiguous Resource.
-const MAX_CANDIDATES: usize = 10;
+pub(crate) const MAX_CANDIDATES: usize = 10;
 
 /// How many Resources a search relinked, left ambiguous and left unmatched; always exact.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -301,7 +301,7 @@ pub fn explicit(
 
 /// The quads that record `resource` at `path` with the mtime `modified`: its `dcat:downloadURL`
 /// and `dcterms:modified` replaced.
-fn moved(
+pub(crate) fn moved(
     store: &Store,
     resource: &NamedNode,
     path: &str,
