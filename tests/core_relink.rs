@@ -291,7 +291,7 @@ mod goal {
 
     /// `stat` for the refresh fixture where the files named in `missing` are gone.
     fn all_but(missing: &'static [&'static str]) -> impl Fn(&str) -> Option<(u64, i64)> {
-        move |path: &str| (!missing.iter().any(|m| *m == path)).then_some((6, PINNED))
+        move |path: &str| (!missing.contains(&path)).then_some((6, PINNED))
     }
 
     /// Every file of six bytes hashes to "hello\n".
@@ -1143,12 +1143,12 @@ mod goal {
                 new_file("/new/a.txt", 12, &sha(99)),
                 new_file("/new/b.txt", 12, &sha(1)),
             ],
-            &stat,
+            stat,
         )
         .unwrap();
         assert!(stats.borrow().is_empty(), "{:?}", stats.borrow());
         // The content of R2 only: R2 alone is stat-ed.
-        let err = resource::check_moves(&store, &[new_file("/new/c.txt", 12, &sha(2))], &stat)
+        let err = resource::check_moves(&store, &[new_file("/new/c.txt", 12, &sha(2))], stat)
             .expect_err("R2's content");
         assert_eq!(err.rule, "POSSIBLE_MOVE");
         assert_eq!(*stats.borrow(), ["/gen/old/r2.txt"]);
