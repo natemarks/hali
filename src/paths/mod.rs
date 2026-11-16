@@ -24,6 +24,12 @@ pub fn config_file(env: impl Fn(&str) -> Option<String>) -> Result<PathBuf, Unre
     xdg_dir(&env, "XDG_CONFIG_HOME", ".config").map(|base| base.join("hali/config.toml"))
 }
 
+/// The state dir, where the remembered Scan roots live: `$XDG_STATE_HOME/hali`, else
+/// `$HOME/.local/state/hali`. Empty values, and a relative `XDG_STATE_HOME`, are ignored.
+pub fn state_dir(env: impl Fn(&str) -> Option<String>) -> Result<PathBuf, Unresolved> {
+    xdg_dir(&env, "XDG_STATE_HOME", ".local/state").map(|base| base.join("hali"))
+}
+
 /// The most bytes of `user-dirs.dirs` read: it holds a few short lines.
 const MAX_USER_DIRS: u64 = 64 * 1024;
 

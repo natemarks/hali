@@ -7,6 +7,7 @@ pub mod describe;
 pub mod relation;
 pub mod relink;
 pub mod resource;
+pub mod roots;
 pub mod scan;
 pub mod schema;
 pub mod types;
@@ -479,6 +480,32 @@ impl Error {
             json!({"path": path.map(|p| p.display().to_string())}),
         )
         .fix("Check that the data dir is a directory you can read and write.")
+    }
+
+    /// The state dir (spec §4) cannot be resolved from the environment.
+    pub fn state_dir_unresolved() -> Error {
+        Error::new(
+            "STORE_IO",
+            3,
+            "cannot locate the state dir: set XDG_STATE_HOME or HOME".to_string(),
+            json!({"path": null}),
+        )
+        .fix("Set XDG_STATE_HOME or HOME to a directory you can read and write.")
+    }
+
+    /// The remembered Scan roots file is not a valid `roots.json`. The message never quotes
+    /// the file.
+    pub fn roots_unparseable(path: &Path) -> Error {
+        let file = path.display().to_string();
+        Error::new(
+            "STORE_UNPARSEABLE",
+            3,
+            format!("{file} is not a valid list of remembered scan roots"),
+            json!({"file": file}),
+        )
+        .fix(&format!(
+            "Fix or delete {file}; deleting it forgets every remembered scan root, not the Resources."
+        ))
     }
 
     /// A store file is not valid Turtle. The message never quotes the file.

@@ -111,9 +111,16 @@ enum Command {
     },
     /// Register the files under a directory, refresh changed ones and report vanished ones
     Scan {
-        /// The Scan root: a directory (symlinks are resolved to the real path)
+        /// The Scan root: a directory (symlinks are resolved to the real path); without it,
+        /// every remembered root with its own settings
         #[arg(value_name = "ROOT")]
-        root: OsString,
+        root: Option<OsString>,
+        /// List the remembered Scan roots and their settings
+        #[arg(long)]
+        list: bool,
+        /// Stop remembering this Scan root; its Resources stay cataloged
+        #[arg(long, value_name = "ROOT")]
+        forget_root: Option<OsString>,
         /// Walk hidden files and directories too
         #[arg(long)]
         include_hidden: bool,
@@ -634,15 +641,8 @@ fn show_schema(cli: &Cli, words: &[String]) -> ExitCode {
 }
 
 fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), Error> {
-    if let Command::Scan {
-        prune: false,
-        force: true,
-        ..
-    } = &cli.command
-    {
-        return Err(Error::usage(
-            "--force is for --prune; a scan without --prune forgets nothing",
-        ));
+    if let Command::Scan { .. } = &cli.command {
+        scan_usage(&cli.command)?;
     }
     let config_path = paths::config_file(env).ok();
     let config = match &config_path {
@@ -1381,12 +1381,93 @@ fn file_facts(real: String, found: storage::Inspected) -> FileFacts {
     }
 }
 
+/// The usage errors of `hali scan` (spec §9.1 **Scan:**), before the config, the state and the
+/// store are read: `--list` and `--forget-root` stand alone, the scan flags need a root, and
+/// `--force` needs `--prune`.
+fn scan_usage(command: &Command) -> Result<(), Error> {
+    let Command::Scan {
+        root,
+        list,
+        forget_root,
+        include_hidden,
+        no_ignore,
+        excludes,
+        max_size,
+        media_types,
+        prune,
+        force,
+    } = command
+    else {
+        unreachable!("only called for scan");
+    };
+    let flags: Vec<&str> = [
+        ("--include-hidden", *include_hidden),
+        ("--no-ignore", *no_ignore),
+        ("--exclude", !excludes.is_empty()),
+        ("--max-size", max_size.is_some()),
+        ("--media-type", !media_types.is_empty()),
+    ]
+    .into_iter()
+    .filter_map(|(flag, given)| given.then_some(flag))
+    .collect();
+    let mut others: Vec<&str> = Vec::new();
+    if root.is_some() {
+        others.push("a root");
+    }
+    if *prune {
+        others.push("--prune");
+    }
+    if *force {
+        others.push("--force");
+    }
+    others.extend(&flags);
+    if *list {
+        if forget_root.is_some() {
+            others.push("--forget-root");
+        }
+        if !others.is_empty() {
+            return Err(Error::usage(&format!(
+                "--list takes no other argument; it was given {}",
+                others.join(", ")
+            )));
+        }
+    } else if forget_root.is_some() {
+        if !others.is_empty() {
+            return Err(Error::usage(&format!(
+                "--forget-root takes one root and no other argument; it was given {}",
+                others.join(", ")
+            )));
+        }
+    } else if root.is_none()
+        && let Some(flag) = flags.first()
+    {
+        return Err(Error::usage(&format!(
+            "{flag} needs a scan root; a bare scan uses the settings each root was remembered with"
+        )));
+    } else if *force && !*prune {
+        return Err(Error::usage(
+            "--force is for --prune; a scan without --prune forgets nothing",
+        ));
+    }
+    Ok(())
+}
+
+/// The state dir (spec §4), and the remembered Scan roots in it: none when the file is missing.
+fn remembered_roots() -> Result<(std::path::PathBuf, Vec<core::roots::RootEntry>), Error> {
+    let state = paths::state_dir(env).map_err(|_| Error::state_dir_unresolved())?;
+    let roots = match storage::state::read_roots(&state)? {
+        None => Vec::new(),
+        Some(text) => core::roots::parse(&text)
+            .map_err(|_| Error::roots_unparseable(&state.join(storage::state::ROOTS_FILE)))?,
+    };
+    Ok((state, roots))
+}
+
 /// The size limit of new files when neither `--max-size` nor `[scan] max_size` sets one: 1 GiB.
 const DEFAULT_MAX_SIZE: u64 = 1 << 30;
 
-/// `hali scan` (spec §9.1 **Scan:**). Checks come in this order: the config's excludes
-/// (`CONFIG_INVALID`), the `--exclude` globs, the root (data dir refused), the store; then the
-/// walk, eagerly and on this thread, then hashing, one SHACL check and the write.
+/// `hali scan` (spec §9.1 **Scan:**): `--list`, `--forget-root`, a scan of one root, or a bare
+/// scan of every remembered root. Its usage errors were checked by `scan_usage`.
 fn scan(
     cli: &Cli,
     ctx: &Context,
@@ -1396,6 +1477,217 @@ fn scan(
     use storage::walk::WalkOptions;
     let Command::Scan {
         root,
+        list,
+        forget_root,
+        ..
+    } = &cli.command
+    else {
+        unreachable!("only called for scan");
+    };
+    if *list {
+        return scan_list(cli);
+    }
+    if let Some(arg) = forget_root {
+        return scan_forget_root(cli, arg);
+    }
+    if WalkOptions::new(false, false, config.scan.exclude.clone(), Vec::new()).is_err() {
+        return Err(Error::config_invalid(
+            config_path.unwrap_or(Path::new("config.toml")),
+            "[scan] exclude has a pattern that is not a gitignore glob, or starts with !",
+        ));
+    }
+    match root {
+        Some(root) => scan_one(cli, ctx, config, root),
+        None => scan_remembered(cli, ctx, config),
+    }
+}
+
+/// `hali scan --list`: the remembered Scan roots, read-only.
+fn scan_list(cli: &Cli) -> Result<(), Error> {
+    let (_, roots) = remembered_roots()?;
+    if cli.json {
+        print_json(&RootListOutput {
+            schema_version: SCHEMA_VERSION,
+            roots: &roots,
+        });
+        return Ok(());
+    }
+    for entry in &roots {
+        let mut line = printable(&entry.root);
+        if entry.include_hidden {
+            line.push_str("\t--include-hidden");
+        }
+        if entry.no_ignore {
+            line.push_str("\t--no-ignore");
+        }
+        for glob in &entry.exclude {
+            line.push_str(&format!("\t--exclude={}", printable(glob)));
+        }
+        if let Some(bytes) = entry.max_size {
+            line.push_str(&format!("\t--max-size={bytes}"));
+        }
+        for pattern in &entry.media_types {
+            line.push_str(&format!("\t--media-type={}", printable(pattern)));
+        }
+        println!("{line}");
+    }
+    Ok(())
+}
+
+/// `hali scan --forget-root <root>`: stops remembering a root, matched on its real path if it
+/// resolves, else on the argument made absolute. Only `roots.json` changes; it never asks.
+fn scan_forget_root(cli: &Cli, arg: &OsString) -> Result<(), Error> {
+    let (state, roots) = remembered_roots()?;
+    let unknown = || {
+        Error::usage(&format!(
+            "{} is not a remembered scan root; see hali scan --list",
+            arg.to_string_lossy()
+        ))
+    };
+    let path = arg.to_str().and_then(paths::ref_path).ok_or_else(unknown)?;
+    let (rest, gone) = core::roots::forget(roots, &path).ok_or_else(unknown)?;
+    let output = ForgotRootOutput {
+        schema_version: SCHEMA_VERSION,
+        root: &gone,
+    };
+    if cli.dry_run {
+        if cli.json {
+            print_json(&DryRunOutput {
+                payload: output,
+                dry_run: true,
+                changes: &[],
+            });
+        } else {
+            println!("would forget root {}", printable(&gone.root));
+            print_changes(&[]);
+        }
+        return Ok(());
+    }
+    storage::state::write_roots(&state, &core::roots::serialise(&rest))?;
+    if cli.json {
+        print_json(&output);
+    } else {
+        println!("forgot root {}", printable(&gone.root));
+    }
+    Ok(())
+}
+
+/// The walker options of one root: the config's excludes and `include_hidden` merged with the
+/// flags, and `prune` never entered. `Err` names an exclude that is not a valid glob.
+fn walk_options(
+    config: &core::config::Config,
+    include_hidden: bool,
+    no_ignore: bool,
+    excludes: &[String],
+    prune: &[std::path::PathBuf],
+) -> Result<storage::walk::WalkOptions, String> {
+    let mut all_excludes = config.scan.exclude.clone();
+    all_excludes.extend(excludes.iter().cloned());
+    storage::walk::WalkOptions::new(
+        include_hidden || config.scan.include_hidden,
+        no_ignore,
+        all_excludes,
+        prune.to_vec(),
+    )
+}
+
+/// Hashes a file for a scan, as `core::scan` wants it.
+fn scan_inspect(p: &str) -> Result<FileFacts, core::scan::Unhashable> {
+    use core::scan::Unhashable;
+    storage::inspect(Path::new(p))
+        .map(|found| file_facts(p.to_string(), found))
+        .map_err(|e| match e {
+            storage::InspectError::Missing => Unhashable::Missing,
+            // `inspect` has no limit, so it is never TooLarge.
+            storage::InspectError::Directory
+            | storage::InspectError::Other
+            | storage::InspectError::TooLarge => Unhashable::NotRegular,
+            storage::InspectError::Unreadable => Unhashable::Unreadable,
+        })
+}
+
+/// Observes every record of a scan's outcome after the change.
+fn observe_scanned(v: &mut core::scan::Scanned) {
+    for record in v
+        .added
+        .iter_mut()
+        .chain(&mut v.refreshed)
+        .chain(v.relinked.iter_mut().map(|r| &mut r.resource))
+        .chain(v.ambiguous.iter_mut().map(|a| &mut a.resource))
+        .chain(&mut v.missing)
+        .chain(&mut v.pruned)
+    {
+        observe(record);
+    }
+}
+
+/// The text of a scan after its root lines: the counts, then the lists.
+fn print_scanned(cli: &Cli, v: &core::scan::Scanned) {
+    let c = &v.counts;
+    for (name, n) in [
+        ("added", c.added),
+        ("refreshed", c.refreshed),
+        ("relinked", c.relinked),
+        ("ambiguous", c.ambiguous),
+        ("unchanged", c.unchanged),
+        ("missing", c.missing),
+        ("pruned", c.pruned),
+        ("skipped", c.skipped),
+    ] {
+        println!("{name}\t{n}");
+    }
+    for (media, n) in &v.media_types {
+        println!("media_type\t{}\t{n}", printable(media));
+    }
+    let [add, refresh, forget] = if cli.dry_run {
+        ["would add", "would refresh", "would forget"]
+    } else {
+        ["added", "refreshed", "forgot"]
+    };
+    for r in &v.added {
+        println!("{add} resource {}", describe_record(r));
+    }
+    for r in &v.refreshed {
+        println!("{refresh} resource {}", describe_record(r));
+    }
+    for r in &v.relinked {
+        println!(
+            "{} {}",
+            relink_verb(cli),
+            describe_move(&r.resource, &r.from)
+        );
+    }
+    for a in &v.ambiguous {
+        println!("ambiguous resource {}", describe_record(&a.resource));
+        for c in &a.candidates {
+            println!("candidate {}", printable(c));
+        }
+    }
+    for r in &v.missing {
+        println!("missing resource {}", describe_record(r));
+    }
+    for r in &v.pruned {
+        println!("{forget} resource {}", describe_record(r));
+    }
+    for s in &v.skipped {
+        println!("skipped {} {}", s.reason, printable(&s.path));
+    }
+    if v.truncated {
+        println!("truncated\ttrue");
+    }
+}
+
+/// `hali scan <root>`. Checks come in this order: the `--exclude` globs, the root (data dir
+/// refused), the state, the store; then the walk, eagerly and on this thread, then hashing,
+/// one SHACL check and the write; then the root is remembered with the flags given.
+fn scan_one(
+    cli: &Cli,
+    ctx: &Context,
+    config: &core::config::Config,
+    root: &OsString,
+) -> Result<(), Error> {
+    use storage::walk::WalkOptions;
+    let Command::Scan {
         include_hidden,
         no_ignore,
         excludes,
@@ -1403,31 +1695,19 @@ fn scan(
         media_types,
         prune,
         force,
+        ..
     } = &cli.command
     else {
         unreachable!("only called for scan");
     };
-    if WalkOptions::new(false, false, config.scan.exclude.clone(), Vec::new()).is_err() {
-        return Err(Error::config_invalid(
-            config_path.unwrap_or(Path::new("config.toml")),
-            "[scan] exclude has a pattern that is not a gitignore glob, or starts with !",
-        ));
-    }
-    let mut all_excludes = config.scan.exclude.clone();
-    all_excludes.extend(excludes.iter().cloned());
     let bad_exclude = |pattern: String| {
         Error::usage(&format!(
             "invalid --exclude pattern {pattern:?}: give a gitignore glob that does not start with !"
         ))
     };
     WalkOptions::new(false, false, excludes.clone(), Vec::new()).map_err(bad_exclude)?;
-    let mut walk_options = WalkOptions::new(
-        *include_hidden || config.scan.include_hidden,
-        *no_ignore,
-        all_excludes,
-        Vec::new(),
-    )
-    .map_err(bad_exclude)?;
+    let mut walk_options =
+        walk_options(config, *include_hidden, *no_ignore, excludes, &[]).map_err(bad_exclude)?;
 
     let root = paths::scan_root(root).map_err(|e| match e {
         paths::RootError::NonUtf8 { path } => Error::non_utf8_path(&path),
@@ -1445,10 +1725,12 @@ fn scan(
             "scan root {root} is hali's data dir or inside it"
         )));
     }
+    let (state, remembered) = remembered_roots()?;
     let mut store = storage::load(&dir)?;
 
-    // A data dir under the root is never entered, so scan never catalogs its own store.
-    walk_options.prune = data.into_iter().collect();
+    // A data dir or state dir under the root is never entered, so scan never catalogs its own
+    // store or state.
+    walk_options.prune = data.into_iter().chain(paths::real_dir(&state)).collect();
     let mut progress = Progress::new(!cli.json && progress_shown());
     let mut walked = 0;
     let entries: Vec<storage::walk::Walked> = storage::walk::walk(Path::new(&root), &walk_options)
@@ -1465,49 +1747,21 @@ fn scan(
         media_types: media_types.clone(),
     };
     let user = core::config::user_name(config, env);
-    let pruning = match (*prune, *force) {
-        (false, _) => core::scan::Prune::Off,
-        (true, false) => core::scan::Prune::On,
-        (true, true) => core::scan::Prune::Forced,
-    };
     let result = core::scan::scan_with(
         ctx,
         &mut store,
         &options,
-        pruning,
+        pruning(*prune, *force),
         entries,
         |p| storage::stat(Path::new(p)),
-        |p| {
-            use core::scan::Unhashable;
-            storage::inspect(Path::new(p))
-                .map(|found| file_facts(p.to_string(), found))
-                .map_err(|e| match e {
-                    storage::InspectError::Missing => Unhashable::Missing,
-                    // `inspect` has no limit, so it is never TooLarge.
-                    storage::InspectError::Directory
-                    | storage::InspectError::Other
-                    | storage::InspectError::TooLarge => Unhashable::NotRegular,
-                    storage::InspectError::Unreadable => Unhashable::Unreadable,
-                })
-        },
+        scan_inspect,
         media_type::glob_type,
         |seen, hashed| progress.update(seen, hashed),
         &user,
     );
     progress.finish();
     let mut done = result?;
-    let v = &mut done.value;
-    for record in v
-        .added
-        .iter_mut()
-        .chain(&mut v.refreshed)
-        .chain(v.relinked.iter_mut().map(|r| &mut r.resource))
-        .chain(v.ambiguous.iter_mut().map(|a| &mut a.resource))
-        .chain(&mut v.missing)
-        .chain(&mut v.pruned)
-    {
-        observe(record);
-    }
+    observe_scanned(&mut done.value);
 
     let output = ScanOutput {
         schema_version: SCHEMA_VERSION,
@@ -1515,63 +1769,23 @@ fn scan(
         scanned: &done.value,
     };
     let text = || {
-        let v = &done.value;
-        let c = &v.counts;
         println!("root\t{}", printable(&root));
-        for (name, n) in [
-            ("added", c.added),
-            ("refreshed", c.refreshed),
-            ("relinked", c.relinked),
-            ("ambiguous", c.ambiguous),
-            ("unchanged", c.unchanged),
-            ("missing", c.missing),
-            ("pruned", c.pruned),
-            ("skipped", c.skipped),
-        ] {
-            println!("{name}\t{n}");
-        }
-        for (media, n) in &v.media_types {
-            println!("media_type\t{}\t{n}", printable(media));
-        }
-        let [add, refresh, forget] = if cli.dry_run {
-            ["would add", "would refresh", "would forget"]
-        } else {
-            ["added", "refreshed", "forgot"]
-        };
-        for r in &v.added {
-            println!("{add} resource {}", describe_record(r));
-        }
-        for r in &v.refreshed {
-            println!("{refresh} resource {}", describe_record(r));
-        }
-        for r in &v.relinked {
-            println!(
-                "{} {}",
-                relink_verb(cli),
-                describe_move(&r.resource, &r.from)
-            );
-        }
-        for a in &v.ambiguous {
-            println!("ambiguous resource {}", describe_record(&a.resource));
-            for c in &a.candidates {
-                println!("candidate {}", printable(c));
-            }
-        }
-        for r in &v.missing {
-            println!("missing resource {}", describe_record(r));
-        }
-        for r in &v.pruned {
-            println!("{forget} resource {}", describe_record(r));
-        }
-        for s in &v.skipped {
-            println!("skipped {} {}", s.reason, printable(&s.path));
-        }
-        if v.truncated {
-            println!("truncated\ttrue");
-        }
+        print_scanned(cli, &done.value);
     };
+    if cli.dry_run {
+        return mutated(
+            cli,
+            &dir,
+            &store,
+            storage::File::Resources,
+            output,
+            &done.changes,
+            text,
+            None,
+        );
+    }
     // Only a scan that would forget something asks; the retry repeats the flags given.
-    let confirmation = (done.value.counts.pruned > 0).then(|| {
+    if !done.changes.is_empty() && done.value.counts.pruned > 0 {
         let mut retry = format!("hali scan {}", core::shell_quote(&root));
         if *include_hidden {
             retry.push_str(" --include-hidden");
@@ -1596,7 +1810,7 @@ fn scan(
             retry.push_str(" --force");
         }
         retry.push_str(" --yes");
-        Confirmation {
+        let confirmation = Confirmation {
             command: "scan",
             question: format!(
                 "forget {} missing resources under {}",
@@ -1604,7 +1818,181 @@ fn scan(
                 printable(&root)
             ),
             retry,
+        };
+        confirm(cli, &confirmation)?;
+    }
+    if !done.changes.is_empty() {
+        storage::save(&dir, &store, storage::File::Resources)?;
+    }
+    // A real scan that succeeded remembers its root with the flags given on the command line.
+    let entry = core::roots::RootEntry {
+        root: root.clone(),
+        include_hidden: *include_hidden,
+        no_ignore: *no_ignore,
+        exclude: excludes.clone(),
+        max_size: *max_size,
+        media_types: media_types.iter().map(ToString::to_string).collect(),
+    };
+    let roots = core::roots::remember(remembered, entry);
+    storage::state::write_roots(&state, &core::roots::serialise(&roots))?;
+    if cli.json {
+        print_json(&output);
+    } else {
+        text();
+    }
+    Ok(())
+}
+
+fn pruning(prune: bool, force: bool) -> core::scan::Prune {
+    match (prune, force) {
+        (false, _) => core::scan::Prune::Off,
+        (true, false) => core::scan::Prune::On,
+        (true, true) => core::scan::Prune::Forced,
+    }
+}
+
+/// A remembered root a bare scan could not walk, and why.
+#[derive(Serialize)]
+struct Unavailable {
+    root: String,
+    reason: &'static str,
+}
+
+/// A bare `hali scan [--prune [--force]]`: every remembered root with its own settings, as one
+/// run. A root that is gone, not a directory, unreadable or in the data dir is `unavailable`
+/// and its Resources are never pruned. `roots.json` is never rewritten.
+fn scan_remembered(cli: &Cli, ctx: &Context, config: &core::config::Config) -> Result<(), Error> {
+    let Command::Scan { prune, force, .. } = &cli.command else {
+        unreachable!("only called for scan");
+    };
+    let dir = paths::data_dir(env).map_err(|_| Error::store_io(None))?;
+    let data = paths::real_dir(&dir);
+    let (state, remembered) = remembered_roots()?;
+    let corrupt = || Error::roots_unparseable(&state.join(storage::state::ROOTS_FILE));
+    let never_walked: Vec<std::path::PathBuf> = data
+        .iter()
+        .cloned()
+        .chain(paths::real_dir(&state))
+        .collect();
+
+    // Every root's settings are checked before the store is read.
+    let mut planned: Vec<(core::scan::ScanOptions, storage::walk::WalkOptions)> = Vec::new();
+    let mut unavailable: Vec<Unavailable> = Vec::new();
+    for entry in &remembered {
+        let walk = walk_options(
+            config,
+            entry.include_hidden,
+            entry.no_ignore,
+            &entry.exclude,
+            &never_walked,
+        )
+        .map_err(|_| corrupt())?;
+        let media_types = entry
+            .media_types
+            .iter()
+            .map(|p| resource::parse_media_pattern(p))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| corrupt())?;
+        let real = match paths::scan_root(std::ffi::OsStr::new(&entry.root)) {
+            Ok(real) => real,
+            Err(e) => {
+                let reason = match e {
+                    paths::RootError::NonUtf8 { .. } => "not UTF-8",
+                    paths::RootError::NotADirectory { .. } => "gone or not a directory",
+                    paths::RootError::Unreadable { .. } => "unreadable",
+                };
+                unavailable.push(Unavailable {
+                    root: entry.root.clone(),
+                    reason,
+                });
+                continue;
+            }
+        };
+        if data
+            .as_ref()
+            .is_some_and(|data| Path::new(&real).starts_with(data))
+        {
+            unavailable.push(Unavailable {
+                root: entry.root.clone(),
+                reason: "hali's data dir or inside it",
+            });
+            continue;
         }
+        if planned.iter().any(|(o, _)| o.root == real) {
+            continue;
+        }
+        let options = core::scan::ScanOptions {
+            root: real,
+            max_size: entry
+                .max_size
+                .or(config.scan.max_size)
+                .unwrap_or(DEFAULT_MAX_SIZE),
+            media_types,
+        };
+        planned.push((options, walk));
+    }
+    planned.sort_by(|a, b| a.0.root.cmp(&b.0.root));
+    let mut store = storage::load(&dir)?;
+
+    // Every walk runs to the end on this thread before anything is hashed.
+    let mut progress = Progress::new(!cli.json && progress_shown());
+    let mut walked = 0;
+    let mut roots: Vec<core::scan::RootScan> = Vec::new();
+    for (options, walk) in planned {
+        let entries = storage::walk::walk(Path::new(&options.root), &walk)
+            .inspect(|_| {
+                walked += 1;
+                progress.update(walked, 0);
+            })
+            .collect();
+        roots.push(core::scan::RootScan { options, entries });
+    }
+    let scanned_roots: Vec<String> = roots.iter().map(|r| r.options.root.clone()).collect();
+    let unavailable_roots: Vec<String> = unavailable.iter().map(|u| u.root.clone()).collect();
+    let user = core::config::user_name(config, env);
+    let result = core::scan::scan_roots(
+        ctx,
+        &mut store,
+        roots,
+        &unavailable_roots,
+        pruning(*prune, *force),
+        |p| storage::stat(Path::new(p)),
+        scan_inspect,
+        media_type::glob_type,
+        |seen, hashed| progress.update(seen, hashed),
+        &user,
+    );
+    progress.finish();
+    let mut done = result?;
+    observe_scanned(&mut done.value);
+
+    let output = RootsScanOutput {
+        schema_version: SCHEMA_VERSION,
+        roots: &scanned_roots,
+        unavailable: &unavailable,
+        scanned: &done.value,
+    };
+    let text = || {
+        for root in &scanned_roots {
+            println!("root\t{}", printable(root));
+        }
+        for u in &unavailable {
+            println!("unavailable\t{}\t{}", printable(&u.root), u.reason);
+        }
+        print_scanned(cli, &done.value);
+    };
+    let confirmation = (done.value.counts.pruned > 0).then(|| Confirmation {
+        command: "scan",
+        question: format!(
+            "forget {} missing resources under {} scan roots",
+            done.value.counts.pruned,
+            scanned_roots.len()
+        ),
+        retry: if *force {
+            "hali scan --prune --force --yes".to_string()
+        } else {
+            "hali scan --prune --yes".to_string()
+        },
     });
     mutated(
         cli,
@@ -1658,13 +2046,24 @@ fn relink(cli: &Cli, ctx: &Context, config: &core::config::Config) -> Result<(),
             .is_some_and(|data| Path::new(root).starts_with(data))
     };
     let mut searched: Vec<String> = Vec::new();
-    if roots.is_empty() {
-        // The default root: the files.dir chain; an unusable one, or one in the data dir, is
-        // skipped silently.
-        let usable = paths::files_dir(env, config.files_dir.as_deref())
-            .and_then(|d| paths::scan_root(d.as_os_str()).ok())
-            .filter(|root| !in_data(root));
-        searched.extend(usable);
+    let state = if roots.is_empty() {
+        // The default roots: the files.dir chain, then the remembered roots in byte order,
+        // without repeats; an unusable one, or one in the data dir, is skipped silently.
+        let (state, remembered) = remembered_roots()?;
+        let files_dir = paths::files_dir(env, config.files_dir.as_deref());
+        let defaults = files_dir
+            .iter()
+            .map(|d| d.as_os_str())
+            .chain(remembered.iter().map(|r| std::ffi::OsStr::new(&r.root)));
+        for root in defaults {
+            if let Ok(real) = paths::scan_root(root)
+                && !in_data(&real)
+                && !searched.contains(&real)
+            {
+                searched.push(real);
+            }
+        }
+        Some(state)
     } else {
         for root in roots {
             let real = paths::scan_root(root).map_err(|e| match e {
@@ -1683,11 +2082,16 @@ fn relink(cli: &Cli, ctx: &Context, config: &core::config::Config) -> Result<(),
                 searched.push(real);
             }
         }
-    }
+        paths::state_dir(env).ok()
+    };
     let mut store = storage::load(&dir)?;
-    let options =
-        storage::walk::WalkOptions::new(false, false, Vec::new(), data.into_iter().collect())
-            .expect("no excludes to check");
+    // Relink walks with its own settings; the data dir and the state dir are never entered.
+    let never_walked = data
+        .into_iter()
+        .chain(state.as_deref().and_then(paths::real_dir))
+        .collect();
+    let options = storage::walk::WalkOptions::new(false, false, Vec::new(), never_walked)
+        .expect("no excludes to check");
     let mut done = core::relink::search(
         ctx,
         &mut store,
@@ -2239,6 +2643,28 @@ struct ScanOutput<'a> {
     root: &'a str,
     #[serde(flatten)]
     scanned: &'a core::scan::Scanned,
+}
+
+/// A bare scan: the roots scanned and the ones that could not be, where `root` was.
+#[derive(Serialize)]
+struct RootsScanOutput<'a> {
+    schema_version: u32,
+    roots: &'a [String],
+    unavailable: &'a [Unavailable],
+    #[serde(flatten)]
+    scanned: &'a core::scan::Scanned,
+}
+
+#[derive(Serialize)]
+struct RootListOutput<'a> {
+    schema_version: u32,
+    roots: &'a [core::roots::RootEntry],
+}
+
+#[derive(Serialize)]
+struct ForgotRootOutput<'a> {
+    schema_version: u32,
+    root: &'a core::roots::RootEntry,
 }
 
 #[derive(Serialize)]
