@@ -69,7 +69,6 @@
 //! C1-C5, all six bytes with the SHA-256 of "hello\n"; here only R4, gone.txt, is Missing unless
 //! a test says otherwise) and stores they generate.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::relink::{self, Searched};
     use hali::core::resource::{self, FileFacts, Hashed};

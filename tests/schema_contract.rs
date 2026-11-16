@@ -248,7 +248,6 @@ mod goal {
         "cli_relink__schema_list_json",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_21: &[(&str, &str)] = &[
         ("cli_dry_run__relink_dry_run_json", "relink"),
         ("cli_relink__relink_explicit_json", "relink"),
@@ -270,7 +269,6 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_19);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_20);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_22);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_21);
         rows
     }
@@ -328,7 +326,6 @@ mod goal {
             pending_22 = &[];
         }
         let mut pending_21: &[&str] = GOAL_SNAPS_21;
-        #[cfg(feature = "goal")]
         {
             pending_21 = &[];
         }
@@ -460,7 +457,6 @@ mod goal {
         assert!(goldens.len() >= 73, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 76, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 79, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 85, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
@@ -2089,7 +2085,6 @@ mod goal {
     /// #21: what the `relink` schema accepts and refuses: four branches (a search or an explicit
     /// relink, each real or dry-run), every key required, nothing else allowed, the caps (100
     /// listed, 10 candidates) as limits.
-    #[cfg(feature = "goal")]
     #[test]
     fn relink_schema_accepts_and_rejects() {
         let record = |id: &str, missing: bool| {
@@ -2375,7 +2370,6 @@ mod goal {
 
     /// #21: `hali schema relink` is served, and `relink` is in the list in sorted place: 26
     /// names, between `relation remove` and `scan`.
-    #[cfg(feature = "goal")]
     #[test]
     fn relink_schema_is_listed() {
         let listed = fetch_list();
@@ -2393,7 +2387,6 @@ mod goal {
     /// #21: the `error` schema has a branch for each new rule: `POSSIBLE_MOVE` (the path being
     /// added and the ids of the Missing Resources with its content) and `HASH_MISMATCH` (the
     /// Resource, the path, the recorded hash and the hash of the file).
-    #[cfg(feature = "goal")]
     #[test]
     fn relink_error_branches() {
         let sha_a = "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03";

@@ -125,7 +125,6 @@ fn round_trip_is_byte_identical() {
 /// bigger one is `InspectError::TooLarge`, and the read stops after the first `limit + 1` bytes
 /// (a relink hashes a candidate with the Resource's recorded size as the limit, so a file that
 /// grew, or a huge one, costs a few bytes of reading and not a full hash).
-#[cfg(feature = "goal")]
 #[test]
 fn inspect_bounded_stops_after_limit() {
     use hali::storage::{InspectError, inspect, inspect_bounded};

@@ -59,7 +59,6 @@
 //! tests/cli_scan.rs and tests/cli_error_text.rs, the help-text snapshots that list subcommands,
 //! and the `relink` row of tests/dry_run_guard.rs (`.goal/checks/02-dry_run_guard_relink.sh`).
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::{Value, json};
