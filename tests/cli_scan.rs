@@ -57,6 +57,7 @@ mod goal {
     const NOW: &str = "2026-10-24T09:30:00Z";
     const PINNED_SECS: u64 = 1_792_504_931; // 2026-10-20T14:02:11Z
     const R1: &str = "018bcfe5-6801-710a-adec-89025cc1beeb";
+    #[cfg(feature = "goal")]
     const R2: &str = "018bcfe5-6804-7099-ac6c-d7363ca585e7";
 
     struct Env {
@@ -231,6 +232,7 @@ mod goal {
         }
 
         /// The output with the temp dir shown as `/TMP`.
+        #[cfg(feature = "goal")]
         fn clean(&self, text: &str) -> String {
             text.replace(self.base.to_str().unwrap(), "/TMP")
         }
@@ -386,10 +388,6 @@ mod goal {
             (
                 vec!["scan".into(), root.clone(), other.clone()],
                 "unexpected argument".into(),
-            ),
-            (
-                vec!["scan".into(), root.clone(), "--prune".into()],
-                "unexpected argument '--prune'".into(),
             ),
             (
                 vec!["scan".into(), root.clone(), "--list".into()],
@@ -1032,6 +1030,7 @@ mod goal {
         env.put("big.txt", b"this is far too big\n");
     }
 
+    #[cfg(feature = "goal")]
     #[test]
     fn scan_json() {
         let env = Env::new();
@@ -1050,6 +1049,7 @@ mod goal {
         });
     }
 
+    #[cfg(feature = "goal")]
     #[test]
     fn scan_dry_run_json() {
         let env = Env::new();
@@ -1070,6 +1070,7 @@ mod goal {
         });
     }
 
+    #[cfg(feature = "goal")]
     #[test]
     fn scan_text() {
         let env = Env::new();
@@ -1082,7 +1083,7 @@ mod goal {
         assert_eq!(
             env.clean(&out.stdout),
             format!(
-                "root\t/TMP/root\nadded\t2\nrefreshed\t0\nunchanged\t0\nmissing\t0\nskipped\t1\n\
+                "root\t/TMP/root\nadded\t2\nrefreshed\t0\nrelinked\t0\nambiguous\t0\nunchanged\t0\nmissing\t0\npruned\t0\nskipped\t1\n\
                  media_type\ttext/plain\t2\n\
                  added resource {R1} \"a\" /TMP/root/a.txt\n\
                  added resource {R2} \"b\" /TMP/root/b.txt\n\
@@ -1110,7 +1111,7 @@ mod goal {
         assert_eq!(
             head,
             format!(
-                "root\t/TMP/root\nadded\t2\nrefreshed\t0\nunchanged\t0\nmissing\t0\nskipped\t1\n\
+                "root\t/TMP/root\nadded\t2\nrefreshed\t0\nrelinked\t0\nambiguous\t0\nunchanged\t0\nmissing\t0\npruned\t0\nskipped\t1\n\
                  media_type\ttext/plain\t2\n\
                  would add resource {R1} \"a\" /TMP/root/a.txt\n\
                  would add resource {R2} \"b\" /TMP/root/b.txt\n"
@@ -1578,5 +1579,765 @@ mod goal {
         insta::with_settings!({prepend_module_to_snapshot => false}, {
             insta::assert_snapshot!("cli_scan__schema_list_json", out.stdout);
         });
+    }
+
+    // ---- moves and --prune (#24, spec §9.1 **Scan:**, §9.8) -----------------------------------
+
+    /// Goal tests for moves and pruning during a scan, through the real binary (#24). Locked
+    /// golden snapshots (hand-written from the approved plan; the ids are those the pinned id
+    /// seeds give `hali add`, as in tests/cli_relink.rs): stdout `cli_scan__scan_moves_json`,
+    /// `cli_scan__scan_prune_json`, `cli_dry_run__scan_prune_dry_run_json` and the stderr
+    /// envelope `cli_scan__prune_confirmation_required_json_envelope`; the two scan goldens that
+    /// already exist gain the new keys.
+    ///
+    /// The contract the tests fix (the approved plan, D7-D13):
+    /// - Output keys in this order: `schema_version`, `root`, `counts` (`added`, `refreshed`,
+    ///   `relinked`, `ambiguous`, `unchanged`, `missing`, `pruned`, `skipped`), `media_types`,
+    ///   `added`, `refreshed`, `relinked` (`{"resource","from"}`), `ambiguous`
+    ///   (`{"resource","candidates"}`), `missing`, `pruned`, `skipped`, `truncated`. The three
+    ///   new lists are always present. `missing` is what is still Missing under the root after
+    ///   the run, ambiguous and kept Resources included.
+    /// - Text: `root`, `added`, `refreshed`, `relinked`, `ambiguous`, `unchanged`, `missing`,
+    ///   `pruned`, `skipped` lines; `media_type` lines; then `added|would add resource …`,
+    ///   `refreshed|would refresh resource …`, `relinked|would relink resource <id> "<title>"
+    ///   <old path> -> <new path>`, `ambiguous resource <id> "<title>" <path>` followed by
+    ///   `candidate <path>` lines, `missing resource …`, `forgot|would forget resource <id>
+    ///   "<title>" <path>`, `skipped <reason> <path>`; then `truncated<TAB>true`; then the
+    ///   `+`/`-` lines of a dry run.
+    /// - `--prune` asks `forget <n> missing resources under <root>? [y/N] ` on stderr (the root
+    ///   escaped for the terminal) when it would forget at least one Resource; without both
+    ///   terminals and without `--yes` it is `CONFIRMATION_REQUIRED` (exit 1, details command
+    ///   `scan`), nothing written, stdin not read; declining writes nothing at all. The
+    ///   suggested command repeats the flags given: `hali scan '<root>' [--include-hidden]
+    ///   [--no-ignore] [--exclude=<glob>]… [--max-size=<bytes>] [--media-type=<pattern>]…
+    ///   --prune [--force] --yes`, each value POSIX single-quoted when it needs it.
+    /// - `--force` without `--prune` is a usage error (exit 2) raised before the config and the
+    ///   store: `--force is for --prune; a scan without --prune forgets nothing`.
+    #[cfg(feature = "goal")]
+    mod moves_and_prune {
+        use super::*;
+
+        const RB: &str = "018bcfe5-6801-7758-b5de-1c9756cebfc8"; // first id of seed 2
+        const RC: &str = "018bcfe5-6801-7d0b-94e4-db018fedb346"; // first id of seed 3
+        const RD: &str = "018bcfe5-6801-7e73-a372-e2338acae474"; // first id of seed 4
+        const NEW_SECS: u64 = 1_792_663_200; // 2026-10-22T10:00:00Z
+        const PROMPT_ONE: &str = "forget 1 missing resources under /TMP/root? [y/N] ";
+
+        /// Writes `root/<rel>` and catalogs it with `hali add` (id seed `seed`).
+        fn add_file(env: &Env, rel: &str, bytes: &[u8], seed: &str) -> String {
+            let path = env.put(rel, bytes);
+            let out = env.run_env(
+                &[("HALI_TEST_ID_SEED", seed)],
+                ["--json", "add", path.to_str().unwrap()],
+            );
+            assert_eq!(out.code, Some(0), "setup add {rel}: {}", out.stderr);
+            let v: Value = serde_json::from_str(&out.stdout).unwrap();
+            v["added"][0]["id"].as_str().unwrap().to_string()
+        }
+
+        fn remove(env: &Env, rel: &str) {
+            std::fs::remove_file(env.root().join(rel)).unwrap();
+        }
+
+        /// The moves scene: a.txt ("alpha\n"), b.txt ("beta\n") and c.txt ("gamma\n") are
+        /// cataloged (a with id seed `seeds[0]`, and so on), then: a.txt moves to
+        /// moved/renamed.txt (mtime 2026-10-22T10:00:00Z); b.txt is replaced by two copies,
+        /// b1.txt and b2.txt; c.txt is deleted; a new d.txt ("delta\n") appears.
+        fn moves_scene(seeds: [&str; 3]) -> (Env, [String; 3]) {
+            let env = Env::new();
+            let a = add_file(&env, "a.txt", b"alpha\n", seeds[0]);
+            let b = add_file(&env, "b.txt", b"beta\n", seeds[1]);
+            let c = add_file(&env, "c.txt", b"gamma\n", seeds[2]);
+            let to = env.root().join("moved/renamed.txt");
+            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+            std::fs::rename(env.root().join("a.txt"), &to).unwrap();
+            pin(&to, NEW_SECS);
+            remove(&env, "b.txt");
+            env.put("b1.txt", b"beta\n");
+            env.put("b2.txt", b"beta\n");
+            remove(&env, "c.txt");
+            env.put("d.txt", b"delta\n");
+            (env, [a, b, c])
+        }
+
+        /// The prune scene: a.txt, b.txt and c.txt are cataloged (id seeds as given), c.txt
+        /// references b.txt (an inbound relation of b), and the files in `gone` are deleted.
+        fn prune_scene(seeds: [&str; 3], gone: &[&str]) -> (Env, [String; 3]) {
+            let env = Env::new();
+            let a = add_file(&env, "a.txt", b"alpha\n", seeds[0]);
+            let b = add_file(&env, "b.txt", b"beta\n", seeds[1]);
+            let c = add_file(&env, "c.txt", b"gamma\n", seeds[2]);
+            let out = env.run(["relate", c.as_str(), "dcterms:references", b.as_str()]);
+            assert_eq!(out.code, Some(0), "setup relate: {}", out.stderr);
+            for rel in gone {
+                remove(&env, rel);
+            }
+            (env, [a, b, c])
+        }
+
+        fn counts8(v: &Value) -> [u64; 8] {
+            let c = &v["counts"];
+            [
+                "added",
+                "refreshed",
+                "relinked",
+                "ambiguous",
+                "unchanged",
+                "missing",
+                "pruned",
+                "skipped",
+            ]
+            .map(|k| c[k].as_u64().unwrap())
+        }
+
+        fn ids_of(list: &Value) -> Vec<String> {
+            list.as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["id"].as_str().unwrap().to_string())
+                .collect()
+        }
+
+        /// Runs the binary with `stdin` as its standard input.
+        fn with_stdin(env: &Env, extra: &[(&str, &str)], stdin: &[u8], args: &[&str]) -> Out {
+            let out = Command::cargo_bin("hali")
+                .unwrap()
+                .env_clear()
+                .envs(env.vars(extra))
+                .timeout(Duration::from_secs(60))
+                .write_stdin(stdin.to_vec())
+                .args(args)
+                .output()
+                .unwrap();
+            Out {
+                code: out.status.code(),
+                stdout: String::from_utf8(out.stdout).unwrap(),
+                stderr: String::from_utf8(out.stderr).unwrap(),
+            }
+        }
+
+        /// Runs the binary with a stdin pipe the test holds open and empty: a command that
+        /// reads stdin never returns.
+        fn with_open_stdin(env: &Env, args: &[&str]) -> Out {
+            let mut child = env.spawn(&[], args);
+            let stdin = child.stdin.take().unwrap();
+            let started = Instant::now();
+            let status = loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break status;
+                }
+                if started.elapsed() > Duration::from_secs(30) {
+                    let _ = child.kill();
+                    panic!("{args:?} did not finish; does it read stdin?");
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            };
+            drop(stdin);
+            let mut stdout = String::new();
+            child
+                .stdout
+                .take()
+                .unwrap()
+                .read_to_string(&mut stdout)
+                .unwrap();
+            let mut stderr = String::new();
+            child
+                .stderr
+                .take()
+                .unwrap()
+                .read_to_string(&mut stderr)
+                .unwrap();
+            Out {
+                code: status.code(),
+                stdout,
+                stderr,
+            }
+        }
+
+        /// The error envelope on stderr; the prompt, which has no newline, may precede it.
+        fn envelope(out: &Out) -> Value {
+            let line = out.stderr.lines().last().unwrap();
+            serde_json::from_str(&line[line.find('{').unwrap()..])
+                .unwrap_or_else(|e| panic!("no error envelope ({e}): {:?}", out.stderr))
+        }
+
+        fn resource_ids(list: &Value) -> Vec<String> {
+            list.as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["resource"]["id"].as_str().unwrap().to_string())
+                .collect()
+        }
+
+        // ---- the summary --------------------------------------------------------------------
+
+        /// Row 10: The summary lists the relinked Resources with `from`, the ambiguous ones with their
+        /// candidates, and counts them; the new file is added; the missing ones stay listed.
+        #[test]
+        fn scan_moves_json() {
+            let (env, ids) = moves_scene(["1", "2", "3"]);
+            assert_eq!(ids, [R1, RB, RC]);
+            let out = env.run_env(
+                &[("HALI_TEST_ID_SEED", "4")],
+                ["--json", "scan", env.root_str().as_str()],
+            );
+            assert_eq!(out.code, Some(0), "{}", out.stderr);
+            assert_eq!(out.stderr, "");
+            insta::with_settings!({prepend_module_to_snapshot => false}, {
+                insta::assert_snapshot!("cli_scan__scan_moves_json", env.clean(&out.stdout));
+            });
+            // The new file took the first id of the seed; the moved one took none.
+            let v: Value = serde_json::from_str(&out.stdout).unwrap();
+            assert_eq!(ids_of(&v["added"]), [RD]);
+        }
+
+        /// Row 11: The text summary: counts in the new order, `relinked … -> …`, `ambiguous` with its
+        /// `candidate` lines; the dry run says `would`.
+        #[test]
+        fn scan_moves_text() {
+            let (env, _) = moves_scene(["1", "2", "3"]);
+            let out = env.run_env(
+                &[("HALI_TEST_ID_SEED", "4")],
+                ["scan", env.root_str().as_str()],
+            );
+            assert_eq!(out.code, Some(0), "{}", out.stderr);
+            assert_eq!(out.stderr, "");
+            assert_eq!(
+                env.clean(&out.stdout),
+                format!(
+                    "root\t/TMP/root\nadded\t1\nrefreshed\t0\nrelinked\t1\nambiguous\t1\n\
+                     unchanged\t0\nmissing\t2\npruned\t0\nskipped\t0\n\
+                     media_type\ttext/plain\t1\n\
+                     added resource {RD} \"d\" /TMP/root/d.txt\n\
+                     relinked resource {R1} \"a\" /TMP/root/a.txt -> /TMP/root/moved/renamed.txt\n\
+                     ambiguous resource {RB} \"b\" /TMP/root/b.txt\n\
+                     candidate /TMP/root/b1.txt\n\
+                     candidate /TMP/root/b2.txt\n\
+                     missing resource {RB} \"b\" /TMP/root/b.txt\n\
+                     missing resource {RC} \"c\" /TMP/root/c.txt\n"
+                )
+            );
+
+            let (env, _) = moves_scene(["1", "2", "3"]);
+            let out = env.run_env(
+                &[("HALI_TEST_ID_SEED", "4")],
+                ["--dry-run", "scan", env.root_str().as_str()],
+            );
+            assert_eq!(out.code, Some(0), "{}", out.stderr);
+            assert_eq!(out.stderr, "note: dry run; nothing was written\n");
+            let text = env.clean(&out.stdout);
+            let last = format!("missing resource {RC} \"c\" /TMP/root/c.txt\n");
+            let (head, changes) = text.split_once(last.as_str()).unwrap();
+            assert_eq!(
+                head,
+                format!(
+                    "root\t/TMP/root\nadded\t1\nrefreshed\t0\nrelinked\t1\nambiguous\t1\n\
+                     unchanged\t0\nmissing\t2\npruned\t0\nskipped\t0\n\
+                     media_type\ttext/plain\t1\n\
+                     would add resource {RD} \"d\" /TMP/root/d.txt\n\
+                     would relink resource {R1} \"a\" /TMP/root/a.txt -> /TMP/root/moved/renamed.txt\n\
+                     ambiguous resource {RB} \"b\" /TMP/root/b.txt\n\
+                     candidate /TMP/root/b1.txt\n\
+                     candidate /TMP/root/b2.txt\n\
+                     missing resource {RB} \"b\" /TMP/root/b.txt\n"
+                )
+            );
+            assert!(changes.lines().count() > 0);
+            assert!(
+                changes
+                    .lines()
+                    .all(|l| l.starts_with("+ <") || l.starts_with("- <")),
+                "{changes}"
+            );
+        }
+
+        /// Row 12: An ambiguous file stays unregistered, so `hali relink <id> <path>` can settle it.
+        #[test]
+        fn ambiguous_files_stay_unregistered() {
+            let (env, ids) = moves_scene(["1", "2", "3"]);
+            let root = env.root_str();
+            let v = ok_json(&env.run_env(
+                &[("HALI_TEST_ID_SEED", "4")],
+                ["--json", "scan", root.as_str()],
+            ));
+            // The candidates are in neither list; only d.txt is added.
+            assert_eq!(record_paths(&v["added"]), [format!("{root}/d.txt")]);
+            assert_eq!(resource_ids(&v["ambiguous"]), [ids[1].clone()]);
+            let ttl = std::fs::read_to_string(env.data().join("resources.ttl")).unwrap();
+            assert!(!ttl.contains("b1.txt") && !ttl.contains("b2.txt"), "{ttl}");
+
+            let b1 = format!("{root}/b1.txt");
+            let out = env.run(["relink", ids[1].as_str(), b1.as_str()]);
+            assert_eq!(out.code, Some(0), "{}", out.stderr);
+            let ttl = std::fs::read_to_string(env.data().join("resources.ttl")).unwrap();
+            assert!(ttl.contains("b1.txt"), "{ttl}");
+
+            // b2.txt is now just another new file with the content of a present Resource.
+            let v = ok_json(&env.run_env(
+                &[("HALI_TEST_ID_SEED", "5")],
+                ["--json", "scan", root.as_str()],
+            ));
+            assert_eq!(record_paths(&v["added"]), [format!("{root}/b2.txt")]);
+            assert_eq!(v["ambiguous"], serde_json::json!([]));
+        }
+
+        /// A prune spares what moved and what is ambiguous, and forgets the rest.
+        #[test]
+        fn prune_spares_moved_and_ambiguous() {
+            let (env, ids) = moves_scene(["1", "2", "3"]);
+            let root = env.root_str();
+            let v = ok_json(&env.run_env(
+                &[("HALI_TEST_ID_SEED", "4")],
+                ["--json", "scan", root.as_str(), "--prune", "--yes"],
+            ));
+            assert_eq!(counts8(&v), [1, 0, 1, 1, 0, 1, 1, 0]);
+            assert_eq!(resource_ids(&v["relinked"]), [ids[0].clone()]);
+            assert_eq!(resource_ids(&v["ambiguous"]), [ids[1].clone()]);
+            assert_eq!(ids_of(&v["missing"]), [ids[1].clone()]);
+            assert_eq!(ids_of(&v["pruned"]), [ids[2].clone()]);
+            let ttl = std::fs::read_to_string(env.data().join("resources.ttl")).unwrap();
+            assert!(ttl.contains(&ids[0]) && ttl.contains(&ids[1]) && !ttl.contains(&ids[2]));
+        }
+
+        // ---- --prune: the confirmation ----------------------------------------------------------
+
+        /// Row 13: Without terminals and without `--yes` a prune that would forget something is
+        /// `CONFIRMATION_REQUIRED`: exit 1, stdout empty, nothing written, stdin not read.
+        #[test]
+        fn prune_needs_yes_without_a_terminal() {
+            let (env, _) = prune_scene(["1", "2", "3"], &["a.txt", "b.txt"]);
+            env.put("d.txt", b"delta\n");
+            let root = env.root_str();
+            let before = listing(&env.data());
+            let out = with_open_stdin(&env, &["--json", "scan", root.as_str(), "--prune"]);
+            assert_eq!(out.code, Some(1), "{}", out.stderr);
+            assert_eq!(out.stdout, "");
+            assert_eq!(listing(&env.data()), before, "nothing was written");
+            insta::with_settings!({prepend_module_to_snapshot => false}, {
+                insta::assert_snapshot!(
+                    "cli_scan__prune_confirmation_required_json_envelope",
+                    env.clean(&out.stderr)
+                );
+            });
+            let e = envelope(&out);
+            assert_eq!(e["error"]["details"]["command"], "scan");
+            assert_eq!(e["error"]["details"]["declined"], false);
+
+            // Text mode names the command and the way out; --dry-run and --yes never fail so.
+            let out = env.run(["scan", root.as_str(), "--prune"]);
+            assert_eq!(out.code, Some(1), "{}", out.stderr);
+            assert_eq!(out.stdout, "");
+            assert!(
+                out.stderr
+                    .contains("scan needs confirmation, but stdin or stderr is not a terminal"),
+                "{}",
+                out.stderr
+            );
+            assert_eq!(listing(&env.data()), before);
+        }
+
+        /// Row 13: The retry repeats the flags given on the command line, in a fixed order, and no
+        /// others (not the config's).
+        #[test]
+        fn retry_repeats_the_given_flags() {
+            let (env, _) = prune_scene(["1", "2", "3"], &["a.txt"]);
+            let root = env.root_str();
+            let suggested = |out: &Out| -> String {
+                assert_eq!(out.code, Some(1), "{}", out.stderr);
+                envelope(out)["error"]["suggested_command"]
+                    .as_str()
+                    .unwrap()
+                    .replace(&root, "/TMP/root")
+            };
+
+            let out = env.run(["--json", "scan", root.as_str(), "--prune"]);
+            assert_eq!(suggested(&out), "hali scan '/TMP/root' --prune --yes");
+
+            // Given in another order, with odd values: the retry's order is fixed, `--max-size`
+            // is the byte count, `--media-type` the lowercase pattern, each value quoted.
+            let out = env.run([
+                "--json",
+                "scan",
+                root.as_str(),
+                "--force",
+                "--media-type=TEXT/*",
+                "--prune",
+                "--max-size=1KiB",
+                "--exclude=*.tmp",
+                "--exclude=a b",
+                "--media-type=application/pdf",
+                "--no-ignore",
+                "--include-hidden",
+            ]);
+            assert_eq!(
+                suggested(&out),
+                "hali scan '/TMP/root' --include-hidden --no-ignore --exclude='*.tmp' \
+                 --exclude='a b' --max-size=1024 --media-type='text/*' \
+                 --media-type='application/pdf' --prune --force --yes"
+            );
+
+            // Only the flags given: the config's keys are not repeated.
+            env.config(
+                "[scan]\nmax_size = \"2MiB\"\nexclude = [\"*.log\"]\ninclude_hidden = true\n",
+            );
+            let out = env.run(["--json", "scan", root.as_str(), "--prune"]);
+            assert_eq!(suggested(&out), "hali scan '/TMP/root' --prune --yes");
+
+            // The command it suggests works.
+            let out = env.run(["--json", "scan", root.as_str(), "--prune", "--yes"]);
+            assert_eq!(out.code, Some(0), "{}", out.stderr);
+        }
+
+        /// Row 14: On a terminal the prompt goes to stderr; `y` and `yes` (any case) confirm; anything
+        /// else, an empty line and end of input decline; declining writes nothing at all.
+        #[test]
+        fn prune_asks_on_a_terminal() {
+            let tty = [("HALI_TEST_TTY", "1")];
+
+            for answer in ["y\n", "yes\n", "YES\n", " Y \n", "y"] {
+                let (env, ids) = prune_scene(["1", "2", "3"], &["a.txt", "b.txt"]);
+                let root = env.root_str();
+                let out = with_stdin(
+                    &env,
+                    &tty,
+                    answer.as_bytes(),
+                    &["--json", "scan", root.as_str(), "--prune"],
+                );
+                assert_eq!(out.code, Some(0), "{answer:?}: {}", out.stderr);
+                // The prompt, with no newline after it, and nothing else on stderr.
+                assert_eq!(env.clean(&out.stderr), PROMPT_ONE, "{answer:?}");
+                let v: Value = serde_json::from_str(&out.stdout).unwrap();
+                assert_eq!(ids_of(&v["pruned"]), [ids[0].clone()]);
+                let ttl = std::fs::read_to_string(env.data().join("resources.ttl")).unwrap();
+                assert!(!ttl.contains(&ids[0]), "{answer:?}: a was forgotten");
+            }
+
+            for answer in ["n\n", "no\n", "\n", "", "maybe\n", "yy\n", "y n\n"] {
+                let (env, _) = prune_scene(["1", "2", "3"], &["a.txt", "b.txt"]);
+                env.put("d.txt", b"delta\n");
+                let root = env.root_str();
+                let before = listing(&env.data());
+                let out = with_stdin(
+                    &env,
+                    &tty,
+                    answer.as_bytes(),
+                    &["--json", "scan", root.as_str(), "--prune"],
+                );
+                assert_eq!(out.code, Some(1), "{answer:?}: {}", out.stderr);
+                assert_eq!(out.stdout, "", "{answer:?}");
+                assert!(
+                    env.clean(&out.stderr).starts_with(PROMPT_ONE),
+                    "{answer:?}: {:?}",
+                    out.stderr
+                );
+                let e = envelope(&out);
+                assert_eq!(e["error"]["rule"], "CONFIRMATION_REQUIRED", "{answer:?}");
+                assert_eq!(e["error"]["details"]["command"], "scan");
+                assert_eq!(e["error"]["details"]["declined"], true, "{answer:?}");
+                assert_eq!(
+                    e["error"]["message"],
+                    "scan was not confirmed; nothing was written"
+                );
+                // The new d.txt is not registered either: nothing at all was written.
+                assert_eq!(listing(&env.data()), before, "{answer:?}");
+            }
+
+            // The prompt shows the count and the escaped root; `--yes` skips it.
+            let (env, _) = prune_scene(["1", "2", "3"], &["a.txt", "b.txt"]);
+            let root = env.root_str();
+            let out = with_stdin(
+                &env,
+                &tty,
+                b"",
+                &["--json", "scan", root.as_str(), "--prune", "--yes"],
+            );
+            assert_eq!(out.code, Some(0), "{}", out.stderr);
+            assert_eq!(out.stderr, "");
+        }
+
+        /// A scan without `--prune` never asks, whatever the terminal says, and forgets nothing.
+        #[test]
+        fn scan_without_prune_never_asks() {
+            let (env, ids) = prune_scene(["1", "2", "3"], &["a.txt", "b.txt"]);
+            let root = env.root_str();
+            for extra in [&[("HALI_TEST_TTY", "1")][..], &[("HALI_TEST_TTY", "0")][..]] {
+                let out = with_stdin(&env, extra, b"", &["--json", "scan", root.as_str()]);
+                assert_eq!(out.code, Some(0), "{}", out.stderr);
+                assert_eq!(out.stderr, "");
+                let v: Value = serde_json::from_str(&out.stdout).unwrap();
+                assert_eq!(counts8(&v), [0, 0, 0, 0, 1, 2, 0, 0]);
+                assert_eq!(ids_of(&v["pruned"]), Vec::<String>::new());
+            }
+            let ttl = std::fs::read_to_string(env.data().join("resources.ttl")).unwrap();
+            assert!(ttl.contains(&ids[0]) && ttl.contains(&ids[1]));
+        }
+
+        // ---- --prune --yes ------------------------------------------------------------------------
+
+        /// Row 15: `--prune --yes` forgets and prints; a Resource kept for an inbound relation stays
+        /// in `missing`.
+        #[test]
+        fn prune_json() {
+            let (env, ids) = prune_scene(["1", "2", "3"], &["a.txt", "b.txt"]);
+            assert_eq!(ids, [R1, RB, RC]);
+            let out = env.run([
+                "--json",
+                "scan",
+                env.root_str().as_str(),
+                "--prune",
+                "--yes",
+            ]);
+            assert_eq!(out.code, Some(0), "{}", out.stderr);
+            assert_eq!(out.stderr, "");
+            insta::with_settings!({prepend_module_to_snapshot => false}, {
+                insta::assert_snapshot!("cli_scan__scan_prune_json", env.clean(&out.stdout));
+            });
+            let ttl = std::fs::read_to_string(env.data().join("resources.ttl")).unwrap();
+            assert!(!ttl.contains(R1), "a is forgotten");
+            assert!(
+                ttl.contains(RB) && ttl.contains(RC),
+                "b is kept, c is present"
+            );
+        }
+
+        #[test]
+        fn prune_text() {
+            let (env, _) = prune_scene(["1", "2", "3"], &["a.txt", "b.txt"]);
+            let out = env.run(["scan", env.root_str().as_str(), "--prune", "--yes"]);
+            assert_eq!(out.code, Some(0), "{}", out.stderr);
+            assert_eq!(out.stderr, "");
+            assert_eq!(
+                env.clean(&out.stdout),
+                format!(
+                    "root\t/TMP/root\nadded\t0\nrefreshed\t0\nrelinked\t0\nambiguous\t0\n\
+                     unchanged\t1\nmissing\t1\npruned\t1\nskipped\t0\n\
+                     missing resource {RB} \"b\" /TMP/root/b.txt\n\
+                     forgot resource {R1} \"a\" /TMP/root/a.txt\n"
+                )
+            );
+
+            // Dry run: the future tense, then the removals, and the data dir is as it was.
+            let (env, _) = prune_scene(["1", "2", "3"], &["a.txt", "b.txt"]);
+            let before = listing(&env.data());
+            let out = env.run(["--dry-run", "scan", env.root_str().as_str(), "--prune"]);
+            assert_eq!(out.code, Some(0), "{}", out.stderr);
+            assert_eq!(out.stderr, "note: dry run; nothing was written\n");
+            let text = env.clean(&out.stdout);
+            let (head, changes) = text
+                .split_once(format!("would forget resource {R1} \"a\" /TMP/root/a.txt\n").as_str())
+                .unwrap();
+            assert_eq!(
+                head,
+                format!(
+                    "root\t/TMP/root\nadded\t0\nrefreshed\t0\nrelinked\t0\nambiguous\t0\n\
+                     unchanged\t1\nmissing\t1\npruned\t1\nskipped\t0\n\
+                     missing resource {RB} \"b\" /TMP/root/b.txt\n"
+                )
+            );
+            assert!(changes.lines().count() > 0);
+            assert!(changes.lines().all(|l| l.starts_with("- <")), "{changes}");
+            assert_eq!(listing(&env.data()), before);
+        }
+
+        /// Row 15: `--force` also forgets what other Resources relate to, and removes those relations.
+        #[test]
+        fn prune_force_removes_inbound_relations() {
+            let (env, ids) = prune_scene(["1", "2", "3"], &["a.txt", "b.txt"]);
+            let root = env.root_str();
+            let ttl = || std::fs::read_to_string(env.data().join("resources.ttl")).unwrap();
+            assert!(
+                ttl().contains(&format!("<urn:uuid:{RB}>")),
+                "setup: b is cataloged"
+            );
+
+            // Without --force b is kept, and so is the relation.
+            let v = ok_json(&env.run(["--json", "scan", root.as_str(), "--prune", "--yes"]));
+            assert_eq!(ids_of(&v["missing"]), [ids[1].clone()]);
+            assert!(ttl().contains(&format!("<urn:uuid:{RC}> ")));
+            assert!(ttl().contains("dcterms:references"), "{}", ttl());
+
+            // With it, b goes too and the triple that pointed at it.
+            let v = ok_json(&env.run([
+                "--json",
+                "scan",
+                root.as_str(),
+                "--prune",
+                "--force",
+                "--yes",
+            ]));
+            assert_eq!(counts8(&v), [0, 0, 0, 0, 1, 0, 1, 0]);
+            assert_eq!(ids_of(&v["pruned"]), [ids[1].clone()]);
+            assert_eq!(v["missing"], serde_json::json!([]));
+            let after = ttl();
+            assert!(!after.contains(RB), "b is forgotten");
+            assert!(after.contains(RC), "c stays");
+            assert!(
+                !after.contains("dcterms:references"),
+                "the relation is gone"
+            );
+
+            // One run of both: a and b together.
+            let (env, ids) = prune_scene(["1", "2", "3"], &["a.txt", "b.txt"]);
+            let v = ok_json(&env.run([
+                "--json",
+                "scan",
+                env.root_str().as_str(),
+                "--prune",
+                "--force",
+                "--yes",
+            ]));
+            assert_eq!(ids_of(&v["pruned"]), [ids[0].clone(), ids[1].clone()]);
+            assert_eq!(counts8(&v), [0, 0, 0, 0, 1, 0, 2, 0]);
+        }
+
+        /// Row 15: Files are never touched: not by a prune, nor by moves.
+        #[test]
+        fn prune_never_touches_files() {
+            let (env, _) = moves_scene(["1", "2", "3"]);
+            let root = env.root_str();
+            let before = tree_print(&env.root());
+            let out = env.run_env(
+                &[("HALI_TEST_ID_SEED", "4")],
+                [
+                    "--json",
+                    "scan",
+                    root.as_str(),
+                    "--prune",
+                    "--force",
+                    "--yes",
+                ],
+            );
+            assert_eq!(out.code, Some(0), "{}", out.stderr);
+            assert_eq!(tree_print(&env.root()), before);
+
+            let (env, _) = prune_scene(["1", "2", "3"], &["a.txt", "b.txt"]);
+            let before = tree_print(&env.root());
+            let out = env.run([
+                "--json",
+                "scan",
+                env.root_str().as_str(),
+                "--prune",
+                "--yes",
+            ]);
+            assert_eq!(out.code, Some(0), "{}", out.stderr);
+            assert_eq!(tree_print(&env.root()), before);
+        }
+
+        /// Row 16: A prune that would forget nothing never asks, even with no terminal and no `--yes`.
+        #[test]
+        fn nothing_to_forget_never_asks() {
+            // Nothing is missing.
+            let (env, _) = prune_scene(["1", "2", "3"], &[]);
+            let root = env.root_str();
+            let out = env.run(["--json", "scan", root.as_str(), "--prune"]);
+            let v = ok_json(&out);
+            assert_eq!(counts8(&v), [0, 0, 0, 0, 3, 0, 0, 0]);
+            for answer in [&b""[..], b"n\n"] {
+                let out = with_stdin(
+                    &env,
+                    &[("HALI_TEST_TTY", "1")],
+                    answer,
+                    &["--json", "scan", root.as_str(), "--prune"],
+                );
+                assert_eq!(out.code, Some(0), "{}", out.stderr);
+                assert_eq!(out.stderr, "", "no prompt");
+            }
+
+            // The only missing Resource is kept for its inbound relation.
+            let (env, ids) = prune_scene(["1", "2", "3"], &["b.txt"]);
+            let root = env.root_str();
+            let out = env.run(["--json", "scan", root.as_str(), "--prune"]);
+            let v = ok_json(&out);
+            assert_eq!(counts8(&v), [0, 0, 0, 0, 2, 1, 0, 0]);
+            assert_eq!(ids_of(&v["missing"]), [ids[1].clone()]);
+        }
+
+        // ---- the flags ------------------------------------------------------------------------------
+
+        /// Row 17: `--force` without `--prune` is a usage error raised before the config and the
+        /// store; `--prune` alone is accepted.
+        #[test]
+        fn force_needs_prune() {
+            let env = Env::new();
+            env.put("a.txt", b"x\n");
+            garbage_store(&env.data());
+            // A config that is wrong: the usage error still comes first.
+            env.config("[scan]\nexclude = \"not a list\"\n");
+            let before = listing(&env.data());
+            let root = env.root_str();
+            for args in [
+                vec!["scan", root.as_str(), "--force"],
+                vec!["--json", "scan", root.as_str(), "--force"],
+                vec!["scan", root.as_str(), "--force", "--yes"],
+                vec!["--dry-run", "scan", root.as_str(), "--force"],
+            ] {
+                let out = env.run(&args);
+                assert_eq!(out.code, Some(2), "{args:?}: {}", out.stderr);
+                assert!(
+                    out.stderr
+                        .contains("--force is for --prune; a scan without --prune forgets nothing"),
+                    "{args:?}: {:?}",
+                    out.stderr
+                );
+                assert_eq!(out.stdout, "", "{args:?}");
+                assert_eq!(listing(&env.data()), before, "{args:?}");
+            }
+
+            // `--prune` and `--prune --force` are accepted: with the config right, the garbage
+            // store is what fails (exit 3).
+            env.config("");
+            for args in [
+                vec!["scan", root.as_str(), "--prune"],
+                vec!["scan", root.as_str(), "--prune", "--force"],
+            ] {
+                let out = env.run(&args);
+                assert_eq!(out.code, Some(3), "{args:?}: {}", out.stderr);
+            }
+        }
+
+        // ---- --dry-run --prune --------------------------------------------------------------------
+
+        /// Row 18: `--dry-run --prune` prints the real payload plus `dry_run` and `changes`, never
+        /// asks (whatever the terminal), writes nothing and matches the real run.
+        #[test]
+        fn prune_dry_run_json() {
+            let (env, _) = prune_scene(["1", "2", "3"], &["a.txt", "b.txt"]);
+            let root = env.root_str();
+            let before = listing(&env.data());
+            let out = env.run_env(
+                &[("HALI_TEST_TTY", "0")],
+                ["--json", "--dry-run", "scan", root.as_str(), "--prune"],
+            );
+            assert_eq!(out.code, Some(0), "{}", out.stderr);
+            assert_eq!(out.stderr, "");
+            assert_eq!(listing(&env.data()), before, "a dry run writes nothing");
+            insta::with_settings!({prepend_module_to_snapshot => false}, {
+                insta::assert_snapshot!(
+                    "cli_dry_run__scan_prune_dry_run_json",
+                    env.clean(&out.stdout)
+                );
+            });
+
+            // On a terminal it still does not ask, and does not read stdin.
+            let out = with_stdin(
+                &env,
+                &[("HALI_TEST_TTY", "1")],
+                b"n\n",
+                &["--json", "--dry-run", "scan", root.as_str(), "--prune"],
+            );
+            assert_eq!(out.code, Some(0), "{}", out.stderr);
+            assert_eq!(out.stderr, "");
+            assert_eq!(listing(&env.data()), before);
+
+            // Against the real run, with moves, a prune and a new file together (ids of the
+            // setup use other seeds than the helper's seed 1).
+            let (env, _) = moves_scene(["2", "3", "4"]);
+            let root = env.root_str();
+            let dry = support::assert_dry_run_matches_real_run(
+                Some(&env.data()),
+                &["scan", root.as_str(), "--prune", "--yes"],
+            );
+            assert_eq!(counts8(&dry), [1, 0, 1, 1, 0, 1, 1, 0], "{dry}");
+        }
     }
 }
