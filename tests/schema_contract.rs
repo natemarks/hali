@@ -236,6 +236,25 @@ mod goal {
         ("cli_scan__schema_list_json", "schema"),
     ];
 
+    /// Snapshots written by the active goal (#21): hidden from a build without the goal
+    /// feature (the `relink` schema and the `POSSIBLE_MOVE` / `HASH_MISMATCH` branches they name
+    /// do not exist until the goal is met).
+    const GOAL_SNAPS_21: &[&str] = &[
+        "cli_dry_run__relink_dry_run_json",
+        "cli_relink__hash_mismatch_json_envelope",
+        "cli_relink__possible_move_json_envelope",
+        "cli_relink__relink_explicit_json",
+        "cli_relink__relink_json",
+        "cli_relink__schema_list_json",
+    ];
+
+    const GOAL_STDOUT_GOLDENS_21: &[(&str, &str)] = &[
+        ("cli_dry_run__relink_dry_run_json", "relink"),
+        ("cli_relink__relink_explicit_json", "relink"),
+        ("cli_relink__relink_json", "relink"),
+        ("cli_relink__schema_list_json", "schema"),
+    ];
+
     /// Every stdout snapshot's row.
     #[allow(unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
@@ -250,6 +269,7 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_19);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_20);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_22);
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_21);
         rows
     }
 
@@ -305,6 +325,10 @@ mod goal {
         {
             pending_22 = &[];
         }
+        let mut pending_21: &[&str] = GOAL_SNAPS_21;
+        {
+            pending_21 = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -322,6 +346,7 @@ mod goal {
                 || pending_19.contains(&stem.as_str())
                 || pending_20.contains(&stem.as_str())
                 || pending_22.contains(&stem.as_str())
+                || pending_21.contains(&stem.as_str())
             {
                 continue;
             }
@@ -432,6 +457,7 @@ mod goal {
         assert!(goldens.len() >= 73, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 76, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 79, "found only {} goldens", goldens.len());
+        assert!(goldens.len() >= 85, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
                 .unwrap_or_else(|| panic!("golden `{}` is not mapped to a schema", g.stem));
@@ -2042,15 +2068,401 @@ mod goal {
     #[test]
     fn scan_schema_is_listed() {
         let listed = fetch_list();
-        assert_eq!(listed.len(), 25, "{listed:?}");
+        assert!(listed.len() >= 25, "{listed:?}");
         let at = listed
             .iter()
             .position(|n| n == "scan")
             .expect("scan is listed");
-        assert_eq!(listed[at - 1], "relation remove");
+        assert!(
+            ["relation remove", "relink"].contains(&listed[at - 1].as_str()),
+            "{listed:?}"
+        );
         assert_eq!(listed[at + 1], "schema");
         assert!(listed.windows(2).all(|w| w[0] < w[1]), "sorted: {listed:?}");
         assert_eq!(fetch("scan")["title"], "hali scan --json");
+    }
+
+    /// #21: what the `relink` schema accepts and refuses: four branches (a search or an explicit
+    /// relink, each real or dry-run), every key required, nothing else allowed, the caps (100
+    /// listed, 10 candidates) as limits.
+    #[test]
+    fn relink_schema_accepts_and_rejects() {
+        let record = |id: &str, missing: bool| {
+            json!({"id": id, "path": "/TMP/root/a.txt", "title": "a", "media_type": "text/plain",
+                "editable": true, "missing": missing, "stale": false, "types": [],
+                "tags": [], "byte_size": 6, "modified": "2026-10-20T14:02:11Z"})
+        };
+        let changes = || json!([{"op": "add", "triple": "<a:b> <a:c> <a:d> ."}]);
+        let search = || {
+            json!({"schema_version": 1, "roots": ["/TMP/root"],
+                "counts": {"relinked": 1, "ambiguous": 1, "unmatched": 1},
+                "relinked": [{"resource": record("0192f0c4-0000-7000-8000-000000000901", false),
+                    "from": "/TMP/root/a.txt"}],
+                "ambiguous": [{"resource": record("0192f0c4-0000-7000-8000-000000000902", true),
+                    "candidates": ["/TMP/root/x.txt", "/TMP/root/y.txt"]}],
+                "unmatched": [record("0192f0c4-0000-7000-8000-000000000904", true)],
+                "truncated": false})
+        };
+        let explicit = || {
+            json!({"schema_version": 1,
+                "resource": record("0192f0c4-0000-7000-8000-000000000901", false),
+                "from": "/TMP/root/a.txt", "refreshed": false})
+        };
+        let dry = |base: Value| {
+            let mut v = base;
+            v["dry_run"] = json!(true);
+            v["changes"] = changes();
+            v
+        };
+        let with = |base: Value, key: &str, value: Value| {
+            let mut v = base;
+            v[key] = value;
+            v
+        };
+        let without = |base: Value, key: &str| {
+            let mut v = base;
+            v.as_object_mut().unwrap().remove(key);
+            v
+        };
+        let counts = |key: &str, value: Option<Value>| {
+            let mut v = search();
+            match value {
+                Some(value) => v["counts"][key] = value,
+                None => {
+                    v["counts"].as_object_mut().unwrap().remove(key);
+                }
+            }
+            v
+        };
+        let many_relinked = |n: usize| {
+            let entry = json!({"resource": record("0192f0c4-0000-7000-8000-000000000901", false),
+                "from": "/TMP/root/a.txt"});
+            with(search(), "relinked", Value::Array(vec![entry; n]))
+        };
+        let candidates = |n: usize| {
+            let paths: Vec<Value> = (0..n)
+                .map(|i| json!(format!("/TMP/root/f{i}.txt")))
+                .collect();
+            with(
+                search(),
+                "ambiguous",
+                json!([{"resource": record("0192f0c4-0000-7000-8000-000000000902", true),
+                    "candidates": paths}]),
+            )
+        };
+        let v = validator("relink");
+        let cases: Vec<(String, Value, bool)> = vec![
+            ("search".into(), search(), true),
+            ("search, dry run".into(), dry(search()), true),
+            (
+                "search, dry run, no changes".into(),
+                with(dry(search()), "changes", json!([])),
+                true,
+            ),
+            (
+                "search, nothing missing".into(),
+                json!({"schema_version": 1, "roots": [],
+                    "counts": {"relinked": 0, "ambiguous": 0, "unmatched": 0},
+                    "relinked": [], "ambiguous": [], "unmatched": [], "truncated": false}),
+                true,
+            ),
+            (
+                "search, truncated".into(),
+                with(search(), "truncated", json!(true)),
+                true,
+            ),
+            ("search, 100 relinked".into(), many_relinked(100), true),
+            ("search, 101 relinked".into(), many_relinked(101), false),
+            ("search, 10 candidates".into(), candidates(10), true),
+            ("search, 11 candidates".into(), candidates(11), false),
+            ("search, no candidates".into(), candidates(0), false),
+            ("explicit".into(), explicit(), true),
+            ("explicit, dry run".into(), dry(explicit()), true),
+            (
+                "explicit, refreshed".into(),
+                with(explicit(), "refreshed", json!(true)),
+                true,
+            ),
+            ("search, no roots".into(), without(search(), "roots"), false),
+            (
+                "search, roots not strings".into(),
+                with(search(), "roots", json!([1])),
+                false,
+            ),
+            (
+                "search, no counts".into(),
+                without(search(), "counts"),
+                false,
+            ),
+            (
+                "search, no unmatched count".into(),
+                counts("unmatched", None),
+                false,
+            ),
+            (
+                "search, negative count".into(),
+                counts("relinked", Some(json!(-1))),
+                false,
+            ),
+            (
+                "search, fractional count".into(),
+                counts("ambiguous", Some(json!(1.5))),
+                false,
+            ),
+            (
+                "search, extra count".into(),
+                counts("skipped", Some(json!(0))),
+                false,
+            ),
+            (
+                "search, no relinked".into(),
+                without(search(), "relinked"),
+                false,
+            ),
+            (
+                "search, no ambiguous".into(),
+                without(search(), "ambiguous"),
+                false,
+            ),
+            (
+                "search, no unmatched".into(),
+                without(search(), "unmatched"),
+                false,
+            ),
+            (
+                "search, no truncated".into(),
+                without(search(), "truncated"),
+                false,
+            ),
+            (
+                "search, relinked without from".into(),
+                with(
+                    search(),
+                    "relinked",
+                    json!([{"resource": record("0192f0c4-0000-7000-8000-000000000901", false)}]),
+                ),
+                false,
+            ),
+            (
+                "search, relinked entry is a bare record".into(),
+                with(
+                    search(),
+                    "relinked",
+                    json!([record("0192f0c4-0000-7000-8000-000000000901", false)]),
+                ),
+                false,
+            ),
+            (
+                "search, ambiguous without candidates".into(),
+                with(
+                    search(),
+                    "ambiguous",
+                    json!([{"resource": record("0192f0c4-0000-7000-8000-000000000902", true)}]),
+                ),
+                false,
+            ),
+            (
+                "search, unmatched is not records".into(),
+                with(search(), "unmatched", json!(["x"])),
+                false,
+            ),
+            (
+                "search, extra key".into(),
+                with(search(), "skipped", json!([])),
+                false,
+            ),
+            (
+                "search, dry_run alone".into(),
+                with(search(), "dry_run", json!(true)),
+                false,
+            ),
+            (
+                "search, changes alone".into(),
+                with(search(), "changes", json!([])),
+                false,
+            ),
+            (
+                "search, dry_run false".into(),
+                with(dry(search()), "dry_run", json!(false)),
+                false,
+            ),
+            (
+                "search, dry run without changes".into(),
+                without(dry(search()), "changes"),
+                false,
+            ),
+            (
+                "search, bad op".into(),
+                with(
+                    dry(search()),
+                    "changes",
+                    json!([{"op": "replace", "triple": "<a:b> <a:c> <a:d> ."}]),
+                ),
+                false,
+            ),
+            (
+                "search, version 2".into(),
+                with(search(), "schema_version", json!(2)),
+                false,
+            ),
+            (
+                "search, no schema_version".into(),
+                without(search(), "schema_version"),
+                false,
+            ),
+            (
+                "explicit, no from".into(),
+                without(explicit(), "from"),
+                false,
+            ),
+            (
+                "explicit, no refreshed".into(),
+                without(explicit(), "refreshed"),
+                false,
+            ),
+            (
+                "explicit, refreshed not a bool".into(),
+                with(explicit(), "refreshed", json!("no")),
+                false,
+            ),
+            (
+                "explicit, no resource".into(),
+                without(explicit(), "resource"),
+                false,
+            ),
+            (
+                "explicit, resource is a list".into(),
+                with(explicit(), "resource", json!([])),
+                false,
+            ),
+            (
+                "explicit, extra key".into(),
+                with(explicit(), "forced", json!(true)),
+                false,
+            ),
+            (
+                "explicit with roots".into(),
+                with(explicit(), "roots", json!(["/TMP/root"])),
+                false,
+            ),
+            (
+                "explicit, dry_run alone".into(),
+                with(explicit(), "dry_run", json!(true)),
+                false,
+            ),
+            (
+                "forget payload".into(),
+                json!({"schema_version": 1,
+                    "resource": record("0192f0c4-0000-7000-8000-000000000901", false)}),
+                false,
+            ),
+        ];
+        for (name, instance, valid) in cases {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema relink` should {} `{name}`: {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #21: `hali schema relink` is served, and `relink` is in the list in sorted place: 26
+    /// names, between `relation remove` and `scan`.
+    #[test]
+    fn relink_schema_is_listed() {
+        let listed = fetch_list();
+        assert_eq!(listed.len(), 26, "{listed:?}");
+        let at = listed
+            .iter()
+            .position(|n| n == "relink")
+            .expect("relink is listed");
+        assert_eq!(listed[at - 1], "relation remove");
+        assert_eq!(listed[at + 1], "scan");
+        assert!(listed.windows(2).all(|w| w[0] < w[1]), "sorted: {listed:?}");
+        assert_eq!(fetch("relink")["title"], "hali relink --json");
+    }
+
+    /// #21: the `error` schema has a branch for each new rule: `POSSIBLE_MOVE` (the path being
+    /// added and the ids of the Missing Resources with its content) and `HASH_MISMATCH` (the
+    /// Resource, the path, the recorded hash and the hash of the file).
+    #[test]
+    fn relink_error_branches() {
+        let sha_a = "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03";
+        let sha_b = "a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447";
+        let id = "0192f0c4-0000-7000-8000-000000000904";
+        let id2 = "0192f0c4-0000-7000-8000-000000000905";
+        let mismatch = |details: Value| error("HASH_MISMATCH", details);
+        let cases: Vec<(Value, bool)> = vec![
+            (
+                error("POSSIBLE_MOVE", json!({"path": "/a/b", "resources": [id]})),
+                true,
+            ),
+            (
+                error(
+                    "POSSIBLE_MOVE",
+                    json!({"path": "/a/b", "resources": [id, id2]}),
+                ),
+                true,
+            ),
+            (error("POSSIBLE_MOVE", json!({})), false),
+            (error("POSSIBLE_MOVE", json!({"path": "/a/b"})), false),
+            (error("POSSIBLE_MOVE", json!({"resources": [id]})), false),
+            (
+                error("POSSIBLE_MOVE", json!({"path": "/a/b", "resources": []})),
+                false,
+            ),
+            (
+                error("POSSIBLE_MOVE", json!({"path": "/a/b", "resources": [5]})),
+                false,
+            ),
+            (
+                error("POSSIBLE_MOVE", json!({"path": "/a/b", "resources": id})),
+                false,
+            ),
+            (
+                error("POSSIBLE_MOVE", json!({"path": 5, "resources": [id]})),
+                false,
+            ),
+            (
+                mismatch(
+                    json!({"resource": id, "path": "/a/b", "expected": sha_a, "actual": sha_b}),
+                ),
+                true,
+            ),
+            (mismatch(json!({})), false),
+            (
+                mismatch(json!({"path": "/a/b", "expected": sha_a, "actual": sha_b})),
+                false,
+            ),
+            (
+                mismatch(json!({"resource": id, "expected": sha_a, "actual": sha_b})),
+                false,
+            ),
+            (
+                mismatch(json!({"resource": id, "path": "/a/b", "actual": sha_b})),
+                false,
+            ),
+            (
+                mismatch(json!({"resource": id, "path": "/a/b", "expected": sha_a})),
+                false,
+            ),
+            (
+                mismatch(json!({"resource": id, "path": "/a/b", "expected": 1, "actual": sha_b})),
+                false,
+            ),
+        ];
+        let v = validator("error");
+        for (instance, valid) in cases {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema error` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
     }
 
     /// #18: what the `relate`, `unrelate` and `relation add|list|remove` schemas accept and

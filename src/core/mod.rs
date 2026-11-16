@@ -5,6 +5,7 @@ pub mod concept;
 pub mod config;
 pub mod describe;
 pub mod relation;
+pub mod relink;
 pub mod resource;
 pub mod scan;
 pub mod schema;
@@ -501,7 +502,7 @@ impl Error {
             json!({"path": path.display().to_string()}),
         )
         .fix(
-            "Fix the config file; only [user] name, [vocabulary] language and [scan] exclude, include_hidden and max_size are read.",
+            "Fix the config file; only [user] name, [vocabulary] language, [files] dir and [scan] exclude, include_hidden and max_size are read.",
         )
     }
 
@@ -563,6 +564,43 @@ impl Error {
             json!({"path": path}),
         )
         .fix("Check that you can read the file and the directories above it.")
+    }
+
+    /// A new file at `path` has the size and content of the Missing Resources `resources`
+    /// (sorted): it was probably moved.
+    pub fn possible_move(path: &str, resources: &[String]) -> Error {
+        let mut err = Error::new(
+            "POSSIBLE_MOVE",
+            1,
+            format!(
+                "{path} has the content of missing Resource {}; nothing was written",
+                resources.join(", ")
+            ),
+            json!({"path": path, "resources": resources}),
+        )
+        .fix("If the file was moved, repair the Resource with hali relink; to catalog it as a new Resource anyway, add it again with --new.");
+        err.suggested_command = Some(match resources {
+            [one] => format!("hali relink {} {}", shell_quote(one), positional(path)),
+            _ => "hali relink".to_string(),
+        });
+        err
+    }
+
+    /// An explicit relink names a file whose content is not the Resource's.
+    pub fn hash_mismatch(resource: &str, path: &str, expected: &str, actual: &str) -> Error {
+        let mut err = Error::new(
+            "HASH_MISMATCH",
+            1,
+            format!("{path} does not have the content of Resource {resource}; nothing was written"),
+            json!({"resource": resource, "path": path, "expected": expected, "actual": actual}),
+        )
+        .fix("Check that the file is the one the Resource describes, or relink with --force to record its new content too.");
+        err.suggested_command = Some(format!(
+            "hali relink {} {} --force",
+            shell_quote(resource),
+            positional(path)
+        ));
+        err
     }
 
     /// A Resource reference matches no Resource.

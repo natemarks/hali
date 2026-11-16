@@ -223,12 +223,25 @@ pub enum InspectError {
     Other,
     /// It exists but cannot be opened or read.
     Unreadable,
+    /// It holds more bytes than the limit of `inspect_bounded`.
+    TooLarge,
 }
 
 /// Opens the regular file at the real path `path` once, read-only and non-blocking, checks on
 /// that descriptor that it is still a regular file, then hashes it by streaming. Nothing is
 /// ever written to it.
 pub fn inspect(path: &Path) -> Result<Inspected, InspectError> {
+    inspect_upto(path, None)
+}
+
+/// `inspect`, reading at most `limit + 1` bytes: a file that holds more than `limit` bytes (by
+/// its size on the open descriptor, or by what is read, should it grow) is `TooLarge`. The other
+/// errors are `inspect`'s and come first.
+pub fn inspect_bounded(path: &Path, limit: u64) -> Result<Inspected, InspectError> {
+    inspect_upto(path, Some(limit))
+}
+
+fn inspect_upto(path: &Path, limit: Option<u64>) -> Result<Inspected, InspectError> {
     use sha2::{Digest, Sha256};
     use std::io::Read;
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
@@ -246,13 +259,18 @@ pub fn inspect(path: &Path) -> Result<Inspected, InspectError> {
             _ => InspectError::Unreadable,
         })?;
     let meta = kind(file.metadata())?;
+    if limit.is_some_and(|limit| meta.len() > limit) {
+        return Err(InspectError::TooLarge);
+    }
+    // Without a limit the read is unbounded; with one it stops one byte past it.
+    let mut reader = (&mut file).take(limit.map_or(u64::MAX, |l| l.saturating_add(1)));
 
     let mut hasher = Sha256::new();
     let mut head = Vec::new();
     let mut buf = vec![0u8; 64 * 1024];
     let mut byte_size = 0u64;
     loop {
-        let n = match file.read(&mut buf) {
+        let n = match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => n,
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
@@ -262,6 +280,9 @@ pub fn inspect(path: &Path) -> Result<Inspected, InspectError> {
         let room = crate::media_type::HEAD_LEN.saturating_sub(head.len());
         head.extend_from_slice(&buf[..n.min(room)]);
         byte_size += n as u64;
+    }
+    if limit.is_some_and(|limit| byte_size > limit) {
+        return Err(InspectError::TooLarge);
     }
     let sha256 = hasher
         .finalize()

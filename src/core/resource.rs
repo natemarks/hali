@@ -354,6 +354,66 @@ pub fn add_all(
     })
 }
 
+/// Refuses an `add` that looks like a move (spec §6): the first file, in argument order, whose
+/// path no Resource records, that is not empty and that has the byte size and SHA-256 of a
+/// Missing Resource (`stat` finds no regular file at its recorded path) is `POSSIBLE_MOVE`, naming
+/// every such Resource. Only Resources with that content are `stat`ed.
+pub fn check_moves(
+    store: &Store,
+    files: &[FileFacts],
+    stat: impl Fn(&str) -> Option<(u64, i64)>,
+) -> Result<(), Error> {
+    for facts in files {
+        if facts.byte_size == 0 || by_path(store, &facts.path).is_some() {
+            continue;
+        }
+        let mut missing: Vec<String> = with_content(store, facts.byte_size, &facts.sha256)
+            .iter()
+            .filter(|r| stat(&recorded_path(store, r)).is_none())
+            .map(id_of)
+            .collect();
+        if !missing.is_empty() {
+            missing.sort();
+            return Err(Error::possible_move(&facts.path, &missing));
+        }
+    }
+    Ok(())
+}
+
+/// The Resources that record this byte size and SHA-256.
+fn with_content(store: &Store, byte_size: u64, sha256: &str) -> Vec<NamedNode> {
+    let value = Literal::new_typed_literal(sha256, xsd::HEX_BINARY);
+    subjects(store, spdx::CHECKSUM_VALUE, value.as_ref().into())
+        .iter()
+        .flat_map(|node| subjects(store, spdx::CHECKSUM, node.as_ref().into()))
+        .filter(|r| is_resource(store, r) && recorded_size(store, r) == byte_size)
+        .collect::<BTreeSet<NamedNode>>()
+        .into_iter()
+        .collect()
+}
+
+/// The byte size a Resource records; 0 when it records none.
+fn recorded_size(store: &Store, resource: &NamedNode) -> u64 {
+    first_literal(store, resource, dcat::BYTE_SIZE)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+}
+
+/// The SHA-256 a Resource records: the value of its first checksum node that has one.
+pub(crate) fn recorded_sha256(store: &Store, resource: &NamedNode) -> Option<String> {
+    objects(store, resource, spdx::CHECKSUM)
+        .into_iter()
+        .find_map(|t| match t {
+            Term::NamedNode(node) => first_literal(store, &node, spdx::CHECKSUM_VALUE),
+            _ => None,
+        })
+}
+
+/// Every cataloged Resource, by IRI (so in id order).
+pub(crate) fn all_resources(store: &Store) -> Vec<NamedNode> {
+    subjects(store, rdf::TYPE.as_str(), iri(RESOURCE).as_ref())
+}
+
 /// The id of the Resource a reference names (spec §9.2): a full hyphenated UUID, bare or as a
 /// `urn:uuid:` and in any case, else a path, which `path_of` turns into the real path (or the
 /// absolute path, if nothing exists there). Prefixes are not accepted.
@@ -1255,7 +1315,7 @@ fn is_resource(store: &Store, resource: &NamedNode) -> bool {
 }
 
 /// The Resource whose `dcat:downloadURL` is the URL of `path`.
-fn by_path(store: &Store, path: &str) -> Option<NamedNode> {
+pub(crate) fn by_path(store: &Store, path: &str) -> Option<NamedNode> {
     let url = NamedNode::new(file_url(path)).ok()?;
     subjects(store, dcat::DOWNLOAD_URL, url.as_ref().into())
         .into_iter()

@@ -1,0 +1,5 @@
+---
+source: tests/cli_relink.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"POSSIBLE_MOVE","message":"/TMP/root/moved/renamed.txt has the content of missing Resource 018bcfe5-6801-710a-adec-89025cc1beeb; nothing was written","details":{"path":"/TMP/root/moved/renamed.txt","resources":["018bcfe5-6801-710a-adec-89025cc1beeb"]},"suggested_fix":"If the file was moved, repair the Resource with hali relink; to catalog it as a new Resource anyway, add it again with --new.","suggested_command":"hali relink 018bcfe5-6801-710a-adec-89025cc1beeb '/TMP/root/moved/renamed.txt'"}}

@@ -1,0 +1,5 @@
+---
+source: tests/cli_relink.rs
+expression: out.stdout
+---
+{"schema_version":1,"roots":["/TMP/root"],"counts":{"relinked":1,"ambiguous":0,"unmatched":0},"relinked":[{"resource":{"id":"018bcfe5-6801-710a-adec-89025cc1beeb","path":"/TMP/root/moved/renamed.txt","title":"a","media_type":"text/plain","editable":true,"missing":false,"stale":false,"types":[],"tags":[],"byte_size":6,"modified":"2026-10-22T10:00:00Z"},"from":"/TMP/root/a.txt"}],"ambiguous":[],"unmatched":[],"truncated":false}

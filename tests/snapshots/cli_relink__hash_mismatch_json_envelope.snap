@@ -1,0 +1,5 @@
+---
+source: tests/cli_relink.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"HASH_MISMATCH","message":"/TMP/root/moved/renamed.txt does not have the content of Resource 018bcfe5-6801-710a-adec-89025cc1beeb; nothing was written","details":{"resource":"018bcfe5-6801-710a-adec-89025cc1beeb","path":"/TMP/root/moved/renamed.txt","expected":"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03","actual":"a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447"},"suggested_fix":"Check that the file is the one the Resource describes, or relink with --force to record its new content too.","suggested_command":"hali relink 018bcfe5-6801-710a-adec-89025cc1beeb '/TMP/root/moved/renamed.txt' --force"}}

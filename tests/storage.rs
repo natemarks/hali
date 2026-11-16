@@ -119,3 +119,69 @@ fn round_trip_is_byte_identical() {
         assert_eq!(hali::storage::to_turtle(&store, file), want, "{name}");
     }
 }
+
+/// #21 (spec §6, **Relink:**): `storage::inspect_bounded(path, limit)` is `inspect` that reads
+/// at most `limit + 1` bytes. A file of at most `limit` bytes is inspected as `inspect` does; a
+/// bigger one is `InspectError::TooLarge`, and the read stops after the first `limit + 1` bytes
+/// (a relink hashes a candidate with the Resource's recorded size as the limit, so a file that
+/// grew, or a huge one, costs a few bytes of reading and not a full hash).
+#[test]
+fn inspect_bounded_stops_after_limit() {
+    use hali::storage::{InspectError, inspect, inspect_bounded};
+    use std::time::{Duration, Instant};
+
+    const SHA_HELLO: &str = "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03";
+    let dir = tempfile::tempdir().unwrap();
+
+    // Exactly `limit` bytes: inspected, with what `inspect` gives.
+    let hello = dir.path().join("hello.txt");
+    std::fs::write(&hello, b"hello\n").unwrap();
+    for limit in [6, 7, 1 << 20] {
+        let got = inspect_bounded(&hello, limit).unwrap();
+        let want = inspect(&hello).unwrap();
+        assert_eq!(got.byte_size, 6, "limit {limit}");
+        assert_eq!(got.sha256, SHA_HELLO, "limit {limit}");
+        assert_eq!(got.mtime, want.mtime, "limit {limit}");
+        assert_eq!(got.head, want.head, "limit {limit}");
+    }
+
+    // One byte over: too large, whatever the content.
+    assert_eq!(
+        inspect_bounded(&hello, 5).err(),
+        Some(InspectError::TooLarge)
+    );
+    assert_eq!(
+        inspect_bounded(&hello, 0).err(),
+        Some(InspectError::TooLarge)
+    );
+
+    // The other errors are the ones `inspect` gives, and win over the limit.
+    assert_eq!(
+        inspect_bounded(&dir.path().join("gone"), 10).err(),
+        Some(InspectError::Missing)
+    );
+    assert_eq!(
+        inspect_bounded(dir.path(), 10).err(),
+        Some(InspectError::Directory)
+    );
+
+    // An empty file with limit 0 is inspected (it holds no more than the limit).
+    let empty = dir.path().join("empty");
+    std::fs::write(&empty, b"").unwrap();
+    assert_eq!(inspect_bounded(&empty, 0).unwrap().byte_size, 0);
+
+    // The read really stops: a 4 GiB sparse file with a 10-byte limit must not be hashed (hashing
+    // it takes many seconds; stopping after 11 bytes takes microseconds).
+    let big = dir.path().join("big");
+    let file = std::fs::File::create(&big).unwrap();
+    file.set_len(4 << 30).unwrap();
+    drop(file);
+    let started = Instant::now();
+    let err = inspect_bounded(&big, 10).err();
+    assert_eq!(err, Some(InspectError::TooLarge));
+    assert!(
+        started.elapsed() < Duration::from_millis(1500),
+        "inspect_bounded read the whole file: {:?}",
+        started.elapsed()
+    );
+}

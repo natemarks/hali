@@ -716,13 +716,13 @@ mod goal {
             out.stdout,
             "{\"schema_version\":1,\"schemas\":[\"add\",\"concept add\",\"concept edit\",\
              \"concept list\",\"concept remove\",\"concept rename\",\"concept show\",\"describe\",\"edit\",\"error\",\"find\",\"forget\",\"refresh\",\"relate\",\
-             \"relation add\",\"relation list\",\"relation remove\",\"scan\",\"schema\",\"show\",\
+             \"relation add\",\"relation list\",\"relation remove\",\"relink\",\"scan\",\"schema\",\"show\",\
              \"type add\",\"type list\",\"type remove\",\"unrelate\",\"validate\"]}\n"
         );
         let out = env.run(["schema"]);
         assert_eq!(
             out.stdout,
-            "add\nconcept add\nconcept edit\nconcept list\nconcept remove\nconcept rename\nconcept show\ndescribe\nedit\nerror\nfind\nforget\nrefresh\nrelate\nrelation add\nrelation list\nrelation remove\nscan\nschema\nshow\ntype add\ntype list\ntype remove\nunrelate\nvalidate\n"
+            "add\nconcept add\nconcept edit\nconcept list\nconcept remove\nconcept rename\nconcept show\ndescribe\nedit\nerror\nfind\nforget\nrefresh\nrelate\nrelation add\nrelation list\nrelation remove\nrelink\nscan\nschema\nshow\ntype add\ntype list\ntype remove\nunrelate\nvalidate\n"
         );
     }
 

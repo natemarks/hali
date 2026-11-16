@@ -98,10 +98,11 @@ mod goal {
             self.root.join("data")
         }
 
-        /// A file under files/ with the pinned mtime (plus nanoseconds).
+        /// A file under files/ with the pinned mtime (plus nanoseconds). Its content is not that
+        /// of the fixture's Resources, whose files are all gone: adding it is no `POSSIBLE_MOVE`.
         fn file(&self, name: &str) -> String {
             let path = self.root.join("files").join(name);
-            std::fs::write(&path, b"hello\n").unwrap();
+            std::fs::write(&path, b"notes\n").unwrap();
             let t = SystemTime::UNIX_EPOCH + Duration::new(MTIME_SECS, 987_654_321);
             std::fs::File::open(&path).unwrap().set_modified(t).unwrap();
             path.to_str().unwrap().to_string()
@@ -1086,7 +1087,7 @@ mod goal {
             );
         }
         let v = ok(&env.run(["schema", "--json"]));
-        assert_eq!(v["schemas"].as_array().unwrap().len(), 25, "{v}");
+        assert_eq!(v["schemas"].as_array().unwrap().len(), 26, "{v}");
         for name in ["type add", "type list", "type remove"] {
             let words: Vec<&str> = name.split(' ').collect();
             let mut args = vec!["schema"];
