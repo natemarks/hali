@@ -34,7 +34,7 @@ Prompt: `forget <n> missing resources under <root>? [y/N] ` (root escaped via `p
 - Rewrite and goal-tag: `scan_json`, `scan_dry_run_json`, `scan_text`, `schema_contract::scan_schema_accepts_and_rejects` (its "counts extra key `relinked`" case flips); locked rewrites of `cli_scan__scan_json.snap` and `cli_dry_run__scan_dry_run_json.snap`.
 - Unaffected (checked): `filters_gate_only_new_registrations`, `missing_and_prefix_rule`, `size_filter`, `nothing_to_do`, `scan_caps_lists_but_counts_exactly`, `scan_dry_run_matches_real_run`, every other CLI test (the `store` fixture's size matches nothing).
 
-## Goal map (24 rows)
+## Goal map (28 rows)
 
 All new tests are goal-tagged inside `#[cfg(feature = "goal")] mod moves_and_prune { use super::*; ... }`, nested in the existing `mod goal` of `tests/core_scan.rs` and `tests/cli_scan.rs`.
 
@@ -64,6 +64,10 @@ All new tests are goal-tagged inside `#[cfg(feature = "goal")] mod moves_and_pru
 | 22 | Dry-run guard covers prune | `.goal/checks/02-dry_run_guard_scan_prune.sh`: the scan row must be `("scan", "store", &["scan", "src/ontology", "--prune", "--force"])`, no `--yes` | `MISSING: ... found ("scan","store",&["scan","src/ontology"])` |
 | 23 | No other golden changes (every schema-list golden unchanged: no schema name is added); the two rewritten scan goldens equal main's with only the new keys inserted | `.goal/checks/03-existing_goldens_unchanged.sh` | a guard, passes before |
 | 24 | `forget` and `relink` behaviour unchanged by the refactor | existing `core_forget`, `cli_forget`, `core_relink`, `cli_relink` plus guard 23 | green before |
+| 25 | An ambiguous Resource is never pruned, even `Forced`; the plain Missing one is (reviewer, blocking) | `core_scan::moves_and_prune::ambiguous_is_never_pruned_even_forced`; `cli_scan::moves_and_prune::prune_never_touches_files` (`--force --yes` asserts `pruned`, `missing`, `ambiguous`, `relinked` ids) | `Prune::Forced => true` in `src/core/scan.rs` fails both |
+| 26 | A scan that forgets nothing never asks, with an add, refresh or relink pending (reviewer, blocking) | `cli_scan::moves_and_prune::forgetting_nothing_never_asks_with_other_changes` (open stdin, `HALI_TEST_TTY=0`, no `--yes`) | `(*prune).then(` in `src/cli/mod.rs` gives `CONFIRMATION_REQUIRED` |
+| 27 | `truncated` covers `ambiguous` (reviewer, advisory) | `core_scan::moves_and_prune::truncated_covers_ambiguous` (101 ambiguous outside the root) | `counts.ambiguous` dropped from the `truncated` array |
+| 28 | (a) content of a present and a Missing Resource relinks the Missing one; (b) a pruned non-IANA format node keeps its type triple when an added file uses it; (c) ambiguous outside the root is only ambiguous (reviewer, advisory) | `content_of_a_present_and_a_missing_resource_relinks`, `pruned_format_node_kept_when_an_added_file_uses_it`, `ambiguous_outside_the_root_is_only_ambiguous` | (a) pool filter `is_missing && with_content(..).len() == 1`; (b) `apply` of removes then adds separately (a remove of the type triple shows in `changes`); (c) deleting `cataloged.retain(under_root)` |
 
 Check 01 must find, in the `^\*\*Scan:\*\*` paragraph: `--prune`, `--force`, `--yes`, `relinked`, `ambiguous`, `pruned`, `candidates`, `from`, `one-to-one`, `CONFIRMATION_REQUIRED`, `inbound relations`, `SHACL_VIOLATION`, `forgot|would forget resource`, `relinked|would relink resource`, `candidate <path>`, `--force is for --prune`, `100`, `10`; the absence of `(#24)` and of `Resources outside the root are not looked at`; the synopsis contains `[--prune [--force]]`; §9.8 contains `forget <n> missing resources under <root>? [y/N] `, `"scan"` and `--prune --yes`.
 

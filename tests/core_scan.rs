@@ -2191,5 +2191,150 @@ mod goal {
             assert!(m.value.truncated);
             assert!(!resources_ttl(&store).contains("/r/old/"));
         }
+
+        /// Row 25: An ambiguous Resource is never pruned, not even with `Forced`; a plain
+        /// Missing one is.
+        #[test]
+        fn ambiguous_is_never_pruned_even_forced() {
+            let mut store = empty_store();
+            let records = catalog(&mut store, &[("/r/a.txt", 5, 5), ("/r/c.txt", 8, 8)]);
+            let a = records[0].id.clone();
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::Forced,
+                vec![file("/r/m1.txt", 5), file("/r/m2.txt", 5)],
+                |_| None,
+                |p| Ok(facts(p, 5, &sha(5), "text/plain")),
+                no_glob,
+            );
+            let m = result.unwrap();
+            let v = &m.value;
+            assert_eq!(v.ambiguous.len(), 1);
+            assert_eq!(v.ambiguous[0].resource.id, a);
+            assert_eq!(paths(&v.pruned), vec!["/r/c.txt"]);
+            assert_eq!(paths(&v.missing), vec!["/r/a.txt"]);
+            assert!(v.added.is_empty() && v.relinked.is_empty());
+            assert_eq!(tally(&v.counts), [0, 0, 0, 1, 0, 1, 1, 0]);
+            let ttl = resources_ttl(&store);
+            assert!(ttl.contains("file:///r/a.txt") && !ttl.contains("file:///r/c.txt"));
+        }
+
+        /// Row 27: `truncated` covers `ambiguous`: 101 ambiguous Resources outside the root, so
+        /// `missing` (under the root) is empty and no other list is long.
+        #[test]
+        fn truncated_covers_ambiguous() {
+            let old: Vec<FileFacts> = (0..101)
+                .map(|i| facts(&format!("/o/f{i:03}.txt"), 2, &sha(i + 1), "text/plain"))
+                .collect();
+            let mut store = empty_store();
+            catalog_facts(&mut store, &old);
+            let entries: Vec<Walked> = (0..101)
+                .flat_map(|i| [format!("/r/x/{i:03}b.txt"), format!("/r/x/{i:03}a.txt")])
+                .map(|p| file(&p, 2))
+                .collect();
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::Off,
+                entries,
+                |_| None,
+                |p| {
+                    let i: usize = p["/r/x/".len()..][..3].parse().unwrap();
+                    Ok(facts(p, 2, &sha(i + 1), "text/plain"))
+                },
+                no_glob,
+            );
+            let m = result.unwrap();
+            let v = &m.value;
+            assert_eq!(v.counts.ambiguous, 101);
+            assert_eq!(v.counts.missing, 0);
+            assert_eq!(v.ambiguous.len(), 100);
+            assert!(v.truncated);
+        }
+
+        /// Row 28a: A new file with the content of a present Resource and of one Missing
+        /// Resource relinks the Missing one, and is not registered.
+        #[test]
+        fn content_of_a_present_and_a_missing_resource_relinks() {
+            let mut store = empty_store();
+            let records = catalog(&mut store, &[("/r/p.txt", 5, 5), ("/r/q.txt", 5, 5)]);
+            let q = records[1].id.clone();
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::Off,
+                vec![file("/r/n.txt", 5), file("/r/p.txt", 5)],
+                stat_in(&[("/r/p.txt", 5)]),
+                |p| Ok(moved_facts(p, 5, 5)),
+                no_glob,
+            );
+            let m = result.unwrap();
+            let v = &m.value;
+            assert_eq!(moves(v), vec![("/r/q.txt", "/r/n.txt")]);
+            assert_eq!(v.relinked[0].resource.id, q);
+            assert!(v.added.is_empty() && v.ambiguous.is_empty() && v.missing.is_empty());
+            assert!(!resources_ttl(&store).contains("file:///r/q.txt"));
+        }
+
+        /// Row 28b: A pruned Resource's non-IANA format node, with a new file of the same
+        /// format added in the same run, keeps its `a dcterms:MediaType` triple.
+        #[test]
+        fn pruned_format_node_kept_when_an_added_file_uses_it() {
+            let mut store = empty_store();
+            catalog_facts(
+                &mut store,
+                &[facts("/r/old.txt", 5, &sha(5), "text/x-forget")],
+            );
+            assert!(resources_ttl(&store).contains("media-types/text/x-forget"));
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::On,
+                vec![file("/r/new.txt", 6)],
+                |_| None,
+                |p| Ok(facts(p, 6, &sha(6), "text/x-forget")),
+                no_glob,
+            );
+            let m = result.unwrap();
+            assert_eq!(paths(&m.value.pruned), vec!["/r/old.txt"]);
+            assert_eq!(paths(&m.value.added), vec!["/r/new.txt"]);
+            let ttl = resources_ttl(&store);
+            assert!(ttl.contains("media-types/text/x-forget> a dcterms:MediaType"));
+            assert!(
+                !m.changes
+                    .iter()
+                    .any(|c| c.op == Op::Remove && c.triple.contains("x-forget> <")),
+                "the type triple is put back, not removed: {:?}",
+                m.changes
+            );
+        }
+
+        /// Row 28c: Ambiguous Resources outside the root are listed in `ambiguous` and in
+        /// neither `missing` nor `pruned`, even forced.
+        #[test]
+        fn ambiguous_outside_the_root_is_only_ambiguous() {
+            let mut store = empty_store();
+            let records = catalog(&mut store, &[("/o/a.txt", 5, 5)]);
+            let a = records[0].id.clone();
+            let before = resources_ttl(&store);
+            let (result, _) = run(
+                &mut store,
+                &opts("/r", 1 << 30, &[]),
+                Prune::Forced,
+                vec![file("/r/m1.txt", 5), file("/r/m2.txt", 5)],
+                |_| None,
+                |p| Ok(facts(p, 5, &sha(5), "text/plain")),
+                no_glob,
+            );
+            let m = result.unwrap();
+            let v = &m.value;
+            assert_eq!(v.ambiguous.len(), 1);
+            assert_eq!(v.ambiguous[0].resource.id, a);
+            assert!(v.missing.is_empty() && v.pruned.is_empty() && v.added.is_empty());
+            assert_eq!(tally(&v.counts), [0, 0, 0, 1, 0, 0, 0, 0]);
+            assert!(m.changes.is_empty());
+            assert_eq!(resources_ttl(&store), before);
+        }
     }
 }

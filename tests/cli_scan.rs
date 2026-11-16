@@ -1719,7 +1719,12 @@ mod goal {
         /// Runs the binary with a stdin pipe the test holds open and empty: a command that
         /// reads stdin never returns.
         fn with_open_stdin(env: &Env, args: &[&str]) -> Out {
-            let mut child = env.spawn(&[], args);
+            with_open_stdin_env(env, &[], args)
+        }
+
+        /// `with_open_stdin` with extra environment variables.
+        fn with_open_stdin_env(env: &Env, extra: &[(&str, &str)], args: &[&str]) -> Out {
+            let mut child = env.spawn(extra, args);
             let stdin = child.stdin.take().unwrap();
             let started = Instant::now();
             let status = loop {
@@ -2193,7 +2198,7 @@ mod goal {
         /// Row 15: Files are never touched: not by a prune, nor by moves.
         #[test]
         fn prune_never_touches_files() {
-            let (env, _) = moves_scene(["1", "2", "3"]);
+            let (env, ids) = moves_scene(["1", "2", "3"]);
             let root = env.root_str();
             let before = tree_print(&env.root());
             let out = env.run_env(
@@ -2209,6 +2214,13 @@ mod goal {
             );
             assert_eq!(out.code, Some(0), "{}", out.stderr);
             assert_eq!(tree_print(&env.root()), before);
+            // Row 25: even forced, the ambiguous b is not forgotten; only the plain Missing c is.
+            let v = ok_json(&out);
+            assert_eq!(ids_of(&v["pruned"]), [ids[2].clone()]);
+            assert_eq!(ids_of(&v["missing"]), [ids[1].clone()]);
+            assert_eq!(resource_ids(&v["ambiguous"]), [ids[1].clone()]);
+            assert_eq!(resource_ids(&v["relinked"]), [ids[0].clone()]);
+            assert_eq!(counts8(&v), [1, 0, 1, 1, 0, 1, 1, 0]);
 
             let (env, _) = prune_scene(["1", "2", "3"], &["a.txt", "b.txt"]);
             let before = tree_print(&env.root());
@@ -2250,6 +2262,42 @@ mod goal {
             let v = ok_json(&out);
             assert_eq!(counts8(&v), [0, 0, 0, 0, 2, 1, 0, 0]);
             assert_eq!(ids_of(&v["missing"]), [ids[1].clone()]);
+        }
+
+        /// Row 26: A scan that forgets nothing never asks, however much else it has to write:
+        /// an add, a refresh or a relink pending, with nothing Missing or only a blocked one.
+        #[test]
+        fn forgetting_nothing_never_asks_with_other_changes() {
+            let tty0 = [("HALI_TEST_TTY", "0"), ("HALI_TEST_ID_SEED", "9")];
+            let check = |env: &Env, want: [u64; 8], what: &str| {
+                let root = env.root_str();
+                let out =
+                    with_open_stdin_env(env, &tty0, &["--json", "scan", root.as_str(), "--prune"]);
+                assert_eq!(out.code, Some(0), "{what}: {}", out.stderr);
+                assert_eq!(out.stderr, "", "{what}: no prompt, no error");
+                let v = ok_json(&out);
+                assert_eq!(counts8(&v), want, "{what}");
+            };
+
+            // An add: nothing Missing.
+            let (env, _) = prune_scene(["1", "2", "3"], &[]);
+            env.put("d.txt", b"delta\n");
+            check(&env, [1, 0, 0, 0, 3, 0, 0, 0], "add");
+
+            // An add: the only Missing Resource is blocked by an inbound relation.
+            let (env, _) = prune_scene(["1", "2", "3"], &["b.txt"]);
+            env.put("d.txt", b"delta\n");
+            check(&env, [1, 0, 0, 0, 2, 1, 0, 0], "add, blocked");
+
+            // A refresh: a.txt changed.
+            let (env, _) = prune_scene(["1", "2", "3"], &[]);
+            env.put("a.txt", b"alpha, changed\n");
+            check(&env, [0, 1, 0, 0, 2, 0, 0, 0], "refresh");
+
+            // A relink: a.txt moved.
+            let (env, _) = prune_scene(["1", "2", "3"], &[]);
+            std::fs::rename(env.root().join("a.txt"), env.root().join("moved.txt")).unwrap();
+            check(&env, [0, 0, 1, 0, 2, 0, 0, 0], "relink");
         }
 
         // ---- the flags ------------------------------------------------------------------------------
