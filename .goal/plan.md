@@ -17,7 +17,7 @@ Approved by the human. Contract wording is in the "Groomed contract (approved)" 
 
 1 empty files excluded from matching and POSSIBLE_MOVE (goal row 24); 2 full `files.dir` chain here; 3 explicit relink of a non-Missing Resource allowed; 4 `--force` asks only when content differs; 5 POSSIBLE_MOVE before UNKNOWN_TYPE/UNKNOWN_CONCEPT; 6 walk skips not reported; 7 unusable default roots skipped silently.
 
-## Goal map (24 rows)
+## Goal map (29 rows)
 
 Test paths: `core_relink` = `tests/core_relink.rs`, `cli_relink` = `tests/cli_relink.rs`, `schema_contract` = `tests/schema_contract.rs`, `storage` = `tests/storage.rs`. Locked goldens: `cli_relink__{relink_json,relink_explicit_json,hash_mismatch_json_envelope,possible_move_json_envelope,schema_list_json}`, `cli_dry_run__relink_dry_run_json`.
 
@@ -47,6 +47,11 @@ Test paths: `core_relink` = `tests/core_relink.rs`, `cli_relink` = `tests/cli_re
 | 22 | Existing goldens unchanged (except the two schema-list goldens, `cli_schema__schema_list_json` and `cli_scan__schema_list_json`, which each gain only the `relink` entry) | `.goal/checks/05-existing_goldens_unchanged.sh` | a guard, passes before the change |
 | 23 | Text mode names old and new path, escapes the terminal; a search never asks and ignores `--yes` | `cli_relink::{relink_text_names_old_and_new_path, text_output_is_escaped_for_the_terminal, a_search_never_asks_and_ignores_yes}` | unknown subcommand |
 | 24 | Empty files are excluded from matching and from `POSSIBLE_MOVE` | `core_relink::{empty_files_are_excluded_from_matching, an_empty_file_is_never_a_possible_move}`, `cli_relink::empty_files_are_never_a_move` | no `core::relink`; no `POSSIBLE_MOVE` contrast |
+| 25 | hali's data dir is never searched: a base root prunes it; an explicit root equal to or inside it is a usage error (exit 2, store unchanged); a default root that is it is skipped silently | `cli_relink::{a_search_over_a_base_never_enters_the_data_dir, a_root_that_is_the_data_dir_or_inside_it_is_a_usage_error, a_default_root_that_is_the_data_dir_is_skipped_silently}` | first passes (guard); others: exit 0 not 2; roots lists the data dir |
+| 26 | An explicit relink never binds a path another Resource records (usage error, exit 2, nothing written); a Resource's own path still works | `core_relink::explicit_relink_never_binds_a_path_another_resource_records`, `cli_relink::an_explicit_relink_to_a_path_another_resource_records_is_a_usage_error` | exit 0 / `Ok` instead of USAGE |
+| 27 | Caps (coverage, passes today): 101 unmatched or 101 ambiguous list 100 and set `truncated`; exactly 100 does not; counts exact | `core_relink::{the_unmatched_list_is_capped_at_100, the_ambiguous_list_is_capped_at_100, exactly_100_relinked_is_not_truncated}` | passes; fails under: dropping `.take(MAX_LISTED)` on `ambiguous` / `unmatched`, `truncated` from `counts.relinked` alone, `>` to `>=` |
+| 28 | A candidate that cannot be hashed is skipped; the other candidate still relinks (coverage, passes today) | `core_relink::an_unreadable_candidate_does_not_stop_the_search` | passes; fails when the `if let Some` of `hash` becomes `let Some .. else break` |
+| 29 | `check_moves` stats only Resources with the new file's size and checksum (coverage, passes today) | `core_relink::check_moves_stats_only_resources_with_the_content` | passes; fails when every Resource is stat-ed |
 
 ## Defined (test-author notes)
 

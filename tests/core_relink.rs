@@ -1011,4 +1011,147 @@ mod goal {
             assert_eq!(err.exit_code(), 3, "{bad}");
         }
     }
+
+    // ---- 25-29: reviewer rows ----------------------------------------------------------------
+
+    // Row 26: an explicit relink never binds a path another Resource records.
+    #[test]
+    fn explicit_relink_never_binds_a_path_another_resource_records() {
+        let mut store = refresh_store();
+        let before = resources_ttl(&store);
+        // R1 records SAME; R4 is Missing with the same content and asks for it.
+        let err = explicit(&mut store, R4, SAME, &hashed(6, SHA_HELLO), false)
+            .expect_err("SAME is R1's path");
+        assert_eq!(err.rule, "USAGE");
+        assert_eq!(err.exit_code(), 2);
+        assert_eq!(resources_ttl(&store), before, "nothing is written");
+        // Forcing does not lift it.
+        let err = explicit(&mut store, R4, SAME, &hashed(6, SHA_HELLO), true)
+            .expect_err("SAME is R1's path");
+        assert_eq!(err.rule, "USAGE");
+        assert_eq!(resources_ttl(&store), before, "nothing is written");
+        // A Resource's own path is no other Resource's: that still works.
+        let m = explicit(&mut store, R1, SAME, &hashed(6, SHA_HELLO), false).unwrap();
+        assert_eq!(m.value.resource.path, SAME);
+    }
+
+    // Row 27: caps.
+    fn capped_search(n: u32, ambiguous: bool) -> Searched {
+        let gens: Vec<Gen> = (1..=n)
+            .map(|k| make(k, u64::from(k), &sha(k as usize)))
+            .collect();
+        let mut store = generated(&gens, None);
+        let mut files: Vec<(String, u64)> = Vec::new();
+        if ambiguous {
+            for k in 1..=u64::from(n) {
+                files.push((format!("/new/f{k:03}a.txt"), k));
+                files.push((format!("/new/f{k:03}b.txt"), k));
+            }
+        }
+        let tree: Tree = vec![("/new", files)];
+        let (result, _) = search(
+            &mut store,
+            &["/new"],
+            &tree,
+            |_: &str| None,
+            |_: &str, cap: u64| Some(hashed(cap, &sha(cap as usize))),
+        );
+        result.unwrap().value
+    }
+
+    #[test]
+    fn the_unmatched_list_is_capped_at_100() {
+        let s = capped_search(101, false);
+        assert_eq!(s.counts.unmatched, 101);
+        assert_eq!(s.unmatched.len(), 100);
+        assert_eq!((s.counts.relinked, s.counts.ambiguous), (0, 0));
+        assert!(s.truncated, "an unmatched list was cut");
+        let s = capped_search(100, false);
+        assert_eq!((s.counts.unmatched, s.unmatched.len()), (100, 100));
+        assert!(!s.truncated, "exactly 100 is not cut");
+    }
+
+    #[test]
+    fn the_ambiguous_list_is_capped_at_100() {
+        let s = capped_search(101, true);
+        assert_eq!(s.counts.ambiguous, 101);
+        assert_eq!(s.ambiguous.len(), 100);
+        assert_eq!((s.counts.relinked, s.counts.unmatched), (0, 0));
+        assert!(s.truncated, "an ambiguous list was cut");
+        let s = capped_search(100, true);
+        assert_eq!((s.counts.ambiguous, s.ambiguous.len()), (100, 100));
+        assert!(!s.truncated, "exactly 100 is not cut");
+    }
+
+    #[test]
+    fn exactly_100_relinked_is_not_truncated() {
+        let gens: Vec<Gen> = (1..=100u32)
+            .map(|n| make(n, u64::from(n), &sha(n as usize)))
+            .collect();
+        let mut store = generated(&gens, None);
+        let files: Vec<(String, u64)> = (1..=100u64)
+            .map(|n| (format!("/new/f{n:03}.txt"), n))
+            .collect();
+        let tree: Tree = vec![("/new", files)];
+        let (result, _) = search(
+            &mut store,
+            &["/new"],
+            &tree,
+            |_: &str| None,
+            |_: &str, cap: u64| Some(hashed(cap, &sha(cap as usize))),
+        );
+        let s = result.unwrap().value;
+        assert_eq!((s.counts.relinked, s.relinked.len()), (100, 100));
+        assert!(!s.truncated);
+    }
+
+    // Row 28: a candidate that cannot be hashed is skipped, not fatal for the others.
+    #[test]
+    fn an_unreadable_candidate_does_not_stop_the_search() {
+        for (bad, good) in [("/new/a.txt", "/new/b.txt"), ("/new/b.txt", "/new/a.txt")] {
+            let mut store = refresh_store();
+            let tree = tree_of("/new", &[("/new/a.txt", 6), ("/new/b.txt", 6)]);
+            let (result, calls) = search(
+                &mut store,
+                &["/new"],
+                &tree,
+                all_but(&[GONE]),
+                |path: &str, _: u64| (path != bad).then(|| hashed(6, SHA_HELLO)),
+            );
+            let s = result.unwrap().value;
+            assert_eq!(calls.hashed.len(), 2, "both are tried ({bad} unreadable)");
+            assert_eq!((s.counts.relinked, s.counts.ambiguous), (1, 0), "{bad}");
+            assert_eq!(s.relinked[0].resource.path, good, "{bad}");
+        }
+    }
+
+    // Row 29: check_moves looks at the file system only for Resources that could be the move.
+    #[test]
+    fn check_moves_stats_only_resources_with_the_content() {
+        let gens: Vec<Gen> = (1..=3u32)
+            .map(|n| make(n, u64::from(n) + 10, &sha(n as usize)))
+            .collect();
+        let store = generated(&gens, None);
+        let stats = RefCell::new(Vec::<String>::new());
+        let stat = |path: &str| {
+            stats.borrow_mut().push(path.to_string());
+            None
+        };
+        // Other content, and the size of one but the hash of another: nothing is stat-ed.
+        resource::check_moves(
+            &store,
+            &[
+                new_file("/new/a.txt", 12, &sha(99)),
+                new_file("/new/b.txt", 12, &sha(1)),
+            ],
+            &stat,
+        )
+        .unwrap();
+        assert!(stats.borrow().is_empty(), "{:?}", stats.borrow());
+        // The content of R2 only: R2 alone is stat-ed.
+        let err = resource::check_moves(&store, &[new_file("/new/c.txt", 12, &sha(2))], &stat)
+            .expect_err("R2's content");
+        assert_eq!(err.rule, "POSSIBLE_MOVE");
+        assert_eq!(*stats.borrow(), ["/gen/old/r2.txt"]);
+    }
 }

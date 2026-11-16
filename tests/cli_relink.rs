@@ -1721,4 +1721,85 @@ mod goal {
         let schema: Value = serde_json::from_str(&out.stdout).unwrap();
         assert_eq!(schema["title"], "hali relink --json");
     }
+
+    // ---- row 25: hali's data dir is never searched --------------------------------------------
+
+    /// R1 cataloged and gone, its content copied into the data dir (and a folder in it).
+    fn copies_in_the_data_dir() -> Env {
+        let env = Env::new();
+        env.add("a.txt", b"hello\n", PINNED_SECS, "1");
+        std::fs::remove_file(env.root().join("a.txt")).unwrap();
+        env.put_abs(&env.data().join("copy.txt"), b"hello\n", NEW_SECS);
+        env.put_abs(&env.data().join("sub/copy.txt"), b"hello\n", NEW_SECS);
+        env
+    }
+
+    #[test]
+    fn a_search_over_a_base_never_enters_the_data_dir() {
+        let env = copies_in_the_data_dir();
+        let before = env.resources_ttl();
+        let v = ok(&env.later(["--json", "relink", "--root", env.base.to_str().unwrap()]));
+        assert_eq!(
+            v["counts"],
+            json!({"relinked": 0, "ambiguous": 0, "unmatched": 1}),
+            "{v}"
+        );
+        assert_eq!(env.resources_ttl(), before);
+    }
+
+    #[test]
+    fn a_root_that_is_the_data_dir_or_inside_it_is_a_usage_error() {
+        let env = copies_in_the_data_dir();
+        let before = env.resources_ttl();
+        let data = env.data();
+        let sub = data.join("sub");
+        for root in [&data, &sub] {
+            let out = env.later(["--json", "relink", "--root", root.to_str().unwrap()]);
+            assert_eq!(out.code, Some(2), "{}: {}", root.display(), out.stderr);
+            assert_eq!(out.stdout, "", "{}", root.display());
+            assert_eq!(env.resources_ttl(), before, "{}", root.display());
+        }
+    }
+
+    #[test]
+    fn a_default_root_that_is_the_data_dir_is_skipped_silently() {
+        let env = copies_in_the_data_dir();
+        let before = env.resources_ttl();
+        env.config(&format!("[files]\ndir = \"{}\"\n", env.data().display()));
+        let out = env.later(["--json", "relink"]);
+        assert_eq!(out.code, Some(0), "{}", out.stderr);
+        assert_eq!(out.stderr, "");
+        let v = json(&out.stdout);
+        assert_eq!(v["roots"], json!([]), "{v}");
+        assert_eq!(
+            v["counts"],
+            json!({"relinked": 0, "ambiguous": 0, "unmatched": 1}),
+            "{v}"
+        );
+        assert_eq!(env.resources_ttl(), before);
+    }
+
+    // ---- row 26: an explicit relink never binds a path another Resource records ---------------
+
+    #[test]
+    fn an_explicit_relink_to_a_path_another_resource_records_is_a_usage_error() {
+        let env = Env::new();
+        let a = env.add("a.txt", b"hello\n", PINNED_SECS, "1");
+        let b = env.put_at("b.txt", b"hello\n", PINNED_SECS);
+        let out = env.run_env(
+            &[("HALI_TEST_ID_SEED", "2")],
+            ["--json", "add", "--new", b.to_str().unwrap()],
+        );
+        assert_eq!(out.code, Some(0), "{}", out.stderr);
+        let before = env.state();
+        let ttl = env.resources_ttl();
+        let out = env.later(["--json", "relink", a.as_str(), env.p("b.txt").as_str()]);
+        assert_eq!(out.code, Some(2), "{}", out.stderr);
+        assert_eq!(out.stdout, "");
+        snapshot_is_unchanged(&env, &before, "refused relink");
+        assert_eq!(env.resources_ttl(), ttl);
+        // Its own path is fine.
+        let v = ok(&env.later(["--json", "relink", a.as_str(), env.p("a.txt").as_str()]));
+        assert_eq!(v["resource"]["path"], env.p("a.txt"));
+    }
 }
