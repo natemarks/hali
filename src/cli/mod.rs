@@ -1569,11 +1569,19 @@ fn relink(cli: &Cli, ctx: &Context, config: &core::config::Config) -> Result<(),
         return relink_explicit(cli, ctx, &dir, reference, path, *force);
     }
 
+    // hali's own data dir is never searched: pruned under a root, refused or skipped as one.
+    let data = paths::real_dir(&dir);
+    let in_data = |root: &str| {
+        data.as_ref()
+            .is_some_and(|data| Path::new(root).starts_with(data))
+    };
     let mut searched: Vec<String> = Vec::new();
     if roots.is_empty() {
-        // The default root: the files.dir chain; an unusable one is skipped silently.
+        // The default root: the files.dir chain; an unusable one, or one in the data dir, is
+        // skipped silently.
         let usable = paths::files_dir(env, config.files_dir.as_deref())
-            .and_then(|d| paths::scan_root(d.as_os_str()).ok());
+            .and_then(|d| paths::scan_root(d.as_os_str()).ok())
+            .filter(|root| !in_data(root));
         searched.extend(usable);
     } else {
         for root in roots {
@@ -1584,20 +1592,20 @@ fn relink(cli: &Cli, ctx: &Context, config: &core::config::Config) -> Result<(),
                 }
                 paths::RootError::Unreadable { path } => Error::file_unreadable(&path),
             })?;
+            if in_data(&real) {
+                return Err(Error::usage(&format!(
+                    "relink root {real} is hali's data dir or inside it"
+                )));
+            }
             if !searched.contains(&real) {
                 searched.push(real);
             }
         }
     }
     let mut store = storage::load(&dir)?;
-    // hali's own data dir is never searched.
-    let options = storage::walk::WalkOptions::new(
-        false,
-        false,
-        Vec::new(),
-        paths::real_dir(&dir).into_iter().collect(),
-    )
-    .expect("no excludes to check");
+    let options =
+        storage::walk::WalkOptions::new(false, false, Vec::new(), data.into_iter().collect())
+            .expect("no excludes to check");
     let mut done = core::relink::search(
         ctx,
         &mut store,

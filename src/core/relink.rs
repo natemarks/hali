@@ -3,8 +3,8 @@
 //! a file comes in through injected functions; `core` reads no file.
 
 use super::resource::{
-    Hashed, Record, all_resources, known, record, recorded_path, recorded_sha256, refresh_one,
-    touch_at,
+    Hashed, Record, all_resources, by_path, known, record, recorded_path, recorded_sha256,
+    refresh_one, touch_at,
 };
 use super::{Context, Error, Mutation, apply, validate};
 use crate::ontology::{dcat, dcterms};
@@ -245,7 +245,8 @@ pub fn search(
 /// Records that the Resource `id` (a bare UUID) is now the file at the real path `path`, which
 /// was read as `hashed`, in one mutation with one SHACL check. Any Resource can be relinked,
 /// Missing or not. Content other than the record's (size or SHA-256) is `HASH_MISMATCH` unless
-/// `force`, which also records the new size and hash (`refreshed`).
+/// `force`, which also records the new size and hash (`refreshed`). A path another Resource
+/// records is a usage error, forced or not.
 pub fn explicit(
     ctx: &Context,
     store: &mut Store,
@@ -255,6 +256,12 @@ pub fn explicit(
     force: bool,
 ) -> Result<Mutation<Explicit>, Error> {
     let r = known(store, id)?;
+    if let Some(other) = by_path(store, path).filter(|other| *other != r) {
+        return Err(Error::usage(&format!(
+            "{path} is already the path of resource {}; relink or remove that one first",
+            record(ctx, store, &other).id
+        )));
+    }
     let before = record(ctx, store, &r);
     let expected = recorded_sha256(store, &r).unwrap_or_default();
     let differs = hashed.sha256 != expected || hashed.byte_size != before.byte_size;

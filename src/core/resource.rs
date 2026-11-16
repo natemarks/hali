@@ -1315,7 +1315,7 @@ fn is_resource(store: &Store, resource: &NamedNode) -> bool {
 }
 
 /// The Resource whose `dcat:downloadURL` is the URL of `path`.
-fn by_path(store: &Store, path: &str) -> Option<NamedNode> {
+pub(crate) fn by_path(store: &Store, path: &str) -> Option<NamedNode> {
     let url = NamedNode::new(file_url(path)).ok()?;
     subjects(store, dcat::DOWNLOAD_URL, url.as_ref().into())
         .into_iter()
