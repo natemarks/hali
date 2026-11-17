@@ -399,7 +399,8 @@ mod goal {
         assert!(!env.data().exists(), "a dry run writes nothing");
         assert!(dry.iter().any(|t| t.contains("SoftwareAgent")));
         ok(&env.run(1, &[], ["--json", "--agent", "claude", "add", &s(&path)]));
-        assert_eq!(dry, env.triples());
+        let real: BTreeSet<String> = env.triples().iter().map(|t| env.clean(t)).collect();
+        assert_eq!(dry, real);
 
         // scan
         let env = Env::new();
@@ -428,7 +429,8 @@ mod goal {
             &[],
             ["--json", "--agent", "codex", "scan", &s(&env.files())],
         ));
-        assert_eq!(dry, env.triples());
+        let real: BTreeSet<String> = env.triples().iter().map(|t| env.clean(t)).collect();
+        assert_eq!(dry, real);
     }
 
     // ---- row 8: other commands accept --agent and ignore it -----------------------------------------
