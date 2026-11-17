@@ -1248,9 +1248,9 @@ mod goal {
         assert_eq!(
             one_cell(
                 &env,
-                "SELECT ?t WHERE { BIND(<<( <urn:x:s\u{1b}> dcterms:relation 5 )>> AS ?t) }"
+                "SELECT ?t WHERE { BIND(<<( <urn:x:s\u{202e}> dcterms:relation 5 )>> AS ?t) }"
             ),
-            "<<( <urn:x:s\\u{1b}> dcterms:relation \"5\"^^xsd:integer )>>"
+            "<<( <urn:x:s\\u{202e}> dcterms:relation \"5\"^^xsd:integer )>>"
         );
     }
 
