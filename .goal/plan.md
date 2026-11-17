@@ -33,6 +33,8 @@ Cross-cutting: implementer on opus. Security-sensitive (`src/paths/`, `src/stora
 | 21 | An unwritable state dir fails `scan` (also `--prune --yes`) with STORE_IO before the store is saved | `cli_scan_roots::unwritable_state_dir_leaves_the_store_alone` |
 | 22 | `--forget-root <root>/` with a trailing slash works on a deleted root | `cli_scan_roots::forget_root_with_a_trailing_slash` |
 | 23 | A bare scan's `roots` is deduplicated by real path and in real-path byte order (mutation-backed: deleting the sort or the dedup in `scan_remembered` fails it) | `cli_scan_roots::bare_scan_roots_are_deduplicated_and_in_real_path_order` |
+| 24 | One outcome per path for nested roots: a file one root skips and another registers is in `added` only, not also `skipped` (mutation-backed: deleting `skips.remove(&path)` in `scan_roots` fails both tests) | `tests/core_scan_roots.rs::nested_roots_with_different_settings_add_what_any_root_registers`, `tests/cli_scan_roots.rs::bare_scan_nested_roots_add_what_the_inner_root_would` |
+| 25 | Nested roots hash a file at most once (mutation-backed: deleting the `inspected.insert` in `scan_roots` fails it) | `tests/core_scan_roots.rs::nested_roots_hash_a_file_at_most_once` |
 
 Guards: `.goal/checks/02-existing_goldens_unchanged.sh` (no existing golden changes; `scan <root>` output unchanged); `forget`, `relink` explicit-root behaviour unchanged.
 

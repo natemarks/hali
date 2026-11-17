@@ -709,7 +709,51 @@ mod goal {
                     "{variant} flip {flip}"
                 );
                 assert_eq!(m.value.counts.added, 2, "{variant} flip {flip}");
+                // One outcome per path: what one root registers is not also skipped.
+                let skipped: Vec<&str> = m.value.skipped.iter().map(|s| s.path.as_str()).collect();
+                let expected: &[&str] = if variant == "max-size" {
+                    &["/r/top.txt"]
+                } else {
+                    &[]
+                };
+                assert_eq!(skipped, expected, "{variant} flip {flip}");
+                assert_eq!(
+                    m.value.counts.skipped,
+                    expected.len(),
+                    "{variant} flip {flip}"
+                );
             }
+        }
+    }
+
+    /// Row 25: a file opened under the outer root and ruled out by its content media type is
+    /// hashed once, not again under the inner root that registers it.
+    #[test]
+    fn nested_roots_hash_a_file_at_most_once() {
+        const KNOWN: &[(&str, u64, usize)] = &[("/r/sub/doc", 6, 6)];
+        for flip in [false, true] {
+            let outer = RootScan {
+                options: opts("/r", 1 << 30, &["image/*"]),
+                entries: vec![file("/r/sub/doc", 6)],
+            };
+            let inner = root("/r/sub", vec![file("/r/sub/doc", 6)]);
+            let roots = if flip {
+                vec![inner, outer]
+            } else {
+                vec![outer, inner]
+            };
+            let mut store = empty_store();
+            let (result, _, inspects) = run(
+                &mut store,
+                roots,
+                &[],
+                Prune::Off,
+                stat_in(&[]),
+                inspect_in(KNOWN),
+            );
+            let m = result.unwrap();
+            assert_eq!(paths(&m.value.added), ["/r/sub/doc"], "flip {flip}");
+            assert_eq!(inspects, ["/r/sub/doc"], "flip {flip}");
         }
     }
 }

@@ -1798,6 +1798,11 @@ mod goal {
             assert_eq!(v["roots"], json!([env.s("a"), env.s("a/b")]), "{flags:?}");
             assert!(env.resources().contains("doc.txt"), "{flags:?}");
             assert!(!env.resources().contains("top.txt"), "{flags:?}");
+            // One outcome per path: doc.txt is added, so it is not also skipped.
+            for s in v["skipped"].as_array().unwrap() {
+                let path = s["path"].as_str().unwrap();
+                assert!(!path.ends_with("/doc.txt"), "{flags:?}: {v}");
+            }
         }
     }
 
