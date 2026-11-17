@@ -51,13 +51,15 @@ mod goal {
     /// ignored.
     #[test]
     fn state_dir_from_home() {
-        let env = env_of(&[("HOME", "/home/u")]);
+        let home = [("HOME", "/home/u")];
+        let env = env_of(&home);
         assert_eq!(
             hali::paths::state_dir(env).unwrap(),
             PathBuf::from("/home/u/.local/state/hali")
         );
         for value in ["relative/state", ""] {
-            let env = env_of(&[("XDG_STATE_HOME", value), ("HOME", "/home/u")]);
+            let vars = [("XDG_STATE_HOME", value), ("HOME", "/home/u")];
+            let env = env_of(&vars);
             assert_eq!(
                 hali::paths::state_dir(env).unwrap(),
                 PathBuf::from("/home/u/.local/state/hali"),

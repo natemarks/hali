@@ -401,9 +401,11 @@ mod goal {
             inspect_in(&[("/a/y2.txt", 6, 6), ("/b/x2.txt", 5, 5)]),
         );
         let m = result.unwrap();
+        // Spec 9.1: each list is in byte order of the relinked Resource's new path, so
+        // /a/y2.txt sorts before /b/x2.txt (not old-path order).
         assert_eq!(
             moves(&m.value),
-            [("/a/x.txt", "/b/x2.txt"), ("/b/y.txt", "/a/y2.txt")]
+            [("/b/y.txt", "/a/y2.txt"), ("/a/x.txt", "/b/x2.txt")]
         );
         assert!(m.value.pruned.is_empty() && m.value.missing.is_empty());
         assert_eq!(tally(&m.value.counts), [0, 0, 2, 0, 0, 0, 0, 0]);
