@@ -460,7 +460,8 @@ mod goal {
         let path = env.file("run.sh", b"#!/bin/sh\necho hi\n");
         let v = ok(&env.run(["--json", "add", path.to_str().unwrap()]));
         assert_eq!(v["added"][0]["media_type"], "application/x-shellscript");
-        assert_eq!(v["added"][0]["editable"], false);
+        // A shell script is a subclass of text/plain in the real database (#11).
+        assert_eq!(v["added"][0]["editable"], true);
         let iri = "https://w3id.org/hali/media-types/application/x-shellscript";
         let triples = env.triples();
         assert!(

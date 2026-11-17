@@ -1,0 +1,17 @@
+# Hermetic fixture for the editable rule (#11): the shared-mime-info globs2 format,
+# weight:mime-type:glob. Only the types the tests use.
+50:application/x-shellscript:*.sh
+50:application/json:*.json
+50:application/toml:*.toml
+50:application/xml:*.xml
+50:image/svg+xml:*.svg
+50:application/rtf:*.rtf
+50:application/postscript:*.ps
+50:application/x-desktop:*.desktop
+50:application/pdf:*.pdf
+50:text/html:*.html
+50:text/markdown:*.md
+50:text/plain:*.txt
+50:text/csv:*.csv
+50:application/x-yaml:*.yaml
+50:application/x-loop-a:*.loop

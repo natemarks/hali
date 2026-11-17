@@ -1,0 +1,12 @@
+tests/core_open.rs
+tests/cli_open.rs
+tests/media_type.rs
+tests/cli_resource.rs
+tests/cli_scan.rs
+tests/cli_error_text.rs
+tests/schema_contract.rs
+tests/snapshots/cli_open__add_editable_json.snap
+tests/snapshots/cli_open__find_open_config_json.snap
+tests/fixtures/mime-db/mime/globs2
+tests/fixtures/mime-db/mime/subclasses
+tests/fixtures/mime-db/mime/aliases
