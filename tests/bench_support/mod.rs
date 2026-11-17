@@ -12,6 +12,16 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
+/// The number of timed runs per size.
+pub const RUNS: usize = 30;
+
+/// The report's header line (no newline).
+pub fn header(runs: usize) -> String {
+    format!(
+        "hali find --json: release binary, {runs} fresh processes per size, warm page cache, nearest-rank percentiles"
+    )
+}
+
 /// The mtime of every synthetic file, seconds since the Unix epoch.
 const MTIME: u64 = 1_700_000_000;
 
@@ -136,9 +146,11 @@ pub fn percentile(samples: &[Duration], pct: u32) -> Duration {
 
 /// The last line of the report (no newline): over 200 ms at p95 is strictly greater.
 pub fn verdict(p95_ms: f64) -> String {
+    // Compare the number the line prints: the value rounded to one decimal.
     let shown = format!("{p95_ms:.1}");
+    let rounded: f64 = shown.parse().expect("a formatted float parses");
     let shown = shown.strip_suffix(".0").unwrap_or(&shown);
-    if p95_ms > 200.0 {
+    if rounded > 200.0 {
         format!(
             "verdict: p95 {shown} ms > 200 ms at 10k Resources: the on-disk storage fallback is a v0.1 task (spec §3.2); file a follow-up issue"
         )

@@ -1,17 +1,16 @@
 //! The latency benchmark (#26, spec §14.5): `hali find --json` over synthetic stores of 1,000
 //! and 10,000 Resources. Run it with `make bench`; without `HALI_BENCH=1` it skips, which is
-//! what `make test-external` sees.
+//! what `make test-external` sees. The report goes to stdout, so `--nocapture` is needed to
+//! see it.
 
 mod bench_support;
 
-use bench_support::{build_store, percentile, verdict};
+use bench_support::{RUNS, build_store, header, percentile, verdict};
 use serde_json::Value;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-
-const RUNS: usize = 30;
 
 /// One fresh `hali find --json`, timed around spawn, wait and the stdout read.
 fn find(root: &Path, data: &Path) -> (Duration, Value) {
@@ -50,6 +49,7 @@ fn bench_find_latency() {
     let tmp = tempfile::tempdir().expect("creating a temp dir");
     let mut rows = Vec::new();
     let mut p95_10k = 0.0;
+    // 10000 must be the last size: `p95_10k` is the last iteration's value.
     for n in [1000usize, 10000] {
         let root = tmp.path().join(format!("n{n}"));
         for d in ["home", "cfg"] {
@@ -71,9 +71,7 @@ fn bench_find_latency() {
 
     // The harness has printed "test bench_find_latency ... " without a newline.
     println!();
-    println!(
-        "hali find --json: release binary, 30 fresh processes per size, warm page cache, nearest-rank percentiles"
-    );
+    println!("{}", header(RUNS));
     println!("resources\tp50_ms\tp95_ms");
     for row in rows {
         println!("{row}");
