@@ -6,6 +6,7 @@
 //! It also reads cataloged files (`inspect`, `stat`), only ever read-only, and walks
 //! directories for them (`walk`).
 
+pub mod state;
 pub mod walk;
 
 use crate::ontology::{CORE_TTL, PREFIXES, SHAPES_TTL};

@@ -378,22 +378,14 @@ mod goal {
         let root = env.root_str();
         let other = env.base.join("home").to_str().unwrap().to_string();
 
+        // #23 changes three cases of this test: a bare `scan` is a scan of the remembered roots,
+        // `scan --forget-root <root>` forgets one, and `scan <root> --list` is still a usage error
+        // but with its own message. They are covered in tests/cli_scan_roots.rs (`bare_scan_*`,
+        // `forget_root_*`, `usage_errors`).
         let mut cases: Vec<(Vec<String>, String)> = vec![
-            (
-                vec!["scan".into()],
-                "the following required arguments were not provided:\n  <ROOT>".into(),
-            ),
             (
                 vec!["scan".into(), root.clone(), other.clone()],
                 "unexpected argument".into(),
-            ),
-            (
-                vec!["scan".into(), root.clone(), "--list".into()],
-                "unexpected argument '--list'".into(),
-            ),
-            (
-                vec!["scan".into(), "--forget-root".into(), root.clone()],
-                "unexpected argument '--forget-root'".into(),
             ),
             (
                 vec!["scan".into(), root.clone(), "--max-size".into()],

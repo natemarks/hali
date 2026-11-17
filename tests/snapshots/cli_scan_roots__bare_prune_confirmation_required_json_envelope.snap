@@ -1,0 +1,5 @@
+---
+source: tests/cli_scan_roots.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"CONFIRMATION_REQUIRED","message":"scan needs confirmation, but stdin or stderr is not a terminal; nothing was written","details":{"command":"scan","declined":false},"suggested_fix":"Run it again with --yes to confirm, or with --dry-run to see what it would change.","suggested_command":"hali scan --prune --yes"}}

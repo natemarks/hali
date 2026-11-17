@@ -12,7 +12,7 @@ use crate::storage::walk::{SkipReason, Walked};
 use oxigraph::model::NamedNode;
 use oxigraph::model::vocab::rdf;
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// At most this many entries go into each list of the output; the counts stay exact.
 const MAX_LISTED: usize = 100;
@@ -147,24 +147,11 @@ pub fn scan(
     )
 }
 
-/// Scans (spec §9.1 **Scan:**). `entries` is the walk of `options.root`; `stat` gives the size
-/// and mtime (seconds) of the regular file at a path; `inspect` hashes the file at a real path;
-/// `glob_type` gives the media type a file name alone implies, if any; `progress` is told the
-/// entries seen and the files hashed so far, the last call with the totals.
-///
-/// A new file (one whose path no Resource records) is a candidate unless it is over `max_size`
-/// (skipped `too_large`, never opened), its name or content rules it out by the media type
-/// patterns (dropped, not reported), it vanished (dropped) or it cannot be hashed (skipped).
-/// Every Resource under the root is `stat`ed: no regular file there is missing, a Stale one is
-/// hashed and refreshed as `refresh` does, the rest are unchanged; the filters never apply to
-/// them. A non-empty candidate with the size and SHA-256 of exactly one Missing Resource
-/// (store-wide; one outside the root is `stat`ed only then), and no other Missing Resource
-/// having its content, relinks that Resource as `relink` does; when the match is not
-/// one-to-one, the Resources are ambiguous and their candidates are not registered. With
-/// `prune`, the Missing Resources under the root that are not ambiguous are forgotten as
-/// `forget` forgets them, unless another Resource relates to one (`Prune::On`). The other
-/// candidates are registered, ids minted in byte order of their paths. All changes are one
-/// mutation with one SHACL check; on an error the store is untouched.
+/// Scans one root (spec §9.1 **Scan:**): `scan_roots` of that root alone. `entries` is the
+/// walk of `options.root`; `stat` gives the size and mtime (seconds) of the regular file at a
+/// path; `inspect` hashes the file at a real path; `glob_type` gives the media type a file name
+/// alone implies, if any; `progress` is told the entries seen and the files hashed so far, the
+/// last call with the totals.
 #[allow(clippy::too_many_arguments)]
 pub fn scan_with(
     ctx: &Context,
@@ -173,15 +160,70 @@ pub fn scan_with(
     prune: Prune,
     entries: impl IntoIterator<Item = Walked>,
     stat: impl Fn(&str) -> Option<(u64, i64)>,
+    inspect: impl FnMut(&str) -> Result<FileFacts, Unhashable>,
+    glob_type: impl Fn(&str) -> Option<String>,
+    progress: impl FnMut(usize, usize),
+    user_name: &str,
+) -> Result<Mutation<Scanned>, Error> {
+    scan_roots(
+        ctx,
+        store,
+        vec![RootScan {
+            options: options.clone(),
+            entries,
+        }],
+        &[],
+        prune,
+        stat,
+        inspect,
+        glob_type,
+        progress,
+        user_name,
+    )
+}
+
+/// One Scan root of a run: its own options and its walk.
+#[derive(Clone, Debug)]
+pub struct RootScan<I = Vec<Walked>> {
+    pub options: ScanOptions,
+    pub entries: I,
+}
+
+/// Scans several roots as one run (spec §7, §9.1 **Scan:**). Each root's walk is filtered with
+/// that root's own options; `unavailable` are the real paths of roots that could not be walked.
+///
+/// A new file (one whose path no Resource records) is a candidate unless it is over its root's
+/// `max_size` (skipped `too_large`, never opened), its name or content rules it out by its
+/// root's media type patterns (dropped, not reported), it vanished (dropped) or it cannot be
+/// hashed (skipped). A path walked under several roots counts once: it is a candidate when any
+/// of those roots would make it one, and is otherwise skipped for the first reason in byte
+/// order of the roots; it is hashed at most once. Every Resource under a scanned root is `stat`ed once: no regular file there is
+/// missing, a Stale one is hashed and refreshed as `refresh` does, the rest are unchanged; the
+/// filters never apply to them. A non-empty candidate with the size and SHA-256 of exactly one
+/// Missing Resource (store-wide; one outside the roots is `stat`ed only then), and no other
+/// Missing Resource having its content, relinks that Resource as `relink` does; when the match
+/// is not one-to-one, the Resources are ambiguous and their candidates are not registered.
+/// With `prune`, the Missing Resources under the roots that are not ambiguous, and not under an
+/// unavailable root, are forgotten as `forget` forgets them, unless another Resource relates to
+/// one (`Prune::On`). The other candidates are registered, ids minted in byte order of their
+/// paths. All changes are one mutation with one SHACL check; on an error the store is
+/// untouched.
+#[allow(clippy::too_many_arguments)]
+pub fn scan_roots<I: IntoIterator<Item = Walked>>(
+    ctx: &Context,
+    store: &mut Store,
+    mut roots: Vec<RootScan<I>>,
+    unavailable: &[String],
+    prune: Prune,
+    stat: impl Fn(&str) -> Option<(u64, i64)>,
     mut inspect: impl FnMut(&str) -> Result<FileFacts, Unhashable>,
     glob_type: impl Fn(&str) -> Option<String>,
     mut progress: impl FnMut(usize, usize),
     user_name: &str,
 ) -> Result<Mutation<Scanned>, Error> {
-    let ruled_out = |media_type: &str| {
-        !options.media_types.is_empty()
-            && !options.media_types.iter().any(|p| p.matches(media_type))
-    };
+    roots.sort_by(|a, b| a.options.root.cmp(&b.options.root));
+    let scanned_roots: Vec<String> = roots.iter().map(|r| r.options.root.clone()).collect();
+    let under_scanned = |path: &str| scanned_roots.iter().any(|root| under_root(root, path));
     let resources = resource::subjects(store, rdf::TYPE.as_str(), resource::iri(RESOURCE).as_ref());
     let mut cataloged: Vec<(String, NamedNode)> = resources
         .into_iter()
@@ -190,54 +232,83 @@ pub fn scan_with(
     let known: HashSet<&str> = cataloged.iter().map(|(p, _)| p.as_str()).collect();
 
     let (mut seen, mut hashed) = (0, 0);
-    let mut skipped: Vec<Skipped> = Vec::new();
-    let mut new: Vec<FileFacts> = Vec::new();
-    for entry in entries {
-        seen += 1;
-        match entry {
-            Walked::Skipped { path, reason: why } => skipped.push(Skipped {
-                path,
-                reason: reason(why),
-            }),
-            Walked::File {
-                path, byte_size, ..
-            } => {
-                if known.contains(path.as_str()) {
-                    // Cataloged.
-                } else if byte_size > options.max_size {
-                    skipped.push(Skipped {
-                        path,
-                        reason: reason(SkipReason::TooLarge),
-                    });
-                } else if !options.media_types.is_empty()
-                    && glob_type(path.rsplit('/').next().unwrap_or(&path))
-                        .is_some_and(|t| ruled_out(&t))
-                {
-                    // The name alone rules it out: not hashed.
-                } else {
-                    hashed += 1;
-                    match inspect(&path) {
-                        Ok(facts) => {
-                            if !ruled_out(&facts.media_type) {
-                                new.push(facts);
+    // Per path walked: the facts of a file to register, or the first reason a root skipped it.
+    // A path walked under several roots is registered when any of them would register it, and
+    // hashed at most once.
+    let mut registered: BTreeMap<String, FileFacts> = BTreeMap::new();
+    let mut skips: BTreeMap<String, &'static str> = BTreeMap::new();
+    let mut inspected: HashMap<String, Result<FileFacts, Unhashable>> = HashMap::new();
+    let several = roots.len() > 1;
+    for RootScan { options, entries } in roots {
+        let ruled_out = |media_type: &str| {
+            !options.media_types.is_empty()
+                && !options.media_types.iter().any(|p| p.matches(media_type))
+        };
+        for entry in entries {
+            seen += 1;
+            let (path, why) = match entry {
+                Walked::Skipped { path, reason: why } => (path, Some(reason(why))),
+                Walked::File {
+                    path, byte_size, ..
+                } => {
+                    if registered.contains_key(&path) || known.contains(path.as_str()) {
+                        // Registered under another root, or cataloged.
+                        (path, None)
+                    } else if byte_size > options.max_size {
+                        (path, Some(reason(SkipReason::TooLarge)))
+                    } else if !options.media_types.is_empty()
+                        && glob_type(path.rsplit('/').next().unwrap_or(&path))
+                            .is_some_and(|t| ruled_out(&t))
+                    {
+                        // The name alone rules it out: not hashed.
+                        (path, None)
+                    } else {
+                        let facts = match inspected.get(&path) {
+                            Some(facts) => facts.clone(),
+                            None => {
+                                hashed += 1;
+                                let facts = inspect(&path);
+                                if several {
+                                    inspected.insert(path.clone(), facts.clone());
+                                }
+                                facts
+                            }
+                        };
+                        match facts {
+                            Ok(facts) => {
+                                if !ruled_out(&facts.media_type) {
+                                    skips.remove(&path);
+                                    inspected.remove(&path);
+                                    registered.insert(path.clone(), facts);
+                                }
+                                (path, None)
+                            }
+                            Err(Unhashable::Missing) => (path, None),
+                            Err(Unhashable::NotRegular) => {
+                                (path, Some(reason(SkipReason::NotRegular)))
+                            }
+                            Err(Unhashable::Unreadable) => {
+                                (path, Some(reason(SkipReason::Unreadable)))
                             }
                         }
-                        Err(Unhashable::Missing) => {}
-                        Err(Unhashable::NotRegular) => skipped.push(Skipped {
-                            path,
-                            reason: reason(SkipReason::NotRegular),
-                        }),
-                        Err(Unhashable::Unreadable) => skipped.push(Skipped {
-                            path,
-                            reason: reason(SkipReason::Unreadable),
-                        }),
                     }
                 }
+            };
+            if let Some(why) = why
+                && !registered.contains_key(&path)
+            {
+                skips.entry(path).or_insert(why);
             }
+            progress(seen, hashed);
         }
-        progress(seen, hashed);
     }
     drop(known);
+    drop(inspected);
+    let mut skipped: Vec<Skipped> = skips
+        .into_iter()
+        .map(|(path, reason)| Skipped { path, reason })
+        .collect();
+    let mut new: Vec<FileFacts> = registered.into_values().collect();
 
     let now = ctx.now();
     let mut added_quads = Vec::new();
@@ -246,7 +317,7 @@ pub fn scan_with(
     // Under the root, in byte order of the path.
     let mut missing: Vec<NamedNode> = Vec::new();
     let mut unchanged = 0;
-    cataloged.retain(|(path, _)| under_root(&options.root, path));
+    cataloged.retain(|(path, _)| under_scanned(path));
     cataloged.sort();
     for (path, r) in &cataloged {
         let Some(stats) = stat(path) else {
@@ -315,7 +386,7 @@ pub fn scan_with(
                 continue;
             }
             let path = resource::recorded_path(store, &r);
-            let is_missing = if under_root(&options.root, &path) {
+            let is_missing = if under_scanned(&path) {
                 under_missing.contains(&r)
             } else {
                 stat(&path).is_none()
@@ -363,11 +434,19 @@ pub fn scan_with(
     missing.retain(|r| !moved_away.contains(r));
     drop(moved_away);
 
-    // Prune: the Missing Resources under the root that are not ambiguous; relations are read
-    // from the store as it was, so one from another pruned Resource still keeps a Resource.
+    // Prune: the Missing Resources under the roots that are not ambiguous and not under an
+    // unavailable root; relations are read from the store as it was, so one from another pruned
+    // Resource still keeps a Resource.
     let unsure: HashSet<&NamedNode> = ambiguous.iter().map(|(r, _)| r).collect();
+    let protected = |r: &NamedNode| {
+        !unavailable.is_empty() && {
+            let path = resource::recorded_path(store, r);
+            unavailable.iter().any(|root| under_root(root, &path))
+        }
+    };
     let pruned: Vec<NamedNode> = missing
         .iter()
+        .filter(|r| !protected(r))
         .filter(|r| match prune {
             Prune::Off => false,
             Prune::On => !unsure.contains(r) && resource::inbound(store, r).is_empty(),

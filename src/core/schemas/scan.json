@@ -141,6 +141,230 @@
       },
       "required": ["schema_version", "root", "counts", "media_types", "added", "refreshed", "relinked", "ambiguous", "missing", "pruned", "skipped", "truncated", "dry_run", "changes"],
       "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "roots": {"type": "array", "items": {"type": "string"}},
+        "unavailable": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {"root": {"type": "string"}, "reason": {"type": "string", "minLength": 1}},
+            "required": ["root", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "counts": {
+          "type": "object",
+          "properties": {
+            "added": {"type": "integer", "minimum": 0},
+            "refreshed": {"type": "integer", "minimum": 0},
+            "relinked": {"type": "integer", "minimum": 0},
+            "ambiguous": {"type": "integer", "minimum": 0},
+            "unchanged": {"type": "integer", "minimum": 0},
+            "missing": {"type": "integer", "minimum": 0},
+            "pruned": {"type": "integer", "minimum": 0},
+            "skipped": {"type": "integer", "minimum": 0}
+          },
+          "required": ["added", "refreshed", "relinked", "ambiguous", "unchanged", "missing", "pruned", "skipped"],
+          "additionalProperties": false
+        },
+        "media_types": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+        "added": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "refreshed": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "relinked": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {"resource": {"$ref": "#/$defs/resource"}, "from": {"type": "string"}},
+            "required": ["resource", "from"],
+            "additionalProperties": false
+          }
+        },
+        "ambiguous": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "resource": {"$ref": "#/$defs/resource"},
+              "candidates": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "string"}}
+            },
+            "required": ["resource", "candidates"],
+            "additionalProperties": false
+          }
+        },
+        "missing": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "pruned": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "skipped": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {"type": "string"},
+              "reason": {
+                "enum": ["too_large", "unreadable", "not_regular", "non_utf8", "outside_root", "bad_ignore_file"]
+              }
+            },
+            "required": ["path", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "truncated": {"type": "boolean"}
+      },
+      "required": ["schema_version", "roots", "unavailable", "counts", "media_types", "added", "refreshed", "relinked", "ambiguous", "missing", "pruned", "skipped", "truncated"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "roots": {"type": "array", "items": {"type": "string"}},
+        "unavailable": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {"root": {"type": "string"}, "reason": {"type": "string", "minLength": 1}},
+            "required": ["root", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "counts": {
+          "type": "object",
+          "properties": {
+            "added": {"type": "integer", "minimum": 0},
+            "refreshed": {"type": "integer", "minimum": 0},
+            "relinked": {"type": "integer", "minimum": 0},
+            "ambiguous": {"type": "integer", "minimum": 0},
+            "unchanged": {"type": "integer", "minimum": 0},
+            "missing": {"type": "integer", "minimum": 0},
+            "pruned": {"type": "integer", "minimum": 0},
+            "skipped": {"type": "integer", "minimum": 0}
+          },
+          "required": ["added", "refreshed", "relinked", "ambiguous", "unchanged", "missing", "pruned", "skipped"],
+          "additionalProperties": false
+        },
+        "media_types": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+        "added": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "refreshed": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "relinked": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {"resource": {"$ref": "#/$defs/resource"}, "from": {"type": "string"}},
+            "required": ["resource", "from"],
+            "additionalProperties": false
+          }
+        },
+        "ambiguous": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "resource": {"$ref": "#/$defs/resource"},
+              "candidates": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "string"}}
+            },
+            "required": ["resource", "candidates"],
+            "additionalProperties": false
+          }
+        },
+        "missing": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "pruned": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/resource"}},
+        "skipped": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {"type": "string"},
+              "reason": {
+                "enum": ["too_large", "unreadable", "not_regular", "non_utf8", "outside_root", "bad_ignore_file"]
+              }
+            },
+            "required": ["path", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "truncated": {"type": "boolean"},
+        "dry_run": {"const": true},
+        "changes": {"type": "array", "items": {"$ref": "#/$defs/change"}}
+      },
+      "required": ["schema_version", "roots", "unavailable", "counts", "media_types", "added", "refreshed", "relinked", "ambiguous", "missing", "pruned", "skipped", "truncated", "dry_run", "changes"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "roots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "root": {"type": "string"},
+              "include_hidden": {"type": "boolean"},
+              "no_ignore": {"type": "boolean"},
+              "exclude": {"type": "array", "items": {"type": "string"}},
+              "max_size": {"type": ["integer", "null"], "minimum": 0},
+              "media_types": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["root", "include_hidden", "no_ignore", "exclude", "max_size", "media_types"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["schema_version", "roots"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "root": {
+          "type": "object",
+          "properties": {
+            "root": {"type": "string"},
+            "include_hidden": {"type": "boolean"},
+            "no_ignore": {"type": "boolean"},
+            "exclude": {"type": "array", "items": {"type": "string"}},
+            "max_size": {"type": ["integer", "null"], "minimum": 0},
+            "media_types": {"type": "array", "items": {"type": "string"}}
+          },
+          "required": ["root", "include_hidden", "no_ignore", "exclude", "max_size", "media_types"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["schema_version", "root"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "root": {
+          "type": "object",
+          "properties": {
+            "root": {"type": "string"},
+            "include_hidden": {"type": "boolean"},
+            "no_ignore": {"type": "boolean"},
+            "exclude": {"type": "array", "items": {"type": "string"}},
+            "max_size": {"type": ["integer", "null"], "minimum": 0},
+            "media_types": {"type": "array", "items": {"type": "string"}}
+          },
+          "required": ["root", "include_hidden", "no_ignore", "exclude", "max_size", "media_types"],
+          "additionalProperties": false
+        },
+        "dry_run": {"const": true},
+        "changes": {"type": "array", "maxItems": 0}
+      },
+      "required": ["schema_version", "root", "dry_run", "changes"],
+      "additionalProperties": false
     }
   ]
 }
