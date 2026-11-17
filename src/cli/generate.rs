@@ -37,8 +37,18 @@ fn without_hidden(command: clap::Command) -> clap::Command {
         .bin_name("hali")
         .args(command.get_arguments().cloned())
         .subcommands(visible);
+    rebuilt = rebuilt.styles(command.get_styles().clone());
+    if command.get_version().is_some() {
+        rebuilt = rebuilt.version(env!("CARGO_PKG_VERSION"));
+    }
     if let Some(about) = command.get_about() {
         rebuilt = rebuilt.about(about.clone());
+    }
+    if let Some(long_about) = command.get_long_about() {
+        rebuilt = rebuilt.long_about(long_about.clone());
+    }
+    if let Some(after_help) = command.get_after_help() {
+        rebuilt = rebuilt.after_help(after_help.clone());
     }
     rebuilt
 }

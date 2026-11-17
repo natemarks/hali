@@ -44,28 +44,31 @@ MANDIR ?= $(PREFIX)/share/man/man1
 BASH_COMPDIR ?= $(PREFIX)/share/bash-completion/completions
 ZSH_COMPDIR ?= $(PREFIX)/share/zsh/site-functions
 FISH_COMPDIR ?= $(HOME)/.config/fish/completions
+export BINDIR MANDIR BASH_COMPDIR ZSH_COMPDIR FISH_COMPDIR
 
 install: ## developer-local install: release build to $(BINDIR), plus man page and bash/zsh/fish completions
 	cargo build --release --locked
-	@set -eu; \
+	@set -eu; umask 022; \
 	bin="$${CARGO_TARGET_DIR:-target}/release/hali"; \
 	if grep -aq 'HALI_TEST_' "$$bin"; then echo "error: $$bin contains HALI_TEST_; refusing to install a test-hooks build" >&2; exit 1; fi; \
-	stage=$$(mktemp -d); trap 'rm -rf -- "$$stage"' EXIT; \
+	stage=$$(mktemp -d); cur=; \
+	trap 'rm -rf -- "$$stage"; if [ -n "$$cur" ]; then rm -f -- "$$cur"; fi' EXIT; \
+	trap 'exit 1' HUP INT TERM; \
 	env -i "$$bin" generate man >"$$stage/hali.1"; \
 	env -i "$$bin" generate completions bash >"$$stage/bash"; \
 	env -i "$$bin" generate completions zsh >"$$stage/zsh"; \
 	env -i "$$bin" generate completions fish >"$$stage/fish"; \
-	bin_new=false; [ -d "$(BINDIR)" ] || bin_new=true; \
-	zsh_new=false; [ -d "$(ZSH_COMPDIR)" ] || zsh_new=true; \
-	put() { mode=$$1; src=$$2; dest=$$3; mkdir -p -m 0755 "$$(dirname "$$dest")"; \
-		tmp="$$dest.tmp.$$$$"; install -m "$$mode" "$$src" "$$tmp"; mv -f -T "$$tmp" "$$dest"; }; \
-	put 0755 "$$bin" "$(BINDIR)/hali"; \
-	put 0644 "$$stage/hali.1" "$(MANDIR)/hali.1"; \
-	put 0644 "$$stage/bash" "$(BASH_COMPDIR)/hali"; \
-	put 0644 "$$stage/zsh" "$(ZSH_COMPDIR)/_hali"; \
-	put 0644 "$$stage/fish" "$(FISH_COMPDIR)/hali.fish"; \
-	if $$bin_new; then echo "warning: created $(BINDIR); log out and back in (or start a new login shell) so it is on PATH" >&2; fi; \
-	if $$zsh_new; then echo "note: add $(ZSH_COMPDIR) to fpath before compinit in ~/.zshrc for zsh completions" >&2; fi
+	bin_new=false; [ -d "$$BINDIR" ] || bin_new=true; \
+	zsh_new=false; [ -d "$$ZSH_COMPDIR" ] || zsh_new=true; \
+	put() { mode=$$1; src=$$2; dest=$$3; mkdir -p -- "$$(dirname -- "$$dest")"; \
+		cur="$$dest.tmp.$$$$"; install -m "$$mode" -- "$$src" "$$cur"; mv -f -T -- "$$cur" "$$dest"; cur=; }; \
+	put 0755 "$$bin" "$$BINDIR/hali"; \
+	put 0644 "$$stage/hali.1" "$$MANDIR/hali.1"; \
+	put 0644 "$$stage/bash" "$$BASH_COMPDIR/hali"; \
+	put 0644 "$$stage/zsh" "$$ZSH_COMPDIR/_hali"; \
+	put 0644 "$$stage/fish" "$$FISH_COMPDIR/hali.fish"; \
+	if $$bin_new; then echo "warning: created $$BINDIR; log out and back in (or start a new login shell) so it is on PATH" >&2; fi; \
+	if $$zsh_new; then echo "note: add $$ZSH_COMPDIR to fpath before compinit in ~/.zshrc for zsh completions" >&2; fi
 
 clean-cache: ## clean Rust build artifacts
 	cargo clean
