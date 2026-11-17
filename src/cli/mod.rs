@@ -7,6 +7,7 @@ use crate::core::{
 };
 use crate::{media_type, ontology, paths, storage};
 use clap::{CommandFactory, Parser, Subcommand};
+mod generate;
 use serde::Serialize;
 use std::ffi::OsString;
 use std::io::{BufRead, IsTerminal, Read, Write};
@@ -262,6 +263,10 @@ enum Command {
         #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
         offset: usize,
     },
+    /// Print the man page or shell completions
+    #[command(hide = true, subcommand_required = true, arg_required_else_help = true)]
+    #[command(subcommand)]
+    Generate(generate::Generate),
 }
 
 /// Field names in record order; a newtype so clap reads it as one value, not a list.
@@ -592,6 +597,9 @@ pub fn run() -> ExitCode {
     };
     if let Command::Schema { name } = &cli.command {
         return show_schema(&cli, name);
+    }
+    if let Command::Generate(what) = &cli.command {
+        return generate::run(what);
     }
     let (clock, ids) = match injected() {
         Ok(injected) => injected,
@@ -1258,7 +1266,9 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 Some(&confirmation),
             )?;
         }
-        Command::Schema { .. } => unreachable!("handled before the store is loaded"),
+        Command::Schema { .. } | Command::Generate(_) => {
+            unreachable!("handled before the store is loaded")
+        }
         Command::Scan { .. } | Command::Relink { .. } => {
             unreachable!("handled before the store is loaded")
         }
