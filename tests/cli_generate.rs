@@ -309,10 +309,12 @@ mod goal {
                     if l.starts_with('}') {
                         break;
                     }
-                    if let Some(rest) = l.trim().strip_prefix('\'') {
-                        if let Some((name, _)) = rest.split_once(':') {
-                            subs.insert(name.to_string());
-                        }
+                    if let Some((name, _)) = l
+                        .trim()
+                        .strip_prefix('\'')
+                        .and_then(|rest| rest.split_once(':'))
+                    {
+                        subs.insert(name.to_string());
                     }
                 }
             }
