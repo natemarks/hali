@@ -675,22 +675,6 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
     {
         return Err(Error::usage("--title takes exactly one path"));
     }
-    if let Command::Edit {
-        add_types,
-        remove_types,
-        add_tags,
-        remove_tags,
-        ..
-    } = &cli.command
-    {
-        resource::check_edit_lists(&resource::Edit {
-            add_types: add_types.clone(),
-            remove_types: remove_types.clone(),
-            add_tags: add_tags.clone(),
-            remove_tags: remove_tags.clone(),
-            ..Default::default()
-        })?;
-    }
     let dir = paths::data_dir(env).map_err(|_| Error::store_io(None))?;
     let writer = open_writer(cli, &dir)?;
     let mut store = load_store(writer.as_ref(), &dir)?;

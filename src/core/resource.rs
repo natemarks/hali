@@ -540,18 +540,6 @@ pub(crate) fn touch_at(
     }
 }
 
-/// A usage error when one reference is literally in both the add and the remove list of Types,
-/// or of tags. The CLI runs it before it takes the lock; `edit` checks the resolved lists again.
-pub fn check_edit_lists(edit: &Edit) -> Result<(), Error> {
-    if edit.add_types.iter().any(|t| edit.remove_types.contains(t)) {
-        return Err(Error::usage("a Type cannot be both added and removed"));
-    }
-    if edit.add_tags.iter().any(|t| edit.remove_tags.contains(t)) {
-        return Err(Error::usage("a Concept cannot be both added and removed"));
-    }
-    Ok(())
-}
-
 /// What `edit` changes: a new title, Type references to assert or retract, and Concept
 /// references to tag with or to untag.
 #[derive(Clone, Debug, Default, PartialEq)]
