@@ -28,3 +28,14 @@ Not cross-cutting (one `record()` path): implementer on its default model. Secur
 Locked: `tests/fixtures/mime-db/`, both new `.snap` files, `tests/core_open.rs`, `tests/cli_open.rs`.
 
 Tests set HOME, XDG_STATE_HOME, XDG_DATA_DIRS and the data dir to temp or fixture dirs.
+
+## Review rows (update, reviewer + security-reviewer)
+| # | Criterion | Check | Expected failure today |
+|---|---|---|---|
+| 11 | A FIFO, a symlink (to a FIFO or a file) or a directory at `$XDG_DATA_HOME/mime/{subclasses,aliases}` is skipped as absent, never opened blocking; `find` exits 0 within 5 s and falls back to the next directory | `cli_open::non_regular_database_files_are_skipped` | FIFO: `find` killed after 5 s (hang); symlink-to-file: pdf editable |
+| 12 | A relative `XDG_DATA_HOME` or `HOME` is ignored (like `XDG_DATA_DIRS` entries and `paths::xdg_dir`) | `cli_open::relative_data_home_and_home_are_ignored` (absolute controls pass) | "relative XDG_DATA_HOME was read" |
+| 13 | A hostile database has bounded cost: (a) a huge fan-out is cheap per Resource (memo or edge cap), (b) the same directory 50 times is read once, (c) 50 hard-linked directories stay inside a total byte budget | `cli_open::{fanout_database_is_cheap_per_resource, duplicate_data_dirs_are_read_once, total_database_bytes_are_budgeted}` (time proxies: 11.6 s, 8.4 s, 8.4 s today on a debug build; bound 3 s) | `find took ...` |
+| 14 | `config_reaches_every_record` also covers `--dry-run` of edit, refresh, forget, relink | `cli_open::config_reaches_every_record` | passes today |
+| 15 | Fixture cases: alias parent, merged dirs (first wins aliases, merged parents), HOME fallback, malformed lines / non-UTF-8 / case folding, the 4 MiB file cap, the 256-type cap | `cli_open::{database_parent_that_is_an_alias_is_resolved, database_directories_are_merged_user_first, database_falls_back_to_home_local_share, malformed_database_lines_are_ignored_and_case_is_folded, database_file_is_read_up_to_a_cap, long_subclass_chains_stop_at_256_types}` | pass today; each fails under its mutation |
+| 16 | The `CONFIG_INVALID` fix text is exact | `tests/cli_scan.rs` (two), `tests/cli_error_text.rs` (the `*` prefix mechanism is gone) | passes today |
+| 10+ | Spec: the database is read from absolute directories and regular files only; the pointer reads "§7 and §9.1 (**Scan:**)" | `.goal/checks/01-spec_open.sh` | MISSING / WRONG lines |

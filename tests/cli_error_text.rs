@@ -213,16 +213,7 @@ mod goal {
             "{label}: {:?}",
             out.stderr
         );
-        // An expectation ending in `*` is a prefix: the config hint lists what is read, and
-        // #11's goal tests pin its full text.
-        match expected.strip_suffix('*') {
-            Some(prefix) => assert!(
-                out.stderr.starts_with(prefix) && out.stderr.ends_with('\n'),
-                "{label}: {:?}",
-                out.stderr
-            ),
-            None => assert_eq!(out.stderr, expected, "{label}"),
-        }
+        assert_eq!(out.stderr, expected, "{label}");
     }
 
     // ---- a typed reference that matches nothing -------------------------------------------------
@@ -437,7 +428,7 @@ mod goal {
             "CONFIG_INVALID",
             &out,
             3,
-            "error: invalid config file /TMP/c\\u{1b}[31mX/hali/config.toml: not valid TOML, or a key has the wrong type\nhint: Fix the config file; only [user] name, [vocabulary] language, [files] dir*",
+            "error: invalid config file /TMP/c\\u{1b}[31mX/hali/config.toml: not valid TOML, or a key has the wrong type\nhint: Fix the config file; only [user] name, [vocabulary] language, [files] dir, [scan] exclude, include_hidden and max_size, and [open] editor and system are read.\n",
         );
 
         // NOT_A_REGULAR_FILE: `add` of a path that does not exist.

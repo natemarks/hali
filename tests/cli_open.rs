@@ -391,8 +391,20 @@ mod goal {
         assert_eq!(out.code, Some(0), "{}", out.stderr);
         step("show", 3, vec!["--json", "show", a], 2);
         step("find", 3, vec!["--json", "find"], 2);
+        step(
+            "edit --dry-run",
+            3,
+            vec!["--json", "--dry-run", "edit", a, "--title", "A"],
+            1,
+        );
         step("edit", 3, vec!["--json", "edit", a, "--title", "A"], 1);
         std::fs::write(&a, b"first, changed\n").unwrap();
+        step(
+            "refresh --dry-run",
+            3,
+            vec!["--json", "--dry-run", "refresh", a],
+            1,
+        );
         step("refresh", 3, vec!["--json", "refresh", a], 1);
         step("add --dry-run", 3, vec!["--json", "--dry-run", "add", c], 1);
         step(
@@ -402,9 +414,21 @@ mod goal {
             1,
         );
         step("scan", 4, vec!["--json", "scan", files], 1);
+        step(
+            "forget --dry-run",
+            5,
+            vec!["--json", "--dry-run", "forget", "--yes", c],
+            1,
+        );
         step("forget", 5, vec!["--json", "forget", "--yes", c], 1);
         let moved = env.files().join("b2.txt");
         std::fs::rename(b, &moved).unwrap();
+        step(
+            "relink --dry-run",
+            6,
+            vec!["--json", "--dry-run", "relink", b, moved.to_str().unwrap()],
+            1,
+        );
         step(
             "relink",
             6,
@@ -485,5 +509,470 @@ mod goal {
         assert!(!editable_of(&rows, "bare"), "{rows:?}");
         let empty = rows.iter().find(|r| r.0 == "bare").unwrap();
         assert_eq!(empty.1, "");
+    }
+
+    // ---- the shared-mime-info database is read defensively (review rows 11-15) ----------------
+
+    /// A run with explicit environment changes: `Some(v)` sets, `None` removes. `cwd` is the
+    /// working directory. A run that outlives `secs` is a hang and fails the test.
+    fn run_vars(
+        env: &Env,
+        vars: &[(&str, Option<&Path>)],
+        cwd: Option<&Path>,
+        secs: u64,
+        args: &[&str],
+    ) -> Out {
+        let mut cmd = Command::cargo_bin("hali").unwrap();
+        cmd.env_clear()
+            .env("XDG_CONFIG_HOME", env.root.join("cfg"))
+            .env("XDG_STATE_HOME", env.root.join("state"))
+            .env("XDG_DATA_HOME", env.root.join("xdg-data"))
+            .env("XDG_DATA_DIRS", &env.db)
+            .env("HOME", env.root.join("home"))
+            .env("HALI_DATA_DIR", env.data())
+            .env("HALI_TEST_NOW", NOW)
+            .env("HALI_TEST_ID_SEED", "1")
+            .timeout(Duration::from_secs(secs))
+            .args(args);
+        for (k, v) in vars {
+            match v {
+                Some(v) => cmd.env(k, v),
+                None => cmd.env_remove(k),
+            };
+        }
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
+        let out = cmd
+            .output()
+            .unwrap_or_else(|e| panic!("`hali {args:?}` did not finish in {secs} s: {e}"));
+        assert!(
+            out.status.code().is_some(),
+            "`hali {args:?}` was killed after {secs} s (a hang?): {:?}",
+            out.status
+        );
+        let root = env.root.to_str().unwrap();
+        let clean = |bytes: Vec<u8>| String::from_utf8(bytes).unwrap().replace(root, "/TMP");
+        Out {
+            code: out.status.code(),
+            stdout: clean(out.stdout),
+            stderr: clean(out.stderr),
+        }
+    }
+
+    /// Write a hand-made store whose Resources `t0`, `t1`, ... have exactly these media types.
+    fn write_store(env: &Env, types: &[&str]) {
+        let store = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/store");
+        std::fs::create_dir_all(env.data()).unwrap();
+        for f in ["vocabulary.ttl", "extensions.ttl"] {
+            std::fs::copy(store.join(f), env.data().join(f)).unwrap();
+        }
+        let head = std::fs::read_to_string(store.join("resources.ttl")).unwrap();
+        let mut text: String = head
+            .lines()
+            .take_while(|l| l.starts_with('@') || l.starts_with('#') || l.is_empty())
+            .map(|l| format!("{l}\n"))
+            .collect();
+        for (n, media) in types.iter().enumerate() {
+            let id = format!("urn:uuid:0192f0c4-0000-7000-8000-00000009{n:04}");
+            let catalog = format!("urn:uuid:0192f0c4-0000-7000-8000-0000000a{n:04}");
+            text.push_str(&format!(
+                "<{id}#sha256> spdx:algorithm spdx:checksumAlgorithm_sha256 ;\n\
+                 \tspdx:checksumValue \"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\"^^xsd:hexBinary .\n\
+                 <{id}> a hali:Resource ;\n\
+                 \tdcterms:modified \"2026-10-20T14:02:11Z\"^^xsd:dateTime ;\n\
+                 \tdcterms:title \"t{n}\" ;\n\
+                 \tspdx:checksum <{id}#sha256> ;\n\
+                 \tdcat:byteSize 6 ;\n\
+                 \tdcat:mediaType <http://www.iana.org/assignments/media-types/{media}> ;\n\
+                 \tdcat:downloadURL <file:///nowhere/t{n}> .\n\
+                 <{catalog}> a dcat:CatalogRecord ;\n\
+                 \tdcterms:issued \"2026-10-21T08:00:00Z\"^^xsd:dateTime ;\n\
+                 \tdcterms:modified \"2026-10-21T08:00:00Z\"^^xsd:dateTime ;\n\
+                 \tfoaf:primaryTopic <{id}> .\n"
+            ));
+        }
+        std::fs::write(env.data().join("resources.ttl"), text).unwrap();
+    }
+
+    /// `find --json` over the store: the `editable` of `t0`, `t1`, ... in order.
+    fn editable_flags(env: &Env, vars: &[(&str, Option<&Path>)], count: usize) -> Vec<bool> {
+        let v = ok(&run_vars(
+            env,
+            vars,
+            None,
+            20,
+            &["--json", "find", "--limit", "2000"],
+        ));
+        let rows = rows(&v, "results");
+        assert_eq!(rows.len(), count, "{v}");
+        (0..count)
+            .map(|n| editable_of(&rows, &format!("t{n}")))
+            .collect()
+    }
+
+    fn put(dir: &Path, name: &str, text: &str) {
+        std::fs::create_dir_all(dir.join("mime")).unwrap();
+        std::fs::write(dir.join("mime").join(name), text).unwrap();
+    }
+
+    /// A hostile `subclasses` or `aliases` that is not a plain file must be skipped (treated
+    /// as absent), never opened for blocking: the editable rule falls back to the next
+    /// directory, here the fixture database, and `find` still exits 0 within seconds.
+    #[test]
+    fn non_regular_database_files_are_skipped() {
+        for name in ["subclasses", "aliases"] {
+            for kind in ["fifo", "symlink-to-fifo", "directory", "symlink-to-file"] {
+                let env = Env::new();
+                // application/pdf is not editable; the fixture knows application/x-shellscript.
+                write_store(&env, &["application/pdf", "application/x-shellscript"]);
+                let home = env.root.join("hostile");
+                let target = home.join("mime").join(name);
+                std::fs::create_dir_all(home.join("mime")).unwrap();
+                let fifo = env.root.join("a-fifo");
+                let mk = |p: &Path| {
+                    let st = std::process::Command::new("mkfifo")
+                        .arg(p)
+                        .status()
+                        .unwrap();
+                    assert!(st.success());
+                };
+                match kind {
+                    "fifo" => mk(&target),
+                    "symlink-to-fifo" => {
+                        mk(&fifo);
+                        std::os::unix::fs::symlink(&fifo, &target).unwrap();
+                    }
+                    "directory" => std::fs::create_dir(&target).unwrap(),
+                    _ => {
+                        // A real file that would make pdf editable, behind a symlink.
+                        let real = env.root.join("real-db");
+                        std::fs::write(&real, "application/pdf text/plain\n").unwrap();
+                        std::os::unix::fs::symlink(&real, &target).unwrap();
+                    }
+                }
+                let out = run_vars(
+                    &env,
+                    &[("XDG_DATA_HOME", Some(home.as_path()))],
+                    None,
+                    5,
+                    &["--json", "find"],
+                );
+                let v = ok(&out);
+                let rows = rows(&v, "results");
+                assert!(
+                    !editable_of(&rows, "t0"),
+                    "{name} as {kind}: pdf editable: {rows:?}"
+                );
+                assert!(
+                    editable_of(&rows, "t1"),
+                    "{name} as {kind}: the next directory was not used: {rows:?}"
+                );
+            }
+        }
+    }
+
+    /// A relative `XDG_DATA_HOME` or `HOME` is ignored, like a relative `XDG_DATA_DIRS` entry
+    /// and like `paths::xdg_dir`: a database under the working directory is never read.
+    #[test]
+    fn relative_data_home_and_home_are_ignored() {
+        let env = Env::new();
+        let db = env.root.join("zzz-db");
+        put(&db, "globs2", "50:application/x-zzz:*.zzz\n");
+        let cwd = env.root.join("cwd");
+        put(
+            &cwd.join("rel"),
+            "subclasses",
+            "application/x-zzz text/plain\n",
+        );
+        put(
+            &cwd.join("relhome/.local/share"),
+            "subclasses",
+            "application/x-zzz text/plain\n",
+        );
+        let abs_home = env.root.join("abs-home");
+        put(
+            &abs_home.join(".local/share"),
+            "subclasses",
+            "application/x-zzz text/plain\n",
+        );
+        let abs_data = env.root.join("abs-data");
+        put(&abs_data, "subclasses", "application/x-zzz text/plain\n");
+        write_store(&env, &["application/x-zzz"]);
+        let flags = |vars: &[(&str, Option<&Path>)], cwd: Option<&Path>| {
+            let mut all = vec![("XDG_DATA_DIRS", Some(db.as_path()))];
+            all.extend_from_slice(vars);
+            let v = ok(&run_vars(&env, &all, cwd, 20, &["--json", "find"]));
+            rows(&v, "results")[0].2
+        };
+        // Controls: the same files under absolute paths are read.
+        assert!(flags(&[("XDG_DATA_HOME", Some(abs_data.as_path()))], None));
+        assert!(flags(
+            &[("XDG_DATA_HOME", None), ("HOME", Some(abs_home.as_path()))],
+            None
+        ));
+        // Relative: ignored.
+        assert!(
+            !flags(&[("XDG_DATA_HOME", Some(Path::new("rel")))], Some(&cwd)),
+            "relative XDG_DATA_HOME was read"
+        );
+        assert!(
+            !flags(
+                &[
+                    ("XDG_DATA_HOME", None),
+                    ("HOME", Some(Path::new("relhome")))
+                ],
+                Some(&cwd)
+            ),
+            "relative HOME was read"
+        );
+    }
+
+    /// A database with a huge fan-out from one type reachable from `application/pdf`.
+    fn fanout_db(dir: &Path, edges: usize) {
+        put(dir, "globs2", "50:application/pdf:*.pdf\n");
+        let mut text = String::from("application/pdf application/x-fan\n");
+        for i in 0..edges {
+            text.push_str(&format!("application/x-fan application/x-f{i}\n"));
+        }
+        put(dir, "subclasses", &text);
+    }
+
+    /// Many Resources of one type over a database with a huge fan-out: the walk is memoized
+    /// per media type (or its edges are capped), so `find` is quick. There is no
+    /// deterministic cost counter through the binary, so the bound is a generous time that a
+    /// debug build doing the work once per Resource misses.
+    #[test]
+    fn fanout_database_is_cheap_per_resource() {
+        let env = Env::new();
+        let db = env.root.join("fan-db");
+        fanout_db(&db, 80_000);
+        write_store(&env, &vec!["application/pdf"; 1500]);
+        let t = std::time::Instant::now();
+        let flags = editable_flags(&env, &[("XDG_DATA_DIRS", Some(db.as_path()))], 1500);
+        let took = t.elapsed();
+        assert!(flags.iter().all(|e| !e));
+        assert!(took < Duration::from_secs(3), "find took {took:?}");
+    }
+
+    /// The same directory listed 50 times in `XDG_DATA_DIRS` is read once.
+    #[test]
+    fn duplicate_data_dirs_are_read_once() {
+        let env = Env::new();
+        let db = env.root.join("fan-db");
+        fanout_db(&db, 45_000);
+        write_store(&env, &["application/pdf"]);
+        let dirs = PathBuf::from(std::env::join_paths(vec![db.clone(); 50]).unwrap());
+        let t = std::time::Instant::now();
+        let flags = editable_flags(&env, &[("XDG_DATA_DIRS", Some(dirs.as_path()))], 1);
+        let took = t.elapsed();
+        assert_eq!(flags, [false]);
+        assert!(took < Duration::from_secs(3), "find took {took:?}");
+    }
+
+    /// Fifty different directories whose files are all the same large file (hard links): the
+    /// total bytes read are budgeted, so the cost stays bounded however many are listed.
+    #[test]
+    fn total_database_bytes_are_budgeted() {
+        let env = Env::new();
+        let first = env.root.join("db0");
+        fanout_db(&first, 45_000);
+        let mut dirs = vec![first.clone()];
+        for i in 1..50 {
+            let d = env.root.join(format!("db{i}"));
+            std::fs::create_dir_all(d.join("mime")).unwrap();
+            for name in ["globs2", "subclasses"] {
+                std::fs::hard_link(first.join("mime").join(name), d.join("mime").join(name))
+                    .unwrap();
+            }
+            dirs.push(d);
+        }
+        write_store(&env, &["application/pdf"]);
+        let joined = PathBuf::from(std::env::join_paths(dirs).unwrap());
+        let t = std::time::Instant::now();
+        let flags = editable_flags(&env, &[("XDG_DATA_DIRS", Some(joined.as_path()))], 1);
+        let took = t.elapsed();
+        assert_eq!(flags, [false]);
+        assert!(took < Duration::from_secs(3), "find took {took:?}");
+    }
+
+    /// Each type `application/x-<name>` is one Resource, `t<n>` in `names` order.
+    fn run_cases(env: &Env, names: &[&str], vars: &[(&str, Option<&Path>)]) -> Vec<(String, bool)> {
+        let types: Vec<String> = names.iter().map(|n| format!("application/x-{n}")).collect();
+        let refs: Vec<&str> = types.iter().map(String::as_str).collect();
+        write_store(env, &refs);
+        names
+            .iter()
+            .map(|n| n.to_string())
+            .zip(editable_flags(env, vars, names.len()))
+            .collect()
+    }
+
+    fn flag(cases: &[(String, bool)], name: &str) -> bool {
+        cases.iter().find(|c| c.0 == name).unwrap().1
+    }
+
+    #[test]
+    fn database_parent_that_is_an_alias_is_resolved() {
+        let env = Env::new();
+        let db = env.root.join("db");
+        put(&db, "subclasses", "application/x-kid application/x-nick\n");
+        put(&db, "aliases", "application/x-nick text/plain\n");
+        let cases = run_cases(&env, &["kid"], &[("XDG_DATA_DIRS", Some(db.as_path()))]);
+        assert!(flag(&cases, "kid"), "{cases:?}");
+    }
+
+    #[test]
+    fn database_directories_are_merged_user_first() {
+        let env = Env::new();
+        let user = env.root.join("user");
+        let sys = env.root.join("sys");
+        put(
+            &user,
+            "subclasses",
+            "application/x-a application/x-b\napplication/x-c application/x-d\n",
+        );
+        put(
+            &user,
+            "aliases",
+            "application/x-al text/plain\napplication/x-d text/plain\n",
+        );
+        put(
+            &sys,
+            "subclasses",
+            "application/x-b text/plain\napplication/x-only-sys text/plain\n",
+        );
+        put(&sys, "aliases", "application/x-al application/pdf\n");
+        let cases = run_cases(
+            &env,
+            &["a", "al", "only-sys", "c"],
+            &[
+                ("XDG_DATA_HOME", Some(user.as_path())),
+                ("XDG_DATA_DIRS", Some(sys.as_path())),
+            ],
+        );
+        // parents merged across directories: a -> b (user), b -> text/plain (system)
+        assert!(flag(&cases, "a"), "{cases:?}");
+        // the system directory is read after the user one
+        assert!(flag(&cases, "only-sys"), "{cases:?}");
+        // aliases: the user directory wins (first wins), not the later system one
+        assert!(flag(&cases, "al"), "{cases:?}");
+        // a parent that the user directory aliases
+        assert!(flag(&cases, "c"), "{cases:?}");
+    }
+
+    #[test]
+    fn database_falls_back_to_home_local_share() {
+        let env = Env::new();
+        let home = env.root.join("home");
+        put(
+            &home.join(".local/share"),
+            "subclasses",
+            "application/x-h text/plain\n",
+        );
+        let empty = env.root.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        let cases = run_cases(
+            &env,
+            &["h"],
+            &[
+                ("XDG_DATA_HOME", None),
+                ("HOME", Some(home.as_path())),
+                ("XDG_DATA_DIRS", Some(empty.as_path())),
+            ],
+        );
+        assert!(flag(&cases, "h"), "{cases:?}");
+    }
+
+    #[test]
+    fn malformed_database_lines_are_ignored_and_case_is_folded() {
+        let env = Env::new();
+        let user = env.root.join("user");
+        let sys = env.root.join("sys");
+        let junk: &[u8] = b"application/x-three text/plain extra\n\
+            garbage\n\
+            \n\
+            # a comment text/plain\n\
+            a/b/c text/plain\n\
+            application/x-w text/x$y\n\
+            Application/X-Upper TEXT/Plain\n\
+            application/x-ok text/plain\n";
+        std::fs::create_dir_all(user.join("mime")).unwrap();
+        std::fs::write(user.join("mime/subclasses"), junk).unwrap();
+        // not UTF-8 at all
+        std::fs::write(user.join("mime/aliases"), b"\xff\xfe\x00 \xc3\x28\n").unwrap();
+        put(&sys, "subclasses", "application/x-sysok text/plain\n");
+        let cases = run_cases(
+            &env,
+            &["three", "w", "upper", "ok", "sysok"],
+            &[
+                ("XDG_DATA_HOME", Some(user.as_path())),
+                ("XDG_DATA_DIRS", Some(sys.as_path())),
+            ],
+        );
+        assert!(!flag(&cases, "three"), "three words: {cases:?}");
+        assert!(!flag(&cases, "w"), "an unsafe type name: {cases:?}");
+        assert!(
+            flag(&cases, "upper"),
+            "database lines are lowercased: {cases:?}"
+        );
+        assert!(flag(&cases, "ok"), "{cases:?}");
+        assert!(flag(&cases, "sysok"), "{cases:?}");
+    }
+
+    #[test]
+    fn database_file_is_read_up_to_a_cap() {
+        use std::os::unix::fs::FileExt;
+        let env = Env::new();
+        let user = env.root.join("user");
+        std::fs::create_dir_all(user.join("mime")).unwrap();
+        // 5 MiB sparse file (zero bytes read as garbage lines): a valid line first, one after
+        // the 4 MiB cap.
+        let path = user.join("mime/subclasses");
+        let head = b"application/x-early text/plain\n";
+        let tail = b"\napplication/x-late text/plain\n";
+        let size = 5 * 1024 * 1024u64;
+        let f = std::fs::File::create(&path).unwrap();
+        f.set_len(size).unwrap();
+        f.write_all_at(head, 0).unwrap();
+        f.write_all_at(tail, size - tail.len() as u64).unwrap();
+        let empty = env.root.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        let cases = run_cases(
+            &env,
+            &["early", "late"],
+            &[
+                ("XDG_DATA_HOME", Some(user.as_path())),
+                ("XDG_DATA_DIRS", Some(empty.as_path())),
+            ],
+        );
+        assert!(flag(&cases, "early"), "{cases:?}");
+        assert!(!flag(&cases, "late"), "read past the cap: {cases:?}");
+    }
+
+    /// A chain of subclasses is followed through at most 256 types (the start included).
+    #[test]
+    fn long_subclass_chains_stop_at_256_types() {
+        let env = Env::new();
+        let db = env.root.join("db");
+        let mut text = String::new();
+        // `in`: 255 application types then text/plain = 256 types; `out`: one more.
+        for (name, types) in [("in", 255), ("out", 256)] {
+            for i in 0..types - 1 {
+                text.push_str(&format!(
+                    "application/x-{name}{i} application/x-{name}{}\n",
+                    i + 1
+                ));
+            }
+            text.push_str(&format!("application/x-{name}{} text/plain\n", types - 1));
+        }
+        put(&db, "subclasses", &text);
+        let cases = run_cases(
+            &env,
+            &["in0", "out0"],
+            &[("XDG_DATA_DIRS", Some(db.as_path()))],
+        );
+        assert!(flag(&cases, "in0"), "256 types: {cases:?}");
+        assert!(!flag(&cases, "out0"), "257 types: {cases:?}");
     }
 }

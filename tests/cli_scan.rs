@@ -483,7 +483,7 @@ mod goal {
             assert_eq!(out.code, Some(3), "{text:?}: {}", out.stderr);
             assert!(
                 out.stderr.contains(
-                    "Fix the config file; only [user] name, [vocabulary] language, [files] dir"
+                    "Fix the config file; only [user] name, [vocabulary] language, [files] dir, [scan] exclude, include_hidden and max_size, and [open] editor and system are read."
                 ),
                 "{text:?}: {}",
                 out.stderr
@@ -509,7 +509,7 @@ mod goal {
             );
             assert!(
                 out.stderr.contains(
-                    "Fix the config file; only [user] name, [vocabulary] language, [files] dir"
+                    "Fix the config file; only [user] name, [vocabulary] language, [files] dir, [scan] exclude, include_hidden and max_size, and [open] editor and system are read."
                 ),
                 "{text:?}: {}",
                 out.stderr
