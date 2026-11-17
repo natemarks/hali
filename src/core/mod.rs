@@ -4,6 +4,7 @@
 pub mod concept;
 pub mod config;
 pub mod describe;
+pub mod query;
 pub mod relation;
 pub mod relink;
 pub mod resource;
@@ -328,6 +329,41 @@ impl Error {
             err.suggested_command = Some("hali validate".to_string());
         }
         err
+    }
+
+    /// SPARQL Update text given to `hali query`: refused, nothing was run.
+    pub fn read_only_query() -> Error {
+        Error::new(
+            "READ_ONLY_QUERY",
+            1,
+            "hali query is read-only; SPARQL Update is refused and nothing was run".to_string(),
+            json!({}),
+        )
+        .fix("Use SELECT, ASK, CONSTRUCT or DESCRIBE to read the store, or change it with hali's own commands.")
+    }
+
+    /// A query that could not be answered: `reason` is `service` (with the service IRI),
+    /// `timeout` or `too_large`.
+    pub fn query_failed(reason: &str, service: Option<&str>) -> Error {
+        let (message, fix) = match reason {
+            "service" => (
+                "the query uses SERVICE, which hali never runs; hali opens no network connection",
+                "Remove the SERVICE clause, or use SERVICE SILENT.",
+            ),
+            "timeout" => (
+                "the query ran longer than 30 seconds and was cancelled",
+                "Make the query cheaper: add more specific patterns or a LIMIT.",
+            ),
+            _ => (
+                "the query returned more than 100000 results",
+                "Add LIMIT to the query, or make its patterns more specific.",
+            ),
+        };
+        let details = match service {
+            Some(service) => json!({"reason": reason, "service": service}),
+            None => json!({"reason": reason}),
+        };
+        Error::new("QUERY_FAILED", 1, message.to_string(), details).fix(fix)
     }
 
     /// The shapes cannot be used. The message gives no reason: rudof's text is never echoed.

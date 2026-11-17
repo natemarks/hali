@@ -11,7 +11,7 @@ pub mod walk;
 
 use crate::ontology::{CORE_TTL, PREFIXES, SHAPES_TTL};
 use oxigraph::model::vocab::rdf;
-use oxigraph::model::{GraphNameRef, NamedNode, Triple};
+use oxigraph::model::{GraphNameRef, Literal, NamedNode, NamedOrBlankNode, Term, Triple};
 use oxttl::{TurtleParser, TurtleSerializer};
 use std::fs;
 use std::io::ErrorKind;
@@ -131,10 +131,21 @@ fn position_of(bytes: &[u8], offset: usize) -> (u64, u64) {
 /// with `rdf:type` first per subject.
 pub fn to_turtle(store: &Store, file: File) -> String {
     let graph = file.graph();
-    let mut triples: Vec<Triple> = store
+    let triples: Vec<Triple> = store
         .quads_for_pattern(None, None, None, Some(graph.as_ref().into()))
         .map(|q| Triple::from(q.expect("reading the in-memory store")))
         .collect();
+    let mut out = String::from(HEADER);
+    out.push_str(&turtle_document(triples, |_| false));
+    out
+}
+
+/// Serializes triples as the Turtle of `to_turtle` without its header line (spec §3.4, §9.9): the
+/// fixed prefix table, then the triples sorted and grouped. Every character for which `escape`
+/// is true is written as a Turtle `\uXXXX` or `\UXXXXXXXX` escape, and an IRI that holds one is
+/// written whole, never as a prefixed name. The caller keeps layout characters (LF, TAB) out of
+/// `escape`.
+pub fn turtle_document(mut triples: Vec<Triple>, escape: impl Fn(char) -> bool) -> String {
     triples.sort_by_cached_key(|t| {
         (
             t.subject.to_string(),
@@ -143,6 +154,36 @@ pub fn to_turtle(store: &Store, file: File) -> String {
             t.object.to_string(),
         )
     });
+
+    // An IRI with a character to escape is serialized as a stand-in that no prefix can shorten,
+    // then put back whole in angle brackets.
+    let marker = stand_in_marker(&triples);
+    let mut stand_ins: Vec<String> = Vec::new();
+    let mut stand_in = |iri: NamedNode| {
+        if !iri.as_str().chars().any(&escape) {
+            return iri;
+        }
+        stand_ins.push(iri.into_string());
+        NamedNode::new_unchecked(format!("{marker}{}", stand_ins.len() - 1))
+    };
+    let triples: Vec<Triple> = triples
+        .into_iter()
+        .map(|t| {
+            let subject = match t.subject {
+                NamedOrBlankNode::NamedNode(n) => NamedOrBlankNode::NamedNode(stand_in(n)),
+                other => other,
+            };
+            let object = match t.object {
+                Term::NamedNode(n) => Term::NamedNode(stand_in(n)),
+                Term::Literal(l) if l.language().is_none() => {
+                    let datatype = stand_in(l.datatype().into_owned());
+                    Term::Literal(Literal::new_typed_literal(l.value(), datatype))
+                }
+                other => other,
+            };
+            Triple::new(subject, stand_in(t.predicate), object)
+        })
+        .collect();
 
     // oxttl orders its prefix lines by namespace length, so hali writes the prelude itself
     // and keeps the serializer's prefixes only for abbreviation.
@@ -165,17 +206,49 @@ pub fn to_turtle(store: &Store, file: File) -> String {
     } else {
         PREFIXES.len()
     };
-    let body: String = body
+    let mut body: String = body
         .split_inclusive('\n')
         .skip(prelude_lines)
         .collect::<String>();
+    for (n, iri) in stand_ins.iter().enumerate() {
+        body = body.replace(&format!("<{marker}{n}>"), &format!("<{iri}>"));
+    }
 
-    let mut out = String::from(HEADER);
+    let mut out = String::new();
     for (name, iri) in PREFIXES {
         out.push_str(&format!("@prefix {name}: <{iri}> .\n"));
     }
     out.push('\n');
     out.push_str(&body);
+    escape_turtle(&out, &escape)
+}
+
+/// A stand-in IRI prefix that no term of `triples` contains.
+fn stand_in_marker(triples: &[Triple]) -> String {
+    let mut salt = 0;
+    loop {
+        let marker = format!("urn:hali-stand-in-{salt}-");
+        if !triples.iter().any(|t| t.to_string().contains(&marker)) {
+            return marker;
+        }
+        salt += 1;
+    }
+}
+
+/// Writes every character `escape` selects as a Turtle `\u` or `\U` escape.
+fn escape_turtle(text: &str, escape: &impl Fn(char) -> bool) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        let n = u32::from(c);
+        if !escape(c) {
+            out.push(c);
+        } else if n <= 0xFFFF {
+            write!(out, "\\u{n:04X}").expect("writing to a String");
+        } else {
+            write!(out, "\\U{n:08X}").expect("writing to a String");
+        }
+    }
     out
 }
 

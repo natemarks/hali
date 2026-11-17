@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hali query --json for SELECT and ASK (W3C SPARQL 1.1 Query Results JSON, not the hali envelope); CONSTRUCT and DESCRIBE print Turtle",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "head": {
+          "type": "object",
+          "properties": {
+            "vars": {"type": "array", "items": {"type": "string"}}
+          },
+          "required": ["vars"]
+        },
+        "results": {
+          "type": "object",
+          "properties": {
+            "bindings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": {"$ref": "#/$defs/sparql_term"}
+              }
+            }
+          },
+          "required": ["bindings"]
+        }
+      },
+      "required": ["head", "results"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "head": {"type": "object", "maxProperties": 0},
+        "boolean": {"type": "boolean"}
+      },
+      "required": ["head", "boolean"],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "sparql_term": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {"const": "uri"},
+            "value": {"type": "string"}
+          },
+          "required": ["type", "value"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {"const": "bnode"},
+            "value": {"type": "string"}
+          },
+          "required": ["type", "value"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {"const": "literal"},
+            "value": {"type": "string"},
+            "xml:lang": {"type": "string"},
+            "datatype": {"type": "string"}
+          },
+          "required": ["type", "value"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {"const": "triple"},
+            "value": {
+              "type": "object",
+              "properties": {
+                "subject": {"$ref": "#/$defs/sparql_term"},
+                "predicate": {"$ref": "#/$defs/sparql_term"},
+                "object": {"$ref": "#/$defs/sparql_term"}
+              },
+              "required": ["subject", "predicate", "object"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["type", "value"],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

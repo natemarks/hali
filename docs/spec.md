@@ -440,7 +440,7 @@ hali generate completions <bash|zsh|fish>
   ```
 - **In text mode**, the output is one `error:` line plus a `hint:` line; the message, the suggested fix and the suggested command are each escaped for the terminal (§9.3), so outside text can neither add lines nor drive the terminal. A usage error that clap reports itself (an unknown subcommand or flag, a missing or invalid argument, an unknown `schema` name) keeps clap's layout without colour. Every argument it repeats is escaped for the terminal, and so is the rest of its text apart from its line breaks.
 - **Size:** errors stay well under 10k characters.
-- **Rules** (SCREAMING_SNAKE, minimum set): `UNKNOWN_RESOURCE`, `UNKNOWN_CONCEPT`, `UNKNOWN_TYPE`, `UNKNOWN_RELATION`, `LABEL_TAKEN`, `POSSIBLE_MOVE`, `FORGET_BLOCKED_BY_RELATIONS`, `IN_USE`, `HASH_MISMATCH`, `NOT_A_REGULAR_FILE`, `NON_UTF8_PATH`, `FILE_UNREADABLE`, `SHACL_VIOLATION`, `CONFIRMATION_REQUIRED`, `READ_ONLY_QUERY`, `STORE_LOCKED`.
+- **Rules** (SCREAMING_SNAKE, minimum set): `UNKNOWN_RESOURCE`, `UNKNOWN_CONCEPT`, `UNKNOWN_TYPE`, `UNKNOWN_RELATION`, `LABEL_TAKEN`, `POSSIBLE_MOVE`, `FORGET_BLOCKED_BY_RELATIONS`, `IN_USE`, `HASH_MISMATCH`, `NOT_A_REGULAR_FILE`, `NON_UTF8_PATH`, `FILE_UNREADABLE`, `SHACL_VIOLATION`, `CONFIRMATION_REQUIRED`, `READ_ONLY_QUERY`, `QUERY_FAILED`, `STORE_LOCKED`.
 
 ### 9.5 Dry run
 `--dry-run` is a global flag, like `--json`, accepted before or after the subcommand. A mutating command run with it returns the same payload as a real run, with the same keys in the same order, plus `"dry_run": true` and a `changes` list of the triples it would add to or remove from a tool-managed file (`vocabulary.ttl`, `resources.ttl`), in N-Triples form. A real run never prints `dry_run` or `changes`.
@@ -478,10 +478,17 @@ hali generate completions <bash|zsh|fish>
 - Nothing ever waits on stdin: without both terminals it is never read, and `--yes` and `--dry-run` never read it.
 
 ### 9.9 `hali query`
-- **Read-only:** SPARQL 1.1 over all named graphs. UPDATE is rejected with `READ_ONLY_QUERY`.
-- **Output with `--json`:** SELECT/ASK results use the **W3C SPARQL 1.1 Query Results JSON** format, not the hali envelope; CONSTRUCT/DESCRIBE results are Turtle.
-- **Text mode** shows a table.
-- **Paging:** there is no `--limit`; write `LIMIT` in the query.
+- **Dataset:** SPARQL 1.1 over all named graphs. The default graph is the RDF merge (set union) of the four named graphs `https://w3id.org/hali/graph/{core,vocabulary,resources,extensions}`, so a triple held in two graphs matches once. `GRAPH` works with those IRIs. `FROM` and `FROM NAMED` choose among them and are never fetched: a graph IRI that is not one of the four is empty.
+- **Input:** one positional argument, the query text (no file, no stdin). The §3.4 prefix table is predeclared, and a query's own `PREFIX` overrides it. There is no base IRI.
+- **Output of SELECT and ASK with `--json`:** the **W3C SPARQL 1.1 Query Results JSON** format on one line, not the hali envelope and with no `schema_version`. An ASK prints `{"head":{},"boolean":true}` or `{"head":{},"boolean":false}`. `hali schema query` describes it.
+- **Text mode:** SELECT is a TSV table: the variable names without `?`, then one line per solution, with terms in N-Triples form (IRIs shortened through the prefix table) and an unbound cell empty. A SELECT with no solution prints the header line only. ASK prints `true` or `false`. Every cell is escaped for the terminal (§9.3), so an ESC prints as `\u{1b}`.
+- **CONSTRUCT and DESCRIBE** print Turtle in text and `--json` mode alike: the fixed prefix lines (no header comment), then the triples sorted as in §3.4. Every §9.3 character except LF is written as a Turtle `\u` or `\U` escape, and an IRI that holds one is not shortened to a prefixed name, so the output is valid Turtle and safe for a terminal.
+- **Read-only:** the text is parsed after the config is read and before the store is. Text that parses as SPARQL Update (INSERT, DELETE, LOAD, CLEAR, DROP, CREATE, ADD, MOVE, COPY, or several operations) is refused with `READ_ONLY_QUERY` (exit 1, empty details): the update is never run and the query path never saves the store. Detection is by grammar, so `INSERT` in a comment changes nothing. Text that parses as neither is a usage error (exit 2), `invalid SPARQL query: <parser message>`, the parser message capped at 1,000 characters.
+- **SERVICE:** hali never opens a network connection. A `SERVICE` clause is `QUERY_FAILED` (exit 1, details `reason` `service` and the `service` IRI); `SERVICE SILENT` follows SPARQL's silent semantics and yields no rows from the service.
+- **Bounds:** a query still running after 30 s is cancelled (`QUERY_FAILED`, reason `timeout`). More than 100,000 solutions or triples is `QUERY_FAILED`, reason `too_large`, with the fix to add `LIMIT`. The bounds are fixed; the answer is all or nothing.
+- **Paging:** there is no `--limit`, `--offset` or `--fields`; write `LIMIT` in the query.
+- **Flags:** `--dry-run` and `--yes` are accepted and ignored. `--agent` does not apply.
+- **Store:** an absent or empty data dir is queried as the core graph alone (exit 0, nothing created). `CONFIG_INVALID`, `STORE_IO` and `STORE_UNPARSEABLE` are as for `describe`.
 
 ---
 

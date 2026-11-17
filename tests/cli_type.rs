@@ -1087,7 +1087,7 @@ mod goal {
             );
         }
         let v = ok(&env.run(["schema", "--json"]));
-        assert_eq!(v["schemas"].as_array().unwrap().len(), 26, "{v}");
+        assert_eq!(v["schemas"].as_array().unwrap().len(), 27, "{v}");
         for name in ["type add", "type list", "type remove"] {
             let words: Vec<&str> = name.split(' ').collect();
             let mut args = vec!["schema"];
