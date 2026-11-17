@@ -15,7 +15,7 @@ mod goal {
     fn leaf_paths(cmd: &clap::Command, prefix: &str, out: &mut Vec<String>) {
         let subs: Vec<&clap::Command> = cmd
             .get_subcommands()
-            .filter(|c| c.get_name() != "help")
+            .filter(|c| c.get_name() != "help" && !c.is_hide_set())
             .collect();
         if subs.is_empty() {
             out.push(prefix.trim().to_string());

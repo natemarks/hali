@@ -1,0 +1,3 @@
+tests/cli_generate.rs
+tests/core_schema.rs
+tests/dry_run_guard.rs
