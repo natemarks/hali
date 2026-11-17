@@ -133,7 +133,8 @@ pub fn normalise_title(title: &str) -> Result<String, Error> {
 
 /// Catalogs a file. If its real path is cataloged already, returns that Resource with no
 /// changes (no title change, no refresh). Otherwise mints the Resource, its catalog record and,
-/// the first time, the user Person named `user_name`, in that order. Refused, with the store
+/// the first time, the user Person named `user_name` and, when `ctx` names an acting agent the
+/// store does not know yet, its `prov:SoftwareAgent`, in that order. Refused, with the store
 /// unchanged, if the store would not conform to the SHACL shapes.
 pub fn add(
     ctx: &Context,
