@@ -292,6 +292,11 @@ mod goal {
         ("cli_scan_roots__scan_list_json", "scan"),
     ];
 
+    /// Snapshots written by the active goal (#5): hidden from a build without the goal feature
+    /// (the `STORE_LOCKED` envelope only validates once the `error` schema has its branch).
+    /// It is a stderr snapshot, so it needs no stdout row.
+    const GOAL_SNAPS_5: &[&str] = &["cli_lock__store_locked_json_envelope"];
+
     /// Every stdout snapshot's row.
     #[allow(unused_assignments, unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
@@ -383,6 +388,11 @@ mod goal {
         {
             pending_23 = &[];
         }
+        let mut pending_5: &[&str] = GOAL_SNAPS_5;
+        #[cfg(feature = "goal")]
+        {
+            pending_5 = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -403,6 +413,7 @@ mod goal {
                 || pending_21.contains(&stem.as_str())
                 || pending_24.contains(&stem.as_str())
                 || pending_23.contains(&stem.as_str())
+                || pending_5.contains(&stem.as_str())
             {
                 continue;
             }
@@ -516,6 +527,8 @@ mod goal {
         assert!(goldens.len() >= 85, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 89, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 94, "found only {} goldens", goldens.len());
+        #[cfg(feature = "goal")]
+        assert!(goldens.len() >= 95, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
                 .unwrap_or_else(|| panic!("golden `{}` is not mapped to a schema", g.stem));

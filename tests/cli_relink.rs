@@ -314,6 +314,7 @@ mod goal {
             Some(
                 std::fs::read_dir(&self.data)
                     .unwrap()
+                    .filter(|e| e.as_ref().unwrap().file_name() != ".lock")
                     .map(|e| {
                         let e = e.unwrap();
                         (
@@ -338,6 +339,9 @@ mod goal {
             ) {
                 for e in std::fs::read_dir(dir).unwrap() {
                     let path = e.unwrap().path();
+                    if path.file_name().is_some_and(|n| n == ".lock") {
+                        continue;
+                    }
                     let meta = std::fs::symlink_metadata(&path).unwrap();
                     let name = path.strip_prefix(base).unwrap().display().to_string();
                     if meta.is_dir() {

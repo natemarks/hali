@@ -188,6 +188,7 @@ mod goal {
         fn state(&self) -> Fingerprint {
             std::fs::read_dir(self.data())
                 .unwrap()
+                .filter(|e| e.as_ref().unwrap().file_name() != ".lock")
                 .map(|e| {
                     let e = e.unwrap();
                     (
