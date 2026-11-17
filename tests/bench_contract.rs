@@ -20,12 +20,10 @@
 //! Spawned processes get a cleared environment holding only HALI_DATA_DIR, HOME and
 //! XDG_CONFIG_HOME, all under temp dirs.
 
-#[cfg(feature = "goal")]
 #[allow(dead_code)]
 #[rustfmt::skip]
 mod bench_support;
 
-#[cfg(feature = "goal")]
 mod goal {
     use super::bench_support::{RUNS, build_store, header, percentile, verdict};
     use serde_json::Value;
