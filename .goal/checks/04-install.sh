@@ -32,7 +32,7 @@ inst() {
     local keep=()
     [ -n "${CARGO_TARGET_DIR:-}" ] && keep+=("CARGO_TARGET_DIR=$CARGO_TARGET_DIR")
     env -i PATH="$PATH" HOME="$home" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
-        "${keep[@]}" make install "$@" >"$tmp/out" 2>"$tmp/err"
+        "${keep[@]}" make install "$@" >"$tmp/out" 2>"$tmp/err" </dev/null
 }
 
 mode() { stat -c %a "$1"; }
@@ -158,5 +158,66 @@ else
     [ -f "$prefix/share/man/man1/hali.1" ] || bad "MISSING: PREFIX did not move the man page to \$PREFIX/share/man/man1/hali.1"
     [ -e "$home3/.local/bin/hali" ] && bad "FOUND: PREFIX was ignored: the binary went under HOME"
 fi
+
+# Row 16: every directory the install creates is 0755 whatever the caller's umask; files are
+# 0755 (the binary) or 0644.
+audit() {
+    local h=$1 label=$2 d f
+    while IFS= read -r d; do
+        [ -z "$d" ] || [ "$(mode "$d")" = 755 ] || bad "WRONG MODE ($label): ${d#"$h"/} is $(mode "$d"), not 0755"
+    done < <(find "$h" -mindepth 1 -type d | sort)
+    while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        if [ "$f" = "$h/.local/bin/hali" ]; then
+            [ "$(mode "$f")" = 755 ] || bad "WRONG MODE ($label): ${f#"$h"/} is $(mode "$f"), not 0755"
+        else
+            [ "$(mode "$f")" = 644 ] || bad "WRONG MODE ($label): ${f#"$h"/} is $(mode "$f"), not 0644"
+        fi
+    done < <(find "$h" ! -type d | sort)
+}
+for um in 000 002; do
+    uhome="$tmp/home-umask$um"
+    mkdir -p "$uhome"
+    if ! (umask "$um" && inst "$uhome"); then
+        bad "FAILED: \`make install\` under umask $um failed:"
+        tail -8 "$tmp/err"
+    else
+        audit "$uhome" "umask $um"
+    fi
+done
+
+# Row 17: make variables are data, not shell text: nothing in them is executed, and the files
+# land at the literal path (or the target fails with nothing executed).
+n=0
+while IFS= read -r payload; do
+    n=$((n + 1))
+    cdir="$tmp/inj$n"
+    mkdir -p "$cdir/home"
+    mark="$cdir/pwned"
+    arg=${payload//@MARK@/$mark}
+    lit=${arg//\$\$/\$}
+    if inst "$cdir/home" BINDIR="$cdir/$arg"; then
+        [ -x "$cdir/$lit/hali" ] || bad "MISSING (injection case $n): BINDIR=$arg did not land at the literal path $cdir/$lit/hali"
+    fi
+    [ ! -e "$mark" ] || bad "EXECUTED (injection case $n): BINDIR=$arg ran shell text from the make variable"
+done <<'EOF'
+b";touch @MARK@;echo "
+b$$(touch @MARK@)
+b`touch @MARK@`
+b;touch @MARK@;
+b $$HOME 'x' ;touch @MARK@
+EOF
+
+# Row 18: a failure part way through leaves no staged temp file behind.
+home5="$tmp/home5"
+mkdir -p "$home5/.local/share/man/man1/hali.1/keep"
+if inst "$home5"; then
+    bad "FAILED TO FAIL: \`make install\` succeeded although <MANDIR>/hali.1 is a non-empty directory"
+fi
+left=$(find "$home5" -name '*.tmp.*')
+[ -z "$left" ] || {
+    bad "LEFT BEHIND: a failed install left staged temp files:"
+    printf '%s\n' "$left"
+}
 
 exit "$fail"

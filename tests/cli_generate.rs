@@ -219,6 +219,177 @@ mod goal {
         }
     }
 
+    type Surface = (
+        std::collections::BTreeSet<String>,
+        std::collections::BTreeSet<String>,
+    );
+
+    /// What `hali --help` offers at the top level: (flags, subcommand names).
+    fn help_surface(help: &str) -> Surface {
+        let mut flags = std::collections::BTreeSet::new();
+        let mut subs = std::collections::BTreeSet::new();
+        let mut section = "";
+        for line in help.lines() {
+            if line == "Commands:" || line == "Options:" {
+                section = if line == "Commands:" { "c" } else { "o" };
+                continue;
+            }
+            if !line.starts_with("  ") {
+                if !line.trim().is_empty() {
+                    section = "";
+                }
+                continue;
+            }
+            let body = line.trim();
+            match section {
+                "c" => {
+                    if let Some(name) = body.split_whitespace().next() {
+                        subs.insert(name.to_string());
+                    }
+                }
+                "o" => {
+                    let head = body.split("  ").next().unwrap_or("");
+                    for t in head.split_whitespace() {
+                        let t = t.trim_matches(',');
+                        if t.starts_with('-') {
+                            flags.insert(t.to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        (flags, subs)
+    }
+
+    /// The top-level flags and subcommand names a generated script offers.
+    fn script_surface(shell: &str, text: &str) -> Surface {
+        let mut flags = std::collections::BTreeSet::new();
+        let mut subs = std::collections::BTreeSet::new();
+        let lines: Vec<&str> = text.lines().collect();
+        match shell {
+            "bash" => {
+                let at = lines
+                    .iter()
+                    .position(|l| l.trim() == "hali)")
+                    .expect("bash: no top-level `hali)` case");
+                let opts = lines[at..]
+                    .iter()
+                    .find(|l| l.trim_start().starts_with("opts=\""))
+                    .expect("bash: no top-level opts");
+                let inner = opts.split('"').nth(1).unwrap();
+                for t in inner.split_whitespace() {
+                    if t.starts_with('-') {
+                        flags.insert(t.to_string());
+                    } else {
+                        subs.insert(t.to_string());
+                    }
+                }
+            }
+            "zsh" => {
+                let end = lines
+                    .iter()
+                    .position(|l| l.contains(":: :_hali_commands"))
+                    .expect("zsh: no top-level command list");
+                for l in &lines[..end] {
+                    if let Some(rest) = l.strip_prefix('\'') {
+                        let flag: String = rest
+                            .chars()
+                            .take_while(|c| *c != '[' && *c != '=' && *c != '\'')
+                            .collect();
+                        if flag.starts_with('-') {
+                            flags.insert(flag);
+                        }
+                    }
+                }
+                let start = lines
+                    .iter()
+                    .position(|l| l.starts_with("_hali_commands() {"))
+                    .expect("zsh: no _hali_commands");
+                for l in &lines[start + 1..] {
+                    if l.starts_with('}') {
+                        break;
+                    }
+                    if let Some(rest) = l.trim().strip_prefix('\'') {
+                        if let Some((name, _)) = rest.split_once(':') {
+                            subs.insert(name.to_string());
+                        }
+                    }
+                }
+            }
+            _ => {
+                for l in lines
+                    .iter()
+                    .filter(|l| l.starts_with("complete -c hali -n \"__fish_hali_needs_command\""))
+                {
+                    let toks: Vec<&str> = l.split_whitespace().collect();
+                    let mut i = 0;
+                    while i + 1 < toks.len() {
+                        match toks[i] {
+                            "-d" => break,
+                            "-s" => flags.insert(format!("-{}", toks[i + 1])),
+                            "-l" => flags.insert(format!("--{}", toks[i + 1])),
+                            "-a" => subs.insert(toks[i + 1].trim_matches('"').to_string()),
+                            _ => false,
+                        };
+                        i += 1;
+                    }
+                }
+            }
+        }
+        (flags, subs)
+    }
+
+    #[test]
+    fn completions_match_help() {
+        let env = Env::new();
+        let help = ok(&env.run(&["--help"]), "--help");
+        let (want_flags, want_subs) = help_surface(&help);
+        assert!(
+            want_flags.contains("-V") && want_flags.contains("--version"),
+            "{want_flags:?}"
+        );
+        assert!(
+            want_subs.contains("help") && !want_subs.contains("generate"),
+            "{want_subs:?}"
+        );
+        for shell in SHELLS {
+            let text = ok(
+                &generate(&env, &["completions", shell]),
+                &format!("completions {shell}"),
+            );
+            let (flags, subs) = script_surface(shell, &text);
+            assert_eq!(
+                flags, want_flags,
+                "{shell}: top-level flags differ from --help"
+            );
+            assert_eq!(
+                subs, want_subs,
+                "{shell}: top-level subcommands differ from --help"
+            );
+            for marker in [
+                "__subcmd__generate",
+                "'generate:",
+                "-a \"generate\"",
+                "_subcommand generate",
+            ] {
+                assert!(!text.contains(marker), "{shell}: the script holds {marker}");
+            }
+        }
+    }
+
+    #[test]
+    fn man_header_carries_the_version() {
+        let env = Env::new();
+        let text = ok(&generate(&env, &["man"]), "generate man");
+        let want = format!("hali {}", env!("CARGO_PKG_VERSION"));
+        let th = text
+            .lines()
+            .find(|l| l.starts_with(".TH hali 1"))
+            .expect("no .TH line");
+        assert!(th.contains(&want), "the .TH line lacks `{want}`: {th}");
+    }
+
     #[test]
     #[ignore = "needs bash on PATH (make test-external)"]
     fn completions_parse() {

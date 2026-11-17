@@ -29,3 +29,12 @@ New tests go in `tests/cli_generate.rs` under a goal-tagged `mod goal`.
 | 14 | Spec §4/§13.2 paths, AGENTS.md rows, `make help` lists install | `.goal/checks/07-docs.sh` |
 
 No existing snapshot changes (help tests compare against `render_help()`; no help `.snap` files). Tests clear HOME, XDG_* and HALI_* and point them at temp dirs.
+
+## Review rows (update, reviewer + security-reviewer)
+| # | Criterion | Check |
+|---|---|---|
+| 15 | Completions offer exactly what `hali --help` offers at the top level (subcommands, `--json/--dry-run/--yes`, `-h/--help`, `-V/--version`, `help`), with `generate` absent by name token; the man page `.TH` line carries the version | `cli_generate::completions_match_help`, `cli_generate::man_header_carries_the_version` |
+| 16 | `make install` creates every directory 0755 and files 0755/0644 whatever the umask (000, 002) | `04-install.sh` |
+| 17 | Make variables (`BINDIR` with quotes, `$(...)`, backticks, `;`, spaces) are never executed; files land at the literal path or the target fails | `04-install.sh` |
+| 18 | A mid-install failure (`<MANDIR>/hali.1` a non-empty directory) exits non-zero and leaves no `*.tmp.*` files | `04-install.sh` |
+| 19 | `every_command_has_a_schema` skips only `generate` by name, not every hidden command (passes today) | `core_schema.rs::every_command_has_a_schema` |
