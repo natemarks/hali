@@ -30,7 +30,6 @@
 //! Row 9 (dry-run guard) and the hidden-leaf skip in `every_command_has_a_schema` are edits to
 //! tests/dry_run_guard.rs and tests/core_schema.rs.
 
-#[cfg(feature = "goal")]
 mod goal {
     use std::ffi::OsStr;
     use std::os::unix::fs::symlink;

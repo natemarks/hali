@@ -131,7 +131,6 @@ fn run_case(name: &str, fixture: &str, argv: &[&str], with_store: bool, json: bo
     let ctx = format!("`{name}` {args:?} (store: {with_store}, json: {json})");
     assert_eq!(snapshot(root.path()), before, "{ctx}: a dry run wrote");
     assert!(out.status.code().is_some(), "{ctx}: killed by a signal");
-    #[cfg(feature = "goal")]
     if with_store {
         assert!(
             out.status.success(),
@@ -154,7 +153,6 @@ fn every_subcommand_has_a_guard_case() {
              tests/dry_run_guard.rs; add valid argv for it so the dry-run guard covers it"
         );
     }
-    #[cfg(feature = "goal")]
     for (name, _, _) in CASES {
         assert!(
             leaves.iter().any(|l| l == name),
