@@ -669,6 +669,28 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
     {
         concept::check_alt_lists(add_alt, remove_alt)?;
     }
+    if let Command::Add { paths, title, .. } = &cli.command
+        && title.is_some()
+        && paths.len() > 1
+    {
+        return Err(Error::usage("--title takes exactly one path"));
+    }
+    if let Command::Edit {
+        add_types,
+        remove_types,
+        add_tags,
+        remove_tags,
+        ..
+    } = &cli.command
+    {
+        resource::check_edit_lists(&resource::Edit {
+            add_types: add_types.clone(),
+            remove_types: remove_types.clone(),
+            add_tags: add_tags.clone(),
+            remove_tags: remove_tags.clone(),
+            ..Default::default()
+        })?;
+    }
     let dir = paths::data_dir(env).map_err(|_| Error::store_io(None))?;
     let writer = open_writer(cli, &dir)?;
     let mut store = load_store(writer.as_ref(), &dir)?;
@@ -681,9 +703,6 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             tags,
             new,
         } => {
-            if title.is_some() && paths.len() > 1 {
-                return Err(Error::usage("--title takes exactly one path"));
-            }
             let files = inspect_all(paths)?;
             if !new {
                 resource::check_moves(&store, &files, |p| storage::stat(Path::new(p)))?;

@@ -99,7 +99,8 @@ impl Writer {
         for name in STORE_FILES {
             match fs::symlink_metadata(dir.join(format!("{name}.ttl"))) {
                 Err(e) if e.kind() == ErrorKind::NotFound => {}
-                _ => {
+                Err(_) => return Err(io(dir)),
+                Ok(_) => {
                     return Err(Error::Locked {
                         path: dir.join(LOCK_FILE),
                         reason: LockReason::Changed,
@@ -140,9 +141,10 @@ fn acquire(dir: &Path, mode: Mode) -> Result<Option<fs::File>, Error> {
         options.write(true).create(true).truncate(false).mode(0o600);
     }
     // O_NOFOLLOW and O_NONBLOCK: a symlink is never followed and a FIFO never blocks the open.
-    // O_CLOEXEC: the lock is not inherited across exec.
+    // O_CLOEXEC: the lock is not inherited across exec. O_NOCTTY: a terminal never becomes the
+    // controlling one.
     let file = match options
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC | libc::O_NOCTTY)
         .open(&path)
     {
         Ok(file) => file,

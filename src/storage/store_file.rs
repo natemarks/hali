@@ -108,7 +108,8 @@ fn read_store_file(path: &Path) -> Result<Option<Vec<u8>>, Error> {
 /// Publishes `bytes` as `<dir>/<name>` atomically: the fixed temp `<dir>/.<name>.tmp` (whatever
 /// is planted there is removed, never followed; a directory there is an error) is created
 /// exclusively with mode 0600, written and synced, then renamed over the target, and the dir is
-/// synced. On any error the temp is removed and the old bytes stay. The caller holds the
+/// synced. On any error before the rename the temp is removed and the old bytes stay; a failed
+/// sync of the dir after it is ignored. The caller holds the
 /// exclusive lock. `stall`, in a test-hooks build only, is a marker file created just before the
 /// rename, after which the process sleeps.
 pub(super) fn publish(
@@ -150,10 +151,15 @@ pub(super) fn publish(
         let _ = fs::remove_file(&temp);
         return Err(io());
     }
-    // The rename is durable once the dir is synced.
-    fs::File::open(dir)
-        .and_then(|d| d.sync_all())
-        .map_err(|_| io())
+    // The rename is durable once the dir is synced. O_DIRECTORY and O_NONBLOCK: only a directory
+    // is opened, and the open never blocks. The bytes are published by now, so a failed sync does
+    // not fail the run.
+    let _ = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NONBLOCK)
+        .open(dir)
+        .and_then(|d| d.sync_all());
+    Ok(())
 }
 
 fn write_and_rename(
