@@ -8,7 +8,7 @@ before=$(git status --porcelain)
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
 # A first release build can be slow; allow it.
-if ! timeout 3000 make bench >"$log" 2>&1; then
+if ! timeout 3000 env -u MAKEFLAGS make --no-print-directory bench >"$log" 2>&1; then
   echo "MISSING: 'make bench' failed: $(tail -8 "$log")"
   exit 1
 fi
