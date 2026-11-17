@@ -397,7 +397,7 @@ mod goal {
             1,
         );
         step("edit", 3, vec!["--json", "edit", a, "--title", "A"], 1);
-        std::fs::write(&a, b"first, changed\n").unwrap();
+        std::fs::write(a, b"first, changed\n").unwrap();
         step(
             "refresh --dry-run",
             3,
