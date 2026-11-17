@@ -655,4 +655,61 @@ mod goal {
         assert_eq!(err.details["total"], 2);
         assert_eq!(resources_ttl(&store), before, "the store is untouched");
     }
+
+    // ---- row 19: nested roots with different settings ------------------------------------------
+
+    /// Row 19: A file walked under two roots is new if any root that walked it would register
+    /// it: a file the outer root rules out (its media types, or its size limit) is still added
+    /// under an inner root whose settings allow it, in either order of the roots; a file under
+    /// the inner root only is added once. `/r/top.txt` is outside the inner root: not added.
+    #[test]
+    fn nested_roots_with_different_settings_add_what_any_root_registers() {
+        const KNOWN: &[(&str, u64, usize)] = &[
+            ("/r/sub/doc.txt", 6, 6),
+            ("/r/sub/tiny.txt", 1, 7),
+            ("/r/top.txt", 9, 9),
+        ];
+        for variant in ["media-type", "max-size"] {
+            for flip in [false, true] {
+                let (max, patterns): (u64, &[&str]) = match variant {
+                    "media-type" => (1 << 30, &["image/*"]),
+                    _ => (1, &[]),
+                };
+                let outer = RootScan {
+                    options: opts("/r", max, patterns),
+                    entries: vec![
+                        file("/r/sub/doc.txt", 6),
+                        file("/r/sub/tiny.txt", 1),
+                        file("/r/top.txt", 9),
+                    ],
+                };
+                let inner = root(
+                    "/r/sub",
+                    vec![file("/r/sub/doc.txt", 6), file("/r/sub/tiny.txt", 1)],
+                );
+                let roots = if flip {
+                    vec![inner, outer]
+                } else {
+                    vec![outer, inner]
+                };
+                let mut store = empty_store();
+                let (result, _, _) = run(
+                    &mut store,
+                    roots,
+                    &[],
+                    Prune::Off,
+                    stat_in(&[]),
+                    inspect_in(KNOWN),
+                );
+                let m = result.unwrap();
+                let added = paths(&m.value.added);
+                assert_eq!(
+                    added,
+                    ["/r/sub/doc.txt", "/r/sub/tiny.txt"],
+                    "{variant} flip {flip}"
+                );
+                assert_eq!(m.value.counts.added, 2, "{variant} flip {flip}");
+            }
+        }
+    }
 }

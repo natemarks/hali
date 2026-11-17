@@ -1771,4 +1771,187 @@ mod goal {
         assert_eq!(v["counts"]["relinked"], 0, "{v}");
         assert_eq!(v["counts"]["unmatched"], 1, "{v}");
     }
+
+    // ---- rows 19-23: review findings ------------------------------------------------------------
+
+    /// Row 19: Nested remembered roots with different settings: a file the outer root rules out
+    /// (its media types, or its size limit) is still added by a bare scan, as `scan <inner>` alone
+    /// would add it; the outer root's own files stay out.
+    #[test]
+    fn bare_scan_nested_roots_add_what_the_inner_root_would() {
+        for flags in [vec!["--media-type", "image/*"], vec!["--max-size=1"]] {
+            let env = Env::new();
+            env.put("a/b", "old.txt", b"old file\n");
+            env.scan_root("a", &flags);
+            env.scan_root("a/b", &[]);
+            env.put("a/b", "doc.txt", b"a document\n");
+            env.put("a", "top.txt", b"top level\n");
+            let alone = json_out(&env.run(["--json", "--dry-run", "scan", env.s("a/b").as_str()]));
+            assert_eq!(record_paths(&alone["added"]), [env.s("a/b") + "/doc.txt"]);
+
+            let v = json_out(&env.run(["--json", "scan"]));
+            assert_eq!(
+                record_paths(&v["added"]),
+                record_paths(&alone["added"]),
+                "{flags:?}: {v}"
+            );
+            assert_eq!(v["roots"], json!([env.s("a"), env.s("a/b")]), "{flags:?}");
+            assert!(env.resources().contains("doc.txt"), "{flags:?}");
+            assert!(!env.resources().contains("top.txt"), "{flags:?}");
+        }
+    }
+
+    /// Row 20: The state dir, or a directory inside it, is not a scan root: `scan` is a usage
+    /// error that catalogs nothing.
+    #[test]
+    fn scan_refuses_the_state_dir_as_a_root() {
+        let env = Env::new();
+        env.set_roots(&[]);
+        let sub = env.state_dir().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("s.txt"), "stray\n").unwrap();
+        std::fs::write(env.state_dir().join("t.txt"), "stray\n").unwrap();
+        let roots = env.roots_bytes().unwrap();
+        for root in [env.state_dir(), sub] {
+            let out = env.run(["--json", "scan", root.to_str().unwrap()]);
+            assert_eq!(out.code, Some(2), "{}: {}", root.display(), out.stderr);
+            assert_eq!(out.stdout, "");
+            assert!(
+                out.stderr.contains("state dir or inside it"),
+                "{}",
+                out.stderr
+            );
+            assert!(!env.data().join("resources.ttl").exists());
+            assert_eq!(env.roots_bytes().unwrap(), roots);
+        }
+    }
+
+    /// Row 20: A remembered root that is the state dir (or inside it), written by hand, is
+    /// `unavailable` in a bare scan and never walked.
+    #[test]
+    fn bare_scan_never_walks_a_state_dir_root() {
+        let env = Env::new();
+        env.put("a", "x.txt", b"x\n");
+        env.set_roots(&[plain(&env.s("a"))]);
+        let sub = env.state_dir().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("s.txt"), "stray\n").unwrap();
+        std::fs::write(env.state_dir().join("t.txt"), "stray\n").unwrap();
+        let state = env.state_dir().to_str().unwrap().to_string();
+        let inside = sub.to_str().unwrap().to_string();
+        env.set_roots(&[plain(&env.s("a")), plain(&state), plain(&inside)]);
+
+        let v = json_out(&env.run(["--json", "scan"]));
+        let mut unavailable: Vec<&str> = v["unavailable"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|u| u["root"].as_str().unwrap())
+            .collect();
+        unavailable.sort();
+        assert_eq!(unavailable, [state.as_str(), inside.as_str()], "{v}");
+        assert_eq!(v["roots"], json!([env.s("a")]), "{v}");
+        assert_eq!(record_paths(&v["added"]), [env.s("a") + "/x.txt"], "{v}");
+        let ttl = env.resources();
+        assert!(!ttl.contains("t.txt") && !ttl.contains("s.txt"));
+    }
+
+    /// Row 20: `relink --root` refuses the state dir (exit 2); the default roots skip a
+    /// remembered root that is the state dir, silently.
+    #[test]
+    fn relink_refuses_the_state_dir_as_a_root() {
+        let env = Env::new();
+        env.put("a", "x.txt", b"x\n");
+        env.scan_root("a", &[]);
+        let sub = env.state_dir().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        for root in [env.state_dir(), sub] {
+            let out = env.run(["--json", "relink", "--root", root.to_str().unwrap()]);
+            assert_eq!(out.code, Some(2), "{}: {}", root.display(), out.stderr);
+            assert!(
+                out.stderr.contains("state dir or inside it"),
+                "{}",
+                out.stderr
+            );
+        }
+        let state = env.state_dir().to_str().unwrap().to_string();
+        env.set_roots(&[plain(&env.s("a")), plain(&state)]);
+        let out = env.run(["--json", "relink"]);
+        let v = json_out(&out);
+        assert_eq!(v["roots"], json!([env.s("a")]), "{v}");
+        assert_eq!(out.stderr, "");
+    }
+
+    /// Row 21: When the state dir cannot be written, a scan exits 3 `STORE_IO` and the store is
+    /// not saved (the state dir is checked before the store is written), with or without a
+    /// prune.
+    #[test]
+    fn unwritable_state_dir_leaves_the_store_alone() {
+        if privileged() {
+            return;
+        }
+        for prune in [false, true] {
+            let env = Env::new();
+            env.put("a", "x.txt", b"x\n");
+            env.scan_root("a", &[]);
+            env.put("a", "y.txt", b"y\n");
+            if prune {
+                std::fs::remove_file(env.dir("a").join("x.txt")).unwrap();
+            }
+            let ttl = std::fs::read(env.data().join("resources.ttl")).unwrap();
+            let roots = env.roots_bytes().unwrap();
+            let _restore = Restore(env.state_dir());
+            std::fs::set_permissions(env.state_dir(), std::fs::Permissions::from_mode(0o500))
+                .unwrap();
+            let mut args = vec!["--json", "scan"];
+            let a = env.s("a");
+            args.push(a.as_str());
+            if prune {
+                args.extend(["--prune", "--yes"]);
+            }
+            let out = env.run(args);
+            assert_eq!(out.code, Some(3), "prune {prune}: {}", out.stderr);
+            assert_eq!(envelope(&out)["error"]["rule"], "STORE_IO");
+            assert_eq!(
+                std::fs::read(env.data().join("resources.ttl")).unwrap(),
+                ttl,
+                "prune {prune}"
+            );
+            assert_eq!(env.roots_bytes().unwrap(), roots);
+        }
+    }
+
+    /// Row 22: `--forget-root <root>/` with a trailing slash works on a deleted root.
+    #[test]
+    fn forget_root_with_a_trailing_slash() {
+        let env = Env::new();
+        env.put("a", "x.txt", b"x\n");
+        env.scan_root("a", &[]);
+        std::fs::remove_dir_all(env.dir("a")).unwrap();
+        let arg = format!("{}/", env.s("a"));
+        let v = ok_json(&env.run(["--json", "scan", "--forget-root", arg.as_str()]));
+        assert_eq!(v["root"], plain(&env.s("a")));
+        let v = ok_json(&env.run(["--json", "scan", "--list"]));
+        assert_eq!(v["roots"], json!([]));
+    }
+
+    /// Row 23: A bare scan lists each real root once, in byte order of the real paths: a
+    /// remembered root that is a symlink to another remembered root is not scanned twice, and
+    /// sorts by where it points.
+    #[test]
+    fn bare_scan_roots_are_deduplicated_and_in_real_path_order() {
+        let env = Env::new();
+        env.put("a", "a.txt", b"alpha\n");
+        env.put("b", "b.txt", b"beta\n");
+        let link = env.dir("0link");
+        symlink(env.dir("b"), &link).unwrap();
+        env.set_roots(&[
+            plain(&env.s("0link")),
+            plain(&env.s("a")),
+            plain(&env.s("b")),
+        ]);
+        let v = json_out(&env.run(["--json", "scan"]));
+        assert_eq!(v["roots"], json!([env.s("a"), env.s("b")]), "{v}");
+        assert_eq!(v["counts"]["added"], 2, "{v}");
+    }
 }

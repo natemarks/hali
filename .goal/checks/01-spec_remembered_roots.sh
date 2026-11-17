@@ -6,7 +6,8 @@ set -uo pipefail
 # says relink searches the remembered roots by default, §7 describes the settings, the bare
 # scan, --list, --forget-root and the state dir, §9.1 **Scan:** and **Relink:** carry the
 # behaviour and the output, §9.8 gives the bare-prune prompt and retry, and the "not there yet"
-# notes are gone. An agent guide (docs/agent-usage.md or skill/SKILL.md), when the repo has one,
+# notes are gone. A root that is the state dir or inside it is refused by scan and relink
+# (`state dir or inside it`, named in §7 and in both paragraphs). An agent guide (docs/agent-usage.md or skill/SKILL.md), when the repo has one,
 # says the same in short.
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 
@@ -55,7 +56,8 @@ fi
 
 s7=$(section '^## 7\. ' '^## 8\. ')
 need '§7' "$s7" 'roots.json' 'one run' 'unavailable' '--list' '--forget-root' \
-    'hali scan --list' 'usage error' 'never rewrite' 'state dir' 'never walked'
+    'hali scan --list' 'usage error' 'never rewrite' 'state dir' 'never walked' \
+    'state dir or inside it'
 
 relink=$(grep -E '^\*\*Relink:\*\*' "$spec" || true)
 if [ -z "$relink" ]; then
@@ -63,7 +65,7 @@ if [ -z "$relink" ]; then
     exit 1
 fi
 need 'the **Relink:** paragraph' "$relink" 'remembered' 'files.dir' 'byte order' \
-    'own settings' 'STORE_IO' 'STORE_UNPARSEABLE'
+    'own settings' 'STORE_IO' 'STORE_UNPARSEABLE' 'state dir or inside it'
 
 scan=$(grep -E '^\*\*Scan:\*\*' "$spec" || true)
 if [ -z "$scan" ]; then
@@ -73,7 +75,7 @@ fi
 need 'the **Scan:** paragraph' "$scan" 'roots.json' '`--list`' '`--forget-root`' \
     'unavailable' '"roots"' '"schema_version":1,"roots"' 'XDG_STATE_HOME' \
     'STORE_IO' 'STORE_UNPARSEABLE' '1 MiB' 'hali scan --list' 'dry_run' \
-    'never pruned' 'byte order' 'one-to-one' 'schema_version'
+    'never pruned' 'byte order' 'one-to-one' 'schema_version' 'state dir or inside it'
 if printf '%s\n' "$scan" | grep -qF 'are not there yet'; then
     echo "WRONG: the **Scan:** paragraph still says the remembered roots are not there yet"
     status=1

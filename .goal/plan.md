@@ -28,6 +28,11 @@ Cross-cutting: implementer on opus. Security-sensitive (`src/paths/`, `src/stora
 | 16 | Schema covers bare scan, `--list`, `--forget-root`; every new golden validates | `tests/schema_contract.rs::{scan_schema_covers_remembered_roots, every_golden_validates}` |
 | 17 | Spec and agent guide describe remembered roots | `.goal/checks/01-spec_remembered_roots.sh` |
 | 18 | State dir never walked or cataloged by scan or relink | `cli_scan_roots::{state_dir_pruned_from_walk, relink_never_searches_the_state_dir}` |
+| 19 | A file walked under nested remembered roots is added if any root that walked it would register it (an outer root's media types or size limit do not block the inner root) | `tests/core_scan_roots.rs::nested_roots_with_different_settings_add_what_any_root_registers`, `tests/cli_scan_roots.rs::bare_scan_nested_roots_add_what_the_inner_root_would` |
+| 20 | The state dir, or a directory in it, is never a root: `scan` and `relink --root` exit 2; a remembered one is `unavailable` in a bare scan and skipped by relink's defaults | `cli_scan_roots::{scan_refuses_the_state_dir_as_a_root, bare_scan_never_walks_a_state_dir_root, relink_refuses_the_state_dir_as_a_root}`, spec lines in `.goal/checks/01-spec_remembered_roots.sh` |
+| 21 | An unwritable state dir fails `scan` (also `--prune --yes`) with STORE_IO before the store is saved | `cli_scan_roots::unwritable_state_dir_leaves_the_store_alone` |
+| 22 | `--forget-root <root>/` with a trailing slash works on a deleted root | `cli_scan_roots::forget_root_with_a_trailing_slash` |
+| 23 | A bare scan's `roots` is deduplicated by real path and in real-path byte order (mutation-backed: deleting the sort or the dedup in `scan_remembered` fails it) | `cli_scan_roots::bare_scan_roots_are_deduplicated_and_in_real_path_order` |
 
 Guards: `.goal/checks/02-existing_goldens_unchanged.sh` (no existing golden changes; `scan <root>` output unchanged); `forget`, `relink` explicit-root behaviour unchanged.
 
