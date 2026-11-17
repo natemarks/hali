@@ -20,5 +20,8 @@ Not cross-cutting, not security-sensitive (tests, Makefile, AGENTS.md, spec): im
 | 8 | Verdict line, never fails | `bench_contract::verdict_threshold` (200.0 ms says "stays"; 200.1 ms says "v0.1 task ... file a follow-up issue") |
 | 9 | Reports p50/p95 per size; writes nothing in the repo | `.goal/checks/05-bench-run.sh` (runs `make bench`; header line, `1000` and `10000` rows with two numbers each, a `verdict:` line; `git status --porcelain` identical before and after; `tests/bench_find.rs` uses `env_clear`) |
 | 10 | Docs | `.goal/checks/06-bench-docs.sh` (AGENTS.md `make bench` row and the sentence no longer names `make bench`; spec §14.5 names `HALI_BENCH`, the warm-up, nearest-rank, the verdict; §14.7 sentence) |
+| 11 | The verdict agrees with what it prints (compares the value rounded to one decimal) | `bench_contract::verdict_agrees_with_what_it_prints` (200.04 and 199.96 say "p95 200 ms <= 200 ms ... stays"; 200.06 and 200.1 say "p95 200.1 ms > 200 ms") |
+| 12 | Store has `skos:broader`, a subclass Type, files 0600 and an empty 0600 `.lock` | `bench_contract::store_has_hierarchy_and_private_files` (mutation-checked) |
+| 13 | The header's sample count is `RUNS` | `bench_contract::header_names_the_sample_count` (`bench_support::RUNS`, `header(runs)`; `bench_find.rs` prints `header(RUNS)` and no longer defines `RUNS`) |
 
 Locked: `tests/bench_contract.rs` (goal-tagged). The implementer owns `tests/bench_support/mod.rs` and `tests/bench_find.rs`: the contract tests include `bench_support` through `#[path]`/`mod` and fail to compile today (`E0583`), which is the intended red. Tests clear HOME, XDG_* and HALI_*.

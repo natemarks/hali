@@ -12,6 +12,11 @@
 //! - `verdict(p95_ms: f64) -> String`: the exact `verdict: ...` line (no newline): "stays" up
 //!   to and including 200.0 ms, the v0.1 task line strictly above.
 //!
+//! - `pub const RUNS: usize`: the number of timed runs per size (moved here from
+//!   `tests/bench_find.rs`, which uses it).
+//! - `header(runs: usize) -> String`: the report's header line (no newline), saying
+//!   "{runs} fresh processes per size"; `bench_find.rs` prints `header(RUNS)`.
+//!
 //! Spawned processes get a cleared environment holding only HALI_DATA_DIR, HOME and
 //! XDG_CONFIG_HOME, all under temp dirs.
 
@@ -22,7 +27,7 @@ mod bench_support;
 
 #[cfg(feature = "goal")]
 mod goal {
-    use super::bench_support::{build_store, percentile, verdict};
+    use super::bench_support::{RUNS, build_store, header, percentile, verdict};
     use serde_json::Value;
     use std::collections::BTreeSet;
     use std::os::unix::fs::PermissionsExt;
@@ -161,5 +166,70 @@ mod goal {
             "{over}"
         );
         assert!(!stays.contains('\n') && !over.contains('\n'));
+    }
+
+    #[test]
+    fn verdict_agrees_with_what_it_prints() {
+        for v in [200.04, 200.0, 199.96] {
+            let line = verdict(v);
+            assert!(
+                line.starts_with("verdict: p95 200 ms <= 200 ms"),
+                "{v}: {line}"
+            );
+            assert!(line.contains("stays"), "{v}: {line}");
+        }
+        for v in [200.06, 200.1] {
+            let line = verdict(v);
+            assert!(
+                line.starts_with("verdict: p95 200.1 ms > 200 ms"),
+                "{v}: {line}"
+            );
+            assert!(line.contains("v0.1 task"), "{v}: {line}");
+        }
+    }
+
+    #[test]
+    fn store_has_hierarchy_and_private_files() {
+        let (_tmp, root) = root();
+        let data = build_store(&root, 24);
+
+        let vocab = std::fs::read_to_string(data.join("vocabulary.ttl")).unwrap();
+        assert!(
+            vocab.contains("skos:broader hali:science"),
+            "no Concept under science in\n{vocab}"
+        );
+        assert!(
+            vocab.contains("rdfs:subClassOf hali:Document"),
+            "no Type under Document in\n{vocab}"
+        );
+
+        for name in ["resources.ttl", "vocabulary.ttl", ".lock"] {
+            let mode = std::fs::metadata(data.join(name))
+                .unwrap_or_else(|e| panic!("{name}: {e}"))
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "{name} mode");
+        }
+        assert_eq!(std::fs::metadata(data.join(".lock")).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn header_names_the_sample_count() {
+        let line = header(RUNS);
+        assert!(
+            line.contains(&format!("{RUNS} fresh processes per size")),
+            "{line}"
+        );
+        assert!(header(7).contains("7 fresh processes per size"));
+        assert!(!header(RUNS).contains('\n'));
+        let bench =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/bench_find.rs"))
+                .unwrap();
+        assert!(
+            bench.contains("header(RUNS)"),
+            "bench_find.rs must print header(RUNS)"
+        );
+        assert!(!bench.contains("const RUNS"), "RUNS lives in bench_support");
     }
 }
