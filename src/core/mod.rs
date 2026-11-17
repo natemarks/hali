@@ -493,6 +493,13 @@ impl Error {
         .fix("Set XDG_STATE_HOME or HOME to a directory you can read and write.")
     }
 
+    /// A path in the state dir (spec §4) cannot be read or written: `STORE_IO`, with a fix that
+    /// names the state dir.
+    pub fn state_io(path: &Path) -> Error {
+        Error::store_io(Some(path))
+            .fix("Check that the state dir is a directory you can read and write.")
+    }
+
     /// The remembered Scan roots file is not a valid `roots.json`. The message never quotes
     /// the file.
     pub fn roots_unparseable(path: &Path) -> Error {

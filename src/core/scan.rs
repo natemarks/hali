@@ -12,7 +12,7 @@ use crate::storage::walk::{SkipReason, Walked};
 use oxigraph::model::NamedNode;
 use oxigraph::model::vocab::rdf;
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// At most this many entries go into each list of the output; the counts stay exact.
 const MAX_LISTED: usize = 100;
@@ -195,8 +195,9 @@ pub struct RootScan<I = Vec<Walked>> {
 /// A new file (one whose path no Resource records) is a candidate unless it is over its root's
 /// `max_size` (skipped `too_large`, never opened), its name or content rules it out by its
 /// root's media type patterns (dropped, not reported), it vanished (dropped) or it cannot be
-/// hashed (skipped). A path walked under several roots counts once, under the first root in
-/// byte order. Every Resource under a scanned root is `stat`ed once: no regular file there is
+/// hashed (skipped). A path walked under several roots counts once: it is a candidate when any
+/// of those roots would make it one, and is otherwise skipped for the first reason in byte
+/// order of the roots; it is hashed at most once. Every Resource under a scanned root is `stat`ed once: no regular file there is
 /// missing, a Stale one is hashed and refreshed as `refresh` does, the rest are unchanged; the
 /// filters never apply to them. A non-empty candidate with the size and SHA-256 of exactly one
 /// Missing Resource (store-wide; one outside the roots is `stat`ed only then), and no other
@@ -231,10 +232,12 @@ pub fn scan_roots<I: IntoIterator<Item = Walked>>(
     let known: HashSet<&str> = cataloged.iter().map(|(p, _)| p.as_str()).collect();
 
     let (mut seen, mut hashed) = (0, 0);
-    let mut skipped: Vec<Skipped> = Vec::new();
-    let mut new: Vec<FileFacts> = Vec::new();
-    // Every path walked so far, so one walked under two roots counts once.
-    let mut walked: HashSet<String> = HashSet::new();
+    // Per path walked: the facts of a file to register, or the first reason a root skipped it.
+    // A path walked under several roots is registered when any of them would register it, and
+    // hashed at most once.
+    let mut registered: BTreeMap<String, FileFacts> = BTreeMap::new();
+    let mut skips: BTreeMap<String, &'static str> = BTreeMap::new();
+    let mut inspected: HashMap<String, Result<FileFacts, Unhashable>> = HashMap::new();
     let several = roots.len() > 1;
     for RootScan { options, entries } in roots {
         let ruled_out = |media_type: &str| {
@@ -243,61 +246,69 @@ pub fn scan_roots<I: IntoIterator<Item = Walked>>(
         };
         for entry in entries {
             seen += 1;
-            if several {
-                let path = match &entry {
-                    Walked::Skipped { path, .. } | Walked::File { path, .. } => path,
-                };
-                if !walked.insert(path.clone()) {
-                    progress(seen, hashed);
-                    continue;
-                }
-            }
-            match entry {
-                Walked::Skipped { path, reason: why } => skipped.push(Skipped {
-                    path,
-                    reason: reason(why),
-                }),
+            let (path, why) = match entry {
+                Walked::Skipped { path, reason: why } => (path, Some(reason(why))),
                 Walked::File {
                     path, byte_size, ..
                 } => {
-                    if known.contains(path.as_str()) {
-                        // Cataloged.
+                    if registered.contains_key(&path) || known.contains(path.as_str()) {
+                        // Registered under another root, or cataloged.
+                        (path, None)
                     } else if byte_size > options.max_size {
-                        skipped.push(Skipped {
-                            path,
-                            reason: reason(SkipReason::TooLarge),
-                        });
+                        (path, Some(reason(SkipReason::TooLarge)))
                     } else if !options.media_types.is_empty()
                         && glob_type(path.rsplit('/').next().unwrap_or(&path))
                             .is_some_and(|t| ruled_out(&t))
                     {
                         // The name alone rules it out: not hashed.
+                        (path, None)
                     } else {
-                        hashed += 1;
-                        match inspect(&path) {
+                        let facts = match inspected.get(&path) {
+                            Some(facts) => facts.clone(),
+                            None => {
+                                hashed += 1;
+                                let facts = inspect(&path);
+                                if several {
+                                    inspected.insert(path.clone(), facts.clone());
+                                }
+                                facts
+                            }
+                        };
+                        match facts {
                             Ok(facts) => {
                                 if !ruled_out(&facts.media_type) {
-                                    new.push(facts);
+                                    skips.remove(&path);
+                                    inspected.remove(&path);
+                                    registered.insert(path.clone(), facts);
                                 }
+                                (path, None)
                             }
-                            Err(Unhashable::Missing) => {}
-                            Err(Unhashable::NotRegular) => skipped.push(Skipped {
-                                path,
-                                reason: reason(SkipReason::NotRegular),
-                            }),
-                            Err(Unhashable::Unreadable) => skipped.push(Skipped {
-                                path,
-                                reason: reason(SkipReason::Unreadable),
-                            }),
+                            Err(Unhashable::Missing) => (path, None),
+                            Err(Unhashable::NotRegular) => {
+                                (path, Some(reason(SkipReason::NotRegular)))
+                            }
+                            Err(Unhashable::Unreadable) => {
+                                (path, Some(reason(SkipReason::Unreadable)))
+                            }
                         }
                     }
                 }
+            };
+            if let Some(why) = why
+                && !registered.contains_key(&path)
+            {
+                skips.entry(path).or_insert(why);
             }
             progress(seen, hashed);
         }
     }
     drop(known);
-    drop(walked);
+    drop(inspected);
+    let mut skipped: Vec<Skipped> = skips
+        .into_iter()
+        .map(|(path, reason)| Skipped { path, reason })
+        .collect();
+    let mut new: Vec<FileFacts> = registered.into_values().collect();
 
     let now = ctx.now();
     let mut added_quads = Vec::new();

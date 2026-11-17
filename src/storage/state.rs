@@ -48,6 +48,34 @@ pub fn read_roots(dir: &Path) -> Result<Option<String>, Error> {
     String::from_utf8(bytes).map(Some).map_err(|_| io())
 }
 
+/// The temp file `write_roots` writes before its rename.
+fn temp_file(dir: &Path) -> PathBuf {
+    dir.join(format!(".{ROOTS_FILE}.{}.tmp", std::process::id()))
+}
+
+/// Makes `dir` ready for `write_roots`: creates it with mode 0700 if needed, then proves a file
+/// can be created in it (and removes that file). `Error::Io` with `dir` when it cannot.
+pub fn prepare(dir: &Path) -> Result<(), Error> {
+    let io = || Error::Io {
+        path: dir.to_path_buf(),
+    };
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+        .map_err(|_| io())?;
+    let temp = temp_file(dir);
+    let _ = fs::remove_file(&temp);
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NOCTTY)
+        .open(&temp)
+        .map_err(|_| io())?;
+    fs::remove_file(&temp).map_err(|_| io())
+}
+
 /// Writes `<dir>/roots.json` atomically: a temp file in `dir` (mode 0600), then a rename.
 /// Creates `dir` with mode 0700. On a failure the temp file is removed and what was there stays.
 pub fn write_roots(dir: &Path, text: &str) -> Result<(), Error> {
@@ -60,7 +88,7 @@ pub fn write_roots(dir: &Path, text: &str) -> Result<(), Error> {
         .create(dir)
         .map_err(|_| io(dir))?;
     let path = dir.join(ROOTS_FILE);
-    let temp: PathBuf = dir.join(format!(".{ROOTS_FILE}.{}.tmp", std::process::id()));
+    let temp = temp_file(dir);
     // A temp file left by a crashed run of this pid would block create_new.
     let _ = fs::remove_file(&temp);
     let written = (|| {

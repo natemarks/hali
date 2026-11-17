@@ -1452,10 +1452,30 @@ fn scan_usage(command: &Command) -> Result<(), Error> {
     Ok(())
 }
 
+/// A state dir I/O error is `STORE_IO`, with a fix that names the state dir.
+fn state_io(err: storage::Error) -> Error {
+    match err {
+        storage::Error::Io { path } => Error::state_io(&path),
+        other => other.into(),
+    }
+}
+
+/// Why `root` (a real path) is never a scan or relink root: it is hali's real data dir or
+/// state dir, or inside one. `None` when it is neither.
+fn own_dir(root: &str, data: Option<&Path>, state: Option<&Path>) -> Option<&'static str> {
+    if data.is_some_and(|d| Path::new(root).starts_with(d)) {
+        Some("hali's data dir or inside it")
+    } else if state.is_some_and(|s| Path::new(root).starts_with(s)) {
+        Some("hali's state dir or inside it")
+    } else {
+        None
+    }
+}
+
 /// The state dir (spec §4), and the remembered Scan roots in it: none when the file is missing.
 fn remembered_roots() -> Result<(std::path::PathBuf, Vec<core::roots::RootEntry>), Error> {
     let state = paths::state_dir(env).map_err(|_| Error::state_dir_unresolved())?;
-    let roots = match storage::state::read_roots(&state)? {
+    let roots = match storage::state::read_roots(&state).map_err(state_io)? {
         None => Vec::new(),
         Some(text) => core::roots::parse(&text)
             .map_err(|_| Error::roots_unparseable(&state.join(storage::state::ROOTS_FILE)))?,
@@ -1545,7 +1565,10 @@ fn scan_forget_root(cli: &Cli, arg: &OsString) -> Result<(), Error> {
         ))
     };
     let path = arg.to_str().and_then(paths::ref_path).ok_or_else(unknown)?;
-    let (rest, gone) = core::roots::forget(roots, &path).ok_or_else(unknown)?;
+    // A remembered root never ends in `/` (except `/` itself), whatever the argument did.
+    let trimmed = path.trim_end_matches('/');
+    let path = if trimmed.is_empty() { "/" } else { trimmed };
+    let (rest, gone) = core::roots::forget(roots, path).ok_or_else(unknown)?;
     let output = ForgotRootOutput {
         schema_version: SCHEMA_VERSION,
         root: &gone,
@@ -1563,7 +1586,7 @@ fn scan_forget_root(cli: &Cli, arg: &OsString) -> Result<(), Error> {
         }
         return Ok(());
     }
-    storage::state::write_roots(&state, &core::roots::serialise(&rest))?;
+    storage::state::write_roots(&state, &core::roots::serialise(&rest)).map_err(state_io)?;
     if cli.json {
         print_json(&output);
     } else {
@@ -1718,12 +1741,11 @@ fn scan_one(
     })?;
     let dir = paths::data_dir(env).map_err(|_| Error::store_io(None))?;
     let data = paths::real_dir(&dir);
-    if let Some(data) = &data
-        && Path::new(&root).starts_with(data)
-    {
-        return Err(Error::usage(&format!(
-            "scan root {root} is hali's data dir or inside it"
-        )));
+    let state_real = paths::state_dir(env)
+        .ok()
+        .and_then(|state| paths::real_dir(&state));
+    if let Some(why) = own_dir(&root, data.as_deref(), state_real.as_deref()) {
+        return Err(Error::usage(&format!("scan root {root} is {why}")));
     }
     let (state, remembered) = remembered_roots()?;
     let mut store = storage::load(&dir)?;
@@ -1784,6 +1806,9 @@ fn scan_one(
             None,
         );
     }
+    // The root is remembered after the store is saved, so the state dir is made ready first: a
+    // state dir that cannot be written fails the scan with the store untouched.
+    storage::state::prepare(&state).map_err(state_io)?;
     // Only a scan that would forget something asks; the retry repeats the flags given.
     if !done.changes.is_empty() && done.value.counts.pruned > 0 {
         let mut retry = format!("hali scan {}", core::shell_quote(&root));
@@ -1834,7 +1859,7 @@ fn scan_one(
         media_types: media_types.iter().map(ToString::to_string).collect(),
     };
     let roots = core::roots::remember(remembered, entry);
-    storage::state::write_roots(&state, &core::roots::serialise(&roots))?;
+    storage::state::write_roots(&state, &core::roots::serialise(&roots)).map_err(state_io)?;
     if cli.json {
         print_json(&output);
     } else {
@@ -1859,7 +1884,8 @@ struct Unavailable {
 }
 
 /// A bare `hali scan [--prune [--force]]`: every remembered root with its own settings, as one
-/// run. A root that is gone, not a directory, unreadable or in the data dir is `unavailable`
+/// run. A root that is gone, not a directory, unreadable, or in the data dir or the state dir
+/// is `unavailable`
 /// and its Resources are never pruned. `roots.json` is never rewritten.
 fn scan_remembered(cli: &Cli, ctx: &Context, config: &core::config::Config) -> Result<(), Error> {
     let Command::Scan { prune, force, .. } = &cli.command else {
@@ -1869,11 +1895,9 @@ fn scan_remembered(cli: &Cli, ctx: &Context, config: &core::config::Config) -> R
     let data = paths::real_dir(&dir);
     let (state, remembered) = remembered_roots()?;
     let corrupt = || Error::roots_unparseable(&state.join(storage::state::ROOTS_FILE));
-    let never_walked: Vec<std::path::PathBuf> = data
-        .iter()
-        .cloned()
-        .chain(paths::real_dir(&state))
-        .collect();
+    let state_real = paths::real_dir(&state);
+    let never_walked: Vec<std::path::PathBuf> =
+        data.iter().cloned().chain(state_real.clone()).collect();
 
     // Every root's settings are checked before the store is read.
     let mut planned: Vec<(core::scan::ScanOptions, storage::walk::WalkOptions)> = Vec::new();
@@ -1908,13 +1932,10 @@ fn scan_remembered(cli: &Cli, ctx: &Context, config: &core::config::Config) -> R
                 continue;
             }
         };
-        if data
-            .as_ref()
-            .is_some_and(|data| Path::new(&real).starts_with(data))
-        {
+        if let Some(reason) = own_dir(&real, data.as_deref(), state_real.as_deref()) {
             unavailable.push(Unavailable {
                 root: entry.root.clone(),
-                reason: "hali's data dir or inside it",
+                reason,
             });
             continue;
         }
@@ -2039,16 +2060,18 @@ fn relink(cli: &Cli, ctx: &Context, config: &core::config::Config) -> Result<(),
         return relink_explicit(cli, ctx, &dir, reference, path, *force);
     }
 
-    // hali's own data dir is never searched: pruned under a root, refused or skipped as one.
+    // hali's own data dir and state dir are never searched: pruned under a root, refused or
+    // skipped as one.
     let data = paths::real_dir(&dir);
-    let in_data = |root: &str| {
-        data.as_ref()
-            .is_some_and(|data| Path::new(root).starts_with(data))
-    };
+    let state_real = paths::state_dir(env)
+        .ok()
+        .and_then(|state| paths::real_dir(&state));
+    let own = |root: &str| own_dir(root, data.as_deref(), state_real.as_deref());
     let mut searched: Vec<String> = Vec::new();
     let state = if roots.is_empty() {
         // The default roots: the files.dir chain, then the remembered roots in byte order,
-        // without repeats; an unusable one, or one in the data dir, is skipped silently.
+        // without repeats; an unusable one, or one in the data dir or state dir, is skipped
+        // silently.
         let (state, remembered) = remembered_roots()?;
         let files_dir = paths::files_dir(env, config.files_dir.as_deref());
         let defaults = files_dir
@@ -2057,7 +2080,7 @@ fn relink(cli: &Cli, ctx: &Context, config: &core::config::Config) -> Result<(),
             .chain(remembered.iter().map(|r| std::ffi::OsStr::new(&r.root)));
         for root in defaults {
             if let Ok(real) = paths::scan_root(root)
-                && !in_data(&real)
+                && own(&real).is_none()
                 && !searched.contains(&real)
             {
                 searched.push(real);
@@ -2073,10 +2096,8 @@ fn relink(cli: &Cli, ctx: &Context, config: &core::config::Config) -> Result<(),
                 }
                 paths::RootError::Unreadable { path } => Error::file_unreadable(&path),
             })?;
-            if in_data(&real) {
-                return Err(Error::usage(&format!(
-                    "relink root {real} is hali's data dir or inside it"
-                )));
+            if let Some(why) = own(&real) {
+                return Err(Error::usage(&format!("relink root {real} is {why}")));
             }
             if !searched.contains(&real) {
                 searched.push(real);
