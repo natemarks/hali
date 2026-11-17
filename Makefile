@@ -1,7 +1,5 @@
 .DEFAULT_GOAL := help
 SHELL := $(shell which bash)
-# A nested `make bench` (from `make goal`) would end its output with "Leaving directory".
-MAKEFLAGS += --no-print-directory
 
 help: ## Show this help
 	@fgrep -h "##" $(MAKEFILE_LIST) | fgrep -v fgrep | sed -e 's/\\$$//' | sed -e 's/##//'
