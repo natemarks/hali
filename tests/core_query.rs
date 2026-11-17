@@ -753,4 +753,152 @@ mod goal {
             Answer::Boolean(true)
         );
     }
+
+    // ---- rows 21-25 (review of #9) ----------------------------------------------------------------
+
+    fn at_100ms() -> Limits {
+        Limits {
+            timeout: Duration::from_millis(100),
+            max_results: 100_000,
+        }
+    }
+
+    /// `n` cross-joined `VALUES` of ten rows each, starting at `?v0`: 10^n solutions, none of
+    /// them read from the store.
+    fn values(n: usize) -> String {
+        (0..n)
+            .map(|i| format!("VALUES ?v{i} {{ 1 2 3 4 5 6 7 8 9 10 }}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Row 21: the time limit holds for a query that never reads the store (a billion
+    /// solutions, no scan), not only for store scans.
+    #[test]
+    fn timeout_covers_a_query_that_never_reads_the_store() {
+        let text = format!("SELECT (COUNT(*) AS ?c) WHERE {{ {} }}", values(9));
+        let started = Instant::now();
+        let e = within(30, move || failure(&core_only(), &text, at_100ms()));
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(e.rule, "QUERY_FAILED");
+        assert_eq!(e.exit_code(), 1);
+        assert_eq!(e.details["reason"], "timeout");
+    }
+
+    /// Row 21 (security F9): the sort phase of ORDER BY is cancelled too.
+    #[test]
+    fn timeout_covers_the_sort_of_a_cross_join() {
+        let text = format!(
+            "SELECT ?v0 WHERE {{ {} }} ORDER BY DESC(?v0 * ?v1 + ?v2 - ?v3 * ?v4 + ?v5)",
+            values(6)
+        );
+        let started = Instant::now();
+        let result = within(30, move || {
+            answer_with(
+                &core_only(),
+                &text,
+                Limits {
+                    timeout: Duration::from_millis(100),
+                    max_results: usize::MAX,
+                },
+            )
+        });
+        let e = match result {
+            Err(e) => e,
+            Ok(_) => panic!("a million-row sort ran to the end although the limit is 100 ms"),
+        };
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(e.rule, "QUERY_FAILED");
+        assert_eq!(e.details["reason"], "timeout");
+    }
+
+    /// Row 22: an evaluation error the user's text causes (a custom function nothing defines)
+    /// is a usage error naming the function, never STORE_IO.
+    #[test]
+    fn unsupported_custom_functions_are_usage_errors() {
+        let store = load();
+        for (text, name) in [
+            (
+                "SELECT * WHERE { ?x <http://x/p> ?y . FILTER(<http://x/f>(?y)) }",
+                "http://x/f",
+            ),
+            ("SELECT (<urn:f>(1) AS ?y) {}", "urn:f"),
+            ("SELECT (<urn:f>() AS ?y) {}", "urn:f"),
+            ("SELECT (<urn:f>(1, 2, 3) AS ?y) {}", "urn:f"),
+            ("ASK { FILTER(<urn:f>(1)) }", "urn:f"),
+        ] {
+            let e = match run(&store, &prepared(text), limits()) {
+                Err(e) => e,
+                Ok(a) => panic!("`{text}` should fail, got {a:?}"),
+            };
+            assert_ne!(e.rule, "STORE_IO", "{text}: {}", e.message);
+            assert_eq!(e.rule, "USAGE", "{text}: {}", e.message);
+            assert_eq!(e.exit_code(), 2, "{text}");
+            assert!(
+                e.message.starts_with("invalid SPARQL query: "),
+                "{text}: {}",
+                e.message
+            );
+            assert!(e.message.contains(name), "{text}: {}", e.message);
+        }
+    }
+
+    /// Row 24: nothing to query is a usage error; READ_ONLY_QUERY stays for real updates.
+    #[test]
+    fn empty_text_is_a_usage_error() {
+        for text in [
+            "",
+            "   \n\t",
+            "# only a comment",
+            "# a\n# b\n",
+            "PREFIX ex: <x:>",
+        ] {
+            let e = parse_err(text);
+            assert_eq!(e.rule, "USAGE", "{text:?}: {}", e.message);
+            assert_eq!(e.exit_code(), 2, "{text:?}");
+            assert!(
+                e.message.starts_with("invalid SPARQL query: "),
+                "{text:?}: {}",
+                e.message
+            );
+        }
+        assert_eq!(parse_err("INSERT DATA {}").rule, "READ_ONLY_QUERY");
+    }
+
+    /// Row 25 (F5): `SERVICE ?s` that is bound to an IRI, bound to a non-IRI, or unbound is
+    /// QUERY_FAILED service, never store_io, and never a connection.
+    #[test]
+    fn service_variables_are_service_failures() {
+        let store = core_only();
+        for text in [
+            "SELECT * WHERE { BIND(<urn:x:s> AS ?s) SERVICE ?s { ?a ?b ?c } }",
+            "SELECT * WHERE { BIND(\"not an iri\" AS ?s) SERVICE ?s { ?a ?b ?c } }",
+            "SELECT * WHERE { SERVICE ?s { ?a ?b ?c } }",
+            "ASK { SERVICE ?s {} }",
+            "SELECT * WHERE { VALUES ?s { \"not an iri\" } SERVICE ?s { ?a ?b ?c } }",
+            "SELECT * WHERE { VALUES ?s { <urn:x:s> } SERVICE ?s { ?a ?b ?c } }",
+            "ASK { BIND(<urn:x:s> AS ?s) SERVICE ?s {} }",
+        ] {
+            let e = match run(&store, &prepared(text), limits()) {
+                Err(e) => e,
+                Ok(a) => panic!("`{text}` should fail, got {a:?}"),
+            };
+            assert_eq!(e.rule, "QUERY_FAILED", "{text}: {}", e.message);
+            assert_eq!(e.details["reason"], "service", "{text}: {}", e.details);
+        }
+        // SILENT never fails, and an ASK over it is true: the service adds one empty solution.
+        let a = answer(
+            &store,
+            "ASK { SERVICE SILENT <urn:x:nowhere> { ?s ?p ?o } }",
+        );
+        assert_eq!(a, Answer::Boolean(true));
+    }
 }

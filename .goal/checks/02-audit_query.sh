@@ -23,6 +23,17 @@ if ! printf '%s\n' "$comment" | grep -qiE 'hali query.*(evaluator|SERVICE)|(eval
     echo "MISSING: the justification in $file has no line tying the query evaluator to hali query"
     status=1
 fi
+# F8: the paragraph about the query evaluator sits after the quick-xml reasoning, which ends
+# with "cannot be bumped from here.", not in the middle of it.
+bumped=$(grep -n 'cannot be bumped from here\.' "$file" | head -1 | cut -d: -f1)
+paragraph=$(grep -n 'without_default_http_service_handler' "$file" | head -1 | cut -d: -f1)
+if [ -z "$bumped" ]; then
+    echo "MISSING: $file no longer ends the quick-xml reasoning with \"cannot be bumped from here.\""
+    status=1
+elif [ -n "$paragraph" ] && [ "$paragraph" -le "$bumped" ]; then
+    echo "MISPLACED: the hali query paragraph (line $paragraph) must come after the quick-xml reasoning that ends at line $bumped (\"cannot be bumped from here.\")"
+    status=1
+fi
 for id in RUSTSEC-2026-0194 RUSTSEC-2026-0195; do
     if ! grep -qE "^[[:space:]]*\"$id\"," "$file"; then
         echo "MISSING: $file no longer ignores $id (the ignore list must stay as it was)"

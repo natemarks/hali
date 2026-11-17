@@ -9,8 +9,17 @@
 //! 1. every `SparqlEvaluator::new()` is followed, in the same statement, by
 //!    `.without_default_http_service_handler()`;
 //! 2. nothing in `src/` names `QueryResultsFormat::Xml`, `RdfFormat::RdfXml`, `RdfXml`,
-//!    `QueryResultsParser` or `RdfParser`, and nothing outside `src/core/query` (the module or
-//!    directory of the query seam, where UPDATE text is refused) names `parse_update`.
+//!    `QueryResultsParser` or `RdfParser`; nor any way to pick or write a format by name
+//!    (`QueryResultsFormat::from_extension`, `QueryResultsFormat::from_media_type`,
+//!    `QueryResultsSerializer`, `RdfSerializer`), the crates that hold the XML code
+//!    (`oxrdfxml`, `sparesults`, `quick_xml`), or an evaluator with default settings
+//!    (`SparqlEvaluator::default()`, which would keep the HTTP service handler); and nothing
+//!    outside `src/core/query` (the module or directory of the query seam, where UPDATE text is
+//!    refused) names `parse_update`;
+//! 3. nothing in `src/` runs a query or an update through the store's own entry points
+//!    (`.query(`, `.query_opt(`, `.query_with_options(`, `.update(` and `.update_opt(` on a
+//!    store, whose default evaluator has the HTTP service handler). hali's JSON results are
+//!    written by hand, so no result serializer is needed: nothing is allow-listed.
 //!
 //! Comments are not code: a line comment may name what the code must never use.
 
@@ -22,6 +31,21 @@ const ALWAYS_BANNED: &[&str] = &[
     "RdfXml",
     "QueryResultsParser",
     "RdfParser",
+    "QueryResultsFormat::from_extension",
+    "QueryResultsFormat::from_media_type",
+    "QueryResultsSerializer",
+    "RdfSerializer",
+    "SparqlEvaluator::default()",
+    "oxrdfxml",
+    "sparesults",
+    "quick_xml",
+];
+const STORE_ENTRY_POINTS: &[&str] = &[
+    ".query(",
+    ".query_opt(",
+    ".query_with_options(",
+    ".update(",
+    ".update_opt(",
 ];
 const ONLY_IN_QUERY_MODULE: &[&str] = &["parse_update"];
 const HANDLER: &str = ".without_default_http_service_handler()";
@@ -157,6 +181,38 @@ fn banned(path: &str, text: &str) -> Vec<&'static str> {
     found
 }
 
+/// The store-entry-point calls in `text`: `.query(` and its variants anywhere (nothing in hali
+/// has a method of that name), and `.update(` and `.update_opt(` when the receiver is a store
+/// (an identifier holding `store`, a copy of one, or the result of a call).
+fn store_calls(text: &str) -> Vec<String> {
+    let text = code(text);
+    let mut found = Vec::new();
+    for name in STORE_ENTRY_POINTS {
+        let mut from = 0;
+        while let Some(at) = text[from..].find(name) {
+            let at = from + at;
+            from = at + name.len();
+            let receiver: String = text[..at]
+                .chars()
+                .rev()
+                .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ')')
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            let lower = receiver.to_lowercase();
+            let store = name.starts_with(".query")
+                || lower.ends_with(')')
+                || lower.contains("store")
+                || matches!(lower.as_str(), "merged" | "copy" | "db" | "graph");
+            if store {
+                found.push(format!("{receiver}{name}"));
+            }
+        }
+    }
+    found
+}
+
 fn line_of(text: &str, offset: usize) -> usize {
     code(text)[..offset].matches('\n').count() + 1
 }
@@ -176,6 +232,19 @@ fn every_evaluator_is_built_without_the_http_service_handler() {
         }
     }
     assert!(seen >= 4, "expected the existing evaluators, found {seen}");
+}
+
+#[test]
+fn src_never_calls_the_stores_own_query_or_update() {
+    for (path, text) in sources() {
+        let found = store_calls(&text);
+        assert!(
+            found.is_empty(),
+            "{path} calls {found:?}: a store's own query and update use an evaluator with the \
+             default HTTP service handler; build one with SparqlEvaluator::new() and \
+             .without_default_http_service_handler()"
+        );
+    }
 }
 
 #[test]
@@ -256,4 +325,51 @@ fn the_scanners_catch_violations() {
         .is_empty()
     );
     assert!(banned("src/core/x.rs", "let json = QueryResultsFormat::Json;").is_empty());
+    // The ways around the handler or into the XML code.
+    for name in [
+        "SparqlEvaluator::default()",
+        "RdfSerializer",
+        "QueryResultsSerializer",
+        "QueryResultsFormat::from_extension",
+        "QueryResultsFormat::from_media_type",
+        "oxrdfxml",
+        "sparesults",
+        "quick_xml",
+    ] {
+        assert_eq!(
+            banned("src/core/x.rs", &format!("let x = {name};")),
+            [name],
+            "{name}"
+        );
+        assert_eq!(
+            banned("src/core/query.rs", &format!("let x = {name};")),
+            [name],
+            "{name}: not even the query module may name it"
+        );
+        assert!(banned("src/core/x.rs", &format!("// {name}")).is_empty());
+    }
+    assert_eq!(
+        banned("src/cli/mod.rs", "use sparesults::QueryResultsSerializer;"),
+        ["QueryResultsSerializer", "sparesults"]
+    );
+
+    // The store's own entry points.
+    assert_eq!(store_calls("let r = store.query(text);"), ["store.query("]);
+    assert_eq!(store_calls("self.store.update(text)?;"), ["store.update("]);
+    assert_eq!(
+        store_calls("merged.update(u).unwrap();"),
+        ["merged.update("]
+    );
+    assert_eq!(
+        store_calls("Store::new().unwrap().update(u)"),
+        [").update("]
+    );
+    assert_eq!(
+        store_calls("s.query_with_options(q, o)"),
+        ["s.query_with_options("]
+    );
+    assert!(store_calls("hasher.update(&buf[..n]);").is_empty());
+    assert!(store_calls("progress.update(walked, 0);").is_empty());
+    assert!(store_calls("// store.query(text)").is_empty());
+    assert!(store_calls("evaluator.parse_query(text)").is_empty());
 }

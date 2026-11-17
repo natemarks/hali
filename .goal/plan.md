@@ -39,10 +39,25 @@ Guards: existing goldens unchanged (`hali schema` list changes only by the new `
 Tests set HOME, XDG_STATE_HOME and the data dir to temp dirs. Output order needs ORDER BY.
 
 ## Added by the goal (define)
-- Row 20: `.goal/checks/03-existing_goldens_unchanged.sh`: no existing golden changes; the three schema-list snapshots (`cli_schema__`, `cli_scan__`, `cli_relink__schema_list_json`) may gain exactly one `"query",`.
-- Row 21: `.goal/checks/04-dry_run_guard_query.sh`: `tests/dry_run_guard.rs` has a `query` row in `CASES`.
+- Row 20a: `.goal/checks/03-existing_goldens_unchanged.sh`: no existing golden changes; the three schema-list snapshots (`cli_schema__`, `cli_scan__`, `cli_relink__schema_list_json`) may gain exactly one `"query",`.
+- Row 20b: `.goal/checks/04-dry_run_guard_query.sh`: `tests/dry_run_guard.rs` has a `query` row in `CASES`.
 - Extra tests inside rows: `cli_query::{construct_is_sorted_like_the_store, construct_empty_is_valid_turtle, select_json_terms, read_only_query_leaves_the_store_byte_identical, query_is_parsed_after_the_config_and_before_the_store}`, `core_query::{select_cells_and_unbound, select_uses_a_query_prefix_over_the_table, construct_template_blank_nodes_are_fresh, syntax_errors_are_usage_errors, a_comment_is_not_an_update}`, `schema_contract::query_schema_is_listed`.
 - `tests/schema_contract.rs::relink_schema_is_listed` asserted exactly 26 names; it now asserts at least 26 (goal commit, because the file is locked).
+
+## Added by the update (review of #9: reviewer and security-reviewer)
+Decisions taken (delegated approval): an evaluation error that the user's text can trigger is a usage error; empty or comment-only text is a usage error. (The earlier "Row 20/21" of the define section are 20a and 20b.)
+
+| # | Finding | Check | Fails today because |
+|---|---|---|---|
+| 21 | F1, security F9 (blocking): the 30 s limit fires for every query, the sort phase included | `core_query::{timeout_covers_a_query_that_never_reads_the_store, timeout_covers_the_sort_of_a_cross_join}`, `cli_query::a_quick_query_does_not_wait_for_the_time_limit` (mutation proof for `drop(done)`; passes today) | cancellation is only checked in store scans: a billion-solution VALUES cross join runs on; the million-row sort ends normally. There is no test-hooks way to shorten the 30 s limit, so no CLI test of a timed-out query exiting |
+| 22 | F2, security 4 (blocking): evaluation errors a user can trigger are usage errors, never STORE_IO | `core_query::unsupported_custom_functions_are_usage_errors`, `cli_query::unsupported_custom_functions_are_usage_errors` | an unsupported custom function (any arity, in FILTER or an expression) is STORE_IO, exit 3, text about the data dir |
+| 23 | F3, security 2 (blocking): CONSTRUCT/DESCRIBE output is always valid Turtle | `cli_query::{turtle_blank_node_labels_with_unsafe_characters, turtle_bnode_function_and_triple_terms_are_valid}`; `turtle_stand_in_iris_in_every_position` (subject, predicate, object, datatype; passes today) | a blank node label (extensions, `BNODE(...)`) or a triple-term IRI with U+FEFF, U+061C or a tag character is written with a `\u` escape inside `_:label` / `<<( )>>`, which is not Turtle |
+| 24 | F4: empty, comment-only and PREFIX-only text | `core_query::empty_text_is_a_usage_error`, `cli_query::empty_text_is_a_usage_error` | they parse as an empty SPARQL Update and give READ_ONLY_QUERY, exit 1 |
+| 25 | coverage: mutations of cell_text, result_term, stand-ins, marker, F5, SERVICE SILENT, `drop(done)` | `cli_query::{text_literal_cells, text_blank_node_cells, json_triple_term, turtle_stand_in_iris_in_every_position, turtle_stand_in_marker_avoids_the_data, service_variables_and_silent_ask, a_quick_query_does_not_wait_for_the_time_limit}`, `core_query::service_variables_are_service_failures` | all pass today by design; each kills its mutation (evidence in the report) |
+| 26 | F6: the text triple-term cell is `<<( s p o )>>` | `cli_query::text_triple_term_cells` | the cell is `<< s p o >>` |
+| 27 | security 3: source guard | `tests/sparql_guard.rs::{the_scanners_catch_violations, src_never_calls_the_stores_own_query_or_update}` | passes today (src is clean); the scanners now catch `SparqlEvaluator::default()`, `RdfSerializer`, `QueryResultsSerializer`, `QueryResultsFormat::from_extension`/`from_media_type`, `oxrdfxml`, `sparesults`, `quick_xml` and `.query(`/`.update(` on a store. Nothing is allow-listed: hali writes its JSON results by hand |
+
+Checks extended: `.goal/checks/01-spec_query.sh` (F9, F4/F2, F10: `except LF and TAB`; empty or comment-only text and unsupported custom function evaluation errors are usage errors; CONSTRUCT/DESCRIBE blank node labels are not stable across runs) and `.goal/checks/02-audit_query.sh` (F8: the `hali query` paragraph of `.cargo/audit.toml` comes after the quick-xml reasoning ending "cannot be bumped from here.").
 
 ## Assumed APIs (fixed by the goal tests; see each file's header)
 `core::query::{parse(&str) -> Result<Prepared, Error>, run(&Store, &Prepared, Limits) -> Result<Answer, Error>}`; `Limits { timeout: Duration, max_results: usize }` (`Default` = 30 s, 100,000; `Clone + Copy + Debug + PartialEq`); `Answer::{Solutions { variables: Vec<String>, rows: Vec<Vec<Option<oxrdf::Term>>> }, Boolean(bool), Triples(Vec<oxrdf::Triple>)}` (`Clone + Debug + PartialEq`); `Error::{read_only_query, query_failed}` constructors are the implementer's. `hali query '<sparql>'`: one positional argument.

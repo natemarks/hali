@@ -32,6 +32,31 @@ for what in \
     fi
 done
 
+# Review of #9 (F9, F4/F2, F10): the contract says what the code does.
+flat=$(printf '%s\n' "$section" | tr '\n' ' ' | tr -s ' ')
+for what in \
+    'except LF and TAB' \
+    'empty or comment-only' \
+    'custom function' \
+    'blank node' 'not stable across runs'; do
+    if ! printf '%s\n' "$flat" | grep -qF -- "$what"; then
+        echo "MISSING: §9.9 does not say: $what"
+        status=1
+    fi
+done
+if ! printf '%s\n' "$flat" | grep -qiE 'empty or comment-only[^.]*usage error|usage error[^.]*empty or comment-only'; then
+    echo "MISSING: §9.9 does not say that empty or comment-only text is a usage error"
+    status=1
+fi
+if ! printf '%s\n' "$flat" | grep -qiE 'custom function[^.]*usage error|usage error[^.]*custom function'; then
+    echo "MISSING: §9.9 does not say that an evaluation error from an unsupported custom function is a usage error"
+    status=1
+fi
+if ! printf '%s\n' "$flat" | grep -qiE 'blank node[^.]*not stable across runs|not stable across runs[^.]*blank node'; then
+    echo "MISSING: §9.9 does not say that the blank node labels of CONSTRUCT/DESCRIBE output are not stable across runs"
+    status=1
+fi
+
 rules=$(grep -F '**Rules** (SCREAMING_SNAKE, minimum set)' "$spec" || true)
 if [ -z "$rules" ]; then
     echo "MISSING: $spec has no Rules list in §9.4"

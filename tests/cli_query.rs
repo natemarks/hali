@@ -940,4 +940,363 @@ mod goal {
             assert_eq!(env.tree(), before);
         }
     }
+
+    // ---- rows 21-26 (review of #9) ----------------------------------------------------------------
+    //
+    // Row 21 (CLI half): there is no test-hooks way to shorten the 30 s limit (the only
+    // injected values are HALI_TEST_NOW, HALI_TEST_ID_SEED and HALI_TEST_TTY), so a CLI test of
+    // a timed-out query exiting cannot be written without a new hook; it is skipped. The
+    // process half that is testable is the opposite one: a quick query must not wait out the
+    // limit (row 25, mutation 7).
+
+    #[test]
+    fn a_quick_query_does_not_wait_for_the_time_limit() {
+        let env = Env::absent();
+        for args in [
+            vec!["query", ASK_RELATION],
+            vec!["query", "--json", SELECT_RELATIONS],
+        ] {
+            let started = std::time::Instant::now();
+            let out = env.run(args);
+            assert_eq!(out.code, Some(0), "{}", out.stderr);
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "a query that answers at once took {:?}",
+                started.elapsed()
+            );
+        }
+    }
+
+    /// Row 22: an evaluation error the user's text causes is a usage error, never STORE_IO, and
+    /// never talks about the data dir.
+    #[test]
+    fn unsupported_custom_functions_are_usage_errors() {
+        let env = Env::with_extensions("<urn:x:s> <http://x/p> \"1\" .\n");
+        let before = env.tree();
+        for (text, name) in [
+            (
+                "SELECT * WHERE { ?x <http://x/p> ?y . FILTER(<http://x/f>(?y)) }",
+                "http://x/f",
+            ),
+            ("SELECT (<urn:f>(1) AS ?y) {}", "urn:f"),
+            ("SELECT (<urn:f>() AS ?y) {}", "urn:f"),
+            ("SELECT (<urn:f>(1, 2, 3) AS ?y) {}", "urn:f"),
+        ] {
+            let out = env.run(["query", text]);
+            assert_eq!(out.code, Some(2), "{text}: {}", out.stderr);
+            assert_eq!(out.stdout, "");
+            assert!(
+                out.stderr.contains("invalid SPARQL query"),
+                "{text}: {}",
+                out.stderr
+            );
+            assert!(out.stderr.contains(name), "{text}: {}", out.stderr);
+            assert!(!out.stderr.contains("/TMP"), "{text}: {}", out.stderr);
+            assert!(!out.stderr.contains("data dir"), "{text}: {}", out.stderr);
+            let out = env.run(["query", "--json", text]);
+            let v = failed(&out, 2, "USAGE");
+            let message = v["error"]["message"].as_str().unwrap();
+            assert!(message.starts_with("invalid SPARQL query: "), "{message}");
+            assert!(message.contains(name), "{message}");
+        }
+        assert_eq!(env.tree(), before);
+    }
+
+    /// The Turtle a query prints for `query`, which must parse, hold no raw §9.3 character and
+    /// be the same with `--json`.
+    fn safe_turtle(env: &Env, query: &str) -> (String, HashSet<Triple>) {
+        let out = env.run(["query", query]);
+        let text = ok_text(&out).to_string();
+        assert_eq!(terminal_unsafe(&text), Vec::<char>::new(), "{text:?}");
+        let triples = parse_turtle(&text);
+        let json = env.run(["query", "--json", query]);
+        assert_eq!(json.stdout, text);
+        (text, triples)
+    }
+
+    fn construct_ext() -> String {
+        format!("CONSTRUCT {{ ?s ?p ?o }} WHERE {{ GRAPH <{EXT}> {{ ?s ?p ?o }} }}")
+    }
+
+    /// Row 23: a blank node whose label holds a §9.3 character is still valid Turtle (a label
+    /// cannot carry a `\u` escape, so the label has to change, not the escape).
+    #[test]
+    fn turtle_blank_node_labels_with_unsafe_characters() {
+        for c in ['\u{FEFF}', '\u{061C}', '\u{E0041}'] {
+            let env = Env::with_extensions(&format!("<urn:x:s> <urn:x:p> _:a{c}b .\n"));
+            let (text, triples) = safe_turtle(&env, &construct_ext());
+            assert_eq!(triples.len(), 1, "{c:?}: {text}");
+            let t = triples.iter().next().unwrap();
+            assert_eq!(t.subject, named("urn:x:s").into(), "{c:?}: {text}");
+            assert!(matches!(t.object, Term::BlankNode(_)), "{c:?}: {text}");
+            // Subject position, and DESCRIBE.
+            let env = Env::with_extensions(&format!("_:a{c}b <urn:x:p> <urn:x:o> .\n"));
+            let (text, triples) = safe_turtle(&env, &construct_ext());
+            assert_eq!(triples.len(), 1, "{c:?}: {text}");
+            let out = env.run(["query", "DESCRIBE <urn:x:o>"]);
+            let described = ok_text(&out);
+            assert_eq!(terminal_unsafe(described), Vec::<char>::new());
+            parse_turtle(described);
+        }
+    }
+
+    /// Row 23: `BNODE("...")` with such a character in the string, and a triple term holding an
+    /// IRI that has one, print valid Turtle.
+    #[test]
+    fn turtle_bnode_function_and_triple_terms_are_valid() {
+        let env = Env::absent();
+        for c in ['\u{061C}', '\u{FEFF}', '\u{E0041}'] {
+            let query = format!(
+                "CONSTRUCT {{ <urn:x:s> <urn:x:p> ?b }} WHERE {{ BIND(BNODE(\"a{c}b\") AS ?b) }}"
+            );
+            let (text, triples) = safe_turtle(&env, &query);
+            assert_eq!(triples.len(), 1, "{c:?}: {text}");
+        }
+        let query = "CONSTRUCT { <http://x/s> <http://x/p> <<( <https://w3id.org/hali#a\u{FEFF}> \
+                     <http://x/p> <http://x/o> )>> } WHERE {}";
+        let (text, triples) = safe_turtle(&env, query);
+        assert_eq!(triples.len(), 1, "{text}");
+        let lower = text.to_lowercase();
+        assert!(lower.contains("\\ufeff"), "{text}");
+        let inner = Triple::new(
+            named("https://w3id.org/hali#a\u{FEFF}"),
+            named("http://x/p"),
+            named("http://x/o"),
+        );
+        let expected = Triple::new(
+            named("http://x/s"),
+            named("http://x/p"),
+            Term::Triple(Box::new(inner)),
+        );
+        assert_eq!(triples, [expected].into_iter().collect());
+        // A triple term in a subject-less position of every part: predicate-side and datatype.
+        let query = "CONSTRUCT { <http://x/s> <http://x/p> <<( <http://x/a> <https://w3id.org/hali#a\u{FEFF}> \
+                     \"v\"^^<https://w3id.org/hali#a\u{FEFF}> )>> } WHERE {}";
+        let (text, triples) = safe_turtle(&env, query);
+        assert_eq!(triples.len(), 1, "{text}");
+    }
+
+    /// Row 23: an IRI with a §9.3 character is written whole in every position (subject,
+    /// predicate, object, datatype), never as a prefixed name, and the Turtle parses back.
+    #[test]
+    fn turtle_stand_in_iris_in_every_position() {
+        let hostile = "https://w3id.org/hali#a\u{FEFF}";
+        let env = Env::with_extensions(
+            "<https://w3id.org/hali#a\\uFEFF> <urn:x:p1> <urn:x:o> .\n\
+             <urn:x:s> <https://w3id.org/hali#a\\uFEFF> \"plain\" .\n\
+             <urn:x:s> <urn:x:p3> \"v\"^^<https://w3id.org/hali#a\\uFEFF> .\n\
+             <urn:x:s> <urn:x:p4> <https://w3id.org/hali#a\\uFEFF> .\n",
+        );
+        let (text, triples) = safe_turtle(&env, &construct_ext());
+        let lower = text.to_lowercase();
+        assert!(!text.contains("hali:a"), "{text}");
+        assert_eq!(
+            lower.matches("<https://w3id.org/hali#a\\ufeff>").count(),
+            4,
+            "{text}"
+        );
+        let expected: HashSet<Triple> = [
+            Triple::new(named(hostile), named("urn:x:p1"), named("urn:x:o")),
+            Triple::new(
+                named("urn:x:s"),
+                named(hostile),
+                Literal::new_simple_literal("plain"),
+            ),
+            Triple::new(
+                named("urn:x:s"),
+                named("urn:x:p3"),
+                Literal::new_typed_literal("v", named(hostile)),
+            ),
+            Triple::new(named("urn:x:s"), named("urn:x:p4"), named(hostile)),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(triples, expected);
+    }
+
+    /// Row 25 (mutation 6): data that already holds the serializer's stand-in IRIs is not
+    /// confused with them.
+    #[test]
+    fn turtle_stand_in_marker_avoids_the_data() {
+        let hostile = "https://w3id.org/hali#a\u{FEFF}";
+        let env = Env::with_extensions(
+            "<urn:hali-stand-in-0-0> <urn:x:p> <https://w3id.org/hali#a\\uFEFF> .\n\
+             <urn:hali-stand-in-0-1> <urn:x:p> <urn:hali-stand-in-0-0> .\n\
+             <urn:hali-stand-in-1-0> <urn:x:p> <https://w3id.org/hali#b\\uFEFF> .\n",
+        );
+        let (text, triples) = safe_turtle(&env, &construct_ext());
+        let expected: HashSet<Triple> = [
+            Triple::new(
+                named("urn:hali-stand-in-0-0"),
+                named("urn:x:p"),
+                named(hostile),
+            ),
+            Triple::new(
+                named("urn:hali-stand-in-0-1"),
+                named("urn:x:p"),
+                named("urn:hali-stand-in-0-0"),
+            ),
+            Triple::new(
+                named("urn:hali-stand-in-1-0"),
+                named("urn:x:p"),
+                named("https://w3id.org/hali#b\u{FEFF}"),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(triples, expected, "{text}");
+    }
+
+    /// Row 24: nothing to query is a usage error at the CLI, in text and JSON.
+    #[test]
+    fn empty_text_is_a_usage_error() {
+        let env = Env::new();
+        let before = env.tree();
+        for text in ["", "# only a comment", "PREFIX ex: <x:>"] {
+            let out = env.run(["query", text]);
+            assert_eq!(out.code, Some(2), "{text:?}: {}", out.stderr);
+            assert_eq!(out.stdout, "");
+            assert!(
+                out.stderr.contains("invalid SPARQL query"),
+                "{text:?}: {}",
+                out.stderr
+            );
+            assert!(
+                !out.stderr.contains("READ_ONLY_QUERY") && !out.stderr.contains("read-only"),
+                "{text:?}: {}",
+                out.stderr
+            );
+            let out = env.run(["query", "--json", text]);
+            let v = failed(&out, 2, "USAGE");
+            let message = v["error"]["message"].as_str().unwrap();
+            assert!(message.starts_with("invalid SPARQL query: "), "{message}");
+        }
+        assert_eq!(env.tree(), before);
+    }
+
+    /// The first cell of the one data row of a text SELECT.
+    fn one_cell(env: &Env, query: &str) -> String {
+        let out = env.run(["query", query]);
+        let text = ok_text(&out);
+        let mut lines = text.lines();
+        lines.next().expect("a header line");
+        let row = lines.next().expect("one row");
+        assert_eq!(lines.next(), None, "{text:?}");
+        row.to_string()
+    }
+
+    /// Row 25 (mutations 1 and 2): literal cells in text mode keep their quotes, backslashes
+    /// and datatypes.
+    #[test]
+    fn text_literal_cells() {
+        let env = Env::with_extensions("<urn:x:s> <urn:x:p> \"a\\\\b\\\"c\" .\n");
+        let query = format!("SELECT ?o WHERE {{ GRAPH <{EXT}> {{ ?s <urn:x:p> ?o }} }}");
+        assert_eq!(one_cell(&env, &query), "\"a\\\\b\\\"c\"");
+        let env = Env::absent();
+        assert_eq!(
+            one_cell(&env, "SELECT ?o WHERE { BIND(5 AS ?o) }"),
+            "\"5\"^^xsd:integer"
+        );
+        assert_eq!(
+            one_cell(&env, "SELECT ?o WHERE { BIND(\"v\"^^<urn:x:dt> AS ?o) }"),
+            "\"v\"^^<urn:x:dt>"
+        );
+        assert_eq!(
+            one_cell(
+                &env,
+                "SELECT ?o WHERE { BIND(\"v\"^^<urn:x:d\u{202e}t> AS ?o) }"
+            ),
+            "\"v\"^^<urn:x:d\\u{202e}t>"
+        );
+        assert_eq!(
+            one_cell(&env, "SELECT ?o WHERE { BIND(\"v\\\\w\"@en AS ?o) }"),
+            "\"v\\\\w\"@en"
+        );
+        // A plain string has no datatype suffix.
+        assert_eq!(
+            one_cell(&env, "SELECT ?o WHERE { BIND(\"plain\" AS ?o) }"),
+            "\"plain\""
+        );
+    }
+
+    /// Row 25 (mutation 3): blank nodes in text cells.
+    #[test]
+    fn text_blank_node_cells() {
+        let env = Env::with_extensions("<urn:x:s> <urn:x:p> _:a\u{FEFF}b .\n");
+        let query = format!("SELECT ?o WHERE {{ GRAPH <{EXT}> {{ ?s <urn:x:p> ?o }} }}");
+        let cell = one_cell(&env, &query);
+        assert!(cell.starts_with("_:"), "{cell:?}");
+        assert_eq!(terminal_unsafe(&cell), Vec::<char>::new(), "{cell:?}");
+        let env = Env::absent();
+        let cell = one_cell(&env, "SELECT ?b WHERE { BIND(BNODE(\"x\") AS ?b) }");
+        assert!(cell.starts_with("_:") && cell.len() > 2, "{cell:?}");
+    }
+
+    /// Row 26: the text of a triple-term cell is the N-Triples / RDF 1.2 triple-term form
+    /// `<<( s p o )>>`, not `<< s p o >>`, with every part escaped for the terminal.
+    #[test]
+    fn text_triple_term_cells() {
+        let env = Env::absent();
+        // The N-Triples / RDF 1.2 triple-term form: `<<( s p o )>>`, escaped inside.
+        assert_eq!(
+            one_cell(
+                &env,
+                "SELECT ?t WHERE { BIND(<<( <urn:x:s> <urn:x:p> \"o\" )>> AS ?t) }"
+            ),
+            "<<( <urn:x:s> <urn:x:p> \"o\" )>>"
+        );
+        assert_eq!(
+            one_cell(
+                &env,
+                "SELECT ?t WHERE { BIND(<<( <urn:x:s\u{1b}> dcterms:relation 5 )>> AS ?t) }"
+            ),
+            "<<( <urn:x:s\\u{1b}> dcterms:relation \"5\"^^xsd:integer )>>"
+        );
+    }
+
+    /// Row 25 (mutation 4): a triple term in W3C JSON results.
+    #[test]
+    fn json_triple_term() {
+        let env = Env::absent();
+        let out = env.run([
+            "query",
+            "--json",
+            "SELECT ?t WHERE { BIND(<<( <urn:x:s> <urn:x:p> \"o\" )>> AS ?t) }",
+        ]);
+        let v = json(ok_text(&out));
+        assert_eq!(
+            v["results"]["bindings"],
+            json!([{"t": {"type": "triple", "value": {
+                "subject": {"type": "uri", "value": "urn:x:s"},
+                "predicate": {"type": "uri", "value": "urn:x:p"},
+                "object": {"type": "literal", "value": "o"},
+            }}}])
+        );
+    }
+
+    /// Row 25 (F5 and mutation 8): `SERVICE ?s` is QUERY_FAILED service at the CLI, and
+    /// `SERVICE SILENT` in an ASK prints `true`.
+    #[test]
+    fn service_variables_and_silent_ask() {
+        let env = Env::absent();
+        for text in [
+            "SELECT * WHERE { BIND(<urn:x:s> AS ?s) SERVICE ?s { ?a ?b ?c } }",
+            "SELECT * WHERE { SERVICE ?s { ?a ?b ?c } }",
+        ] {
+            let out = env.run(["query", "--json", text]);
+            let v = failed(&out, 1, "QUERY_FAILED");
+            assert_eq!(v["error"]["details"]["reason"], "service", "{text}");
+        }
+        let out = env.run([
+            "query",
+            "ASK { SERVICE SILENT <urn:x:nowhere> { ?s ?p ?o } }",
+        ]);
+        assert_eq!(ok_text(&out), "true\n");
+        let out = env.run([
+            "query",
+            "--json",
+            "ASK { SERVICE SILENT <urn:x:nowhere> { ?s ?p ?o } }",
+        ]);
+        assert_eq!(ok_text(&out), "{\"head\":{},\"boolean\":true}\n");
+    }
 }
