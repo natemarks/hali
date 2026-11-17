@@ -1,0 +1,5 @@
+---
+source: tests/cli_query.rs
+expression: out.stdout
+---
+{"head":{"vars":["relation","label"]},"results":{"bindings":[{"relation":{"type":"uri","value":"http://purl.org/dc/terms/isPartOf"},"label":{"type":"literal","value":"is part of","xml:lang":"en"}},{"relation":{"type":"uri","value":"http://purl.org/dc/terms/references"},"label":{"type":"literal","value":"references","xml:lang":"en"}},{"relation":{"type":"uri","value":"http://purl.org/dc/terms/relation"},"label":{"type":"literal","value":"relation","xml:lang":"en"}},{"relation":{"type":"uri","value":"http://www.w3.org/ns/prov#wasDerivedFrom"},"label":{"type":"literal","value":"was derived from","xml:lang":"en"}}]}}
