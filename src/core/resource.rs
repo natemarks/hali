@@ -201,10 +201,57 @@ fn file_quads(
     ]
 }
 
+/// Who new catalog records are attributed to (spec §2.5, §9.6): the user Person and, when an AI
+/// agent acts (`Context::agent`), its `prov:SoftwareAgent`. Each is `None` until found in the
+/// store or minted by `catalog_quads`.
+pub(crate) struct Attribution {
+    person: Option<NamedNode>,
+    agent: Option<NamedNode>,
+}
+
+impl Attribution {
+    /// The user Person and the acting agent's SoftwareAgent, as the store holds them.
+    pub(crate) fn of(ctx: &Context, store: &Store) -> Attribution {
+        Attribution {
+            person: user(store),
+            agent: ctx.agent().and_then(|name| software_agent(store, name)),
+        }
+    }
+}
+
+/// The `prov:SoftwareAgent` whose `foaf:name` is the simple literal `name`, exactly: the first
+/// by IRI when several are. The name only ever reaches the store as a literal term.
+fn software_agent(store: &Store, name: &str) -> Option<NamedNode> {
+    let name: Term = Literal::new_simple_literal(name).into();
+    subjects(
+        store,
+        rdf::TYPE.as_str(),
+        iri(prov::SOFTWARE_AGENT).as_ref(),
+    )
+    .into_iter()
+    .find(|agent| has(store, agent, foaf::NAME, name.as_ref()))
+}
+
+/// The acting agent's SoftwareAgent, minted (and then held in `agent`) when the store has none:
+/// `None` when no agent acts. The flag is whether it was minted now.
+fn find_or_mint_agent(ctx: &Context, agent: &mut Option<NamedNode>) -> Option<(NamedNode, bool)> {
+    ctx.agent()?;
+    Some(match agent {
+        Some(agent) => (agent.clone(), false),
+        None => {
+            let minted = urn(&ctx.next_id());
+            *agent = Some(minted.clone());
+            (minted, true)
+        }
+    })
+}
+
 /// The quads that catalog `facts` as a new Resource typed with `types` and tagged with `tags`:
-/// mints the Resource and its catalog record (issued and modified `now`) and, if `person` is
-/// `None`, the user Person named `user_name`, which it then holds. `title` is normalised. Reads
-/// no store: the caller checks that the path is not cataloged yet.
+/// mints the Resource and its catalog record (issued and modified `now`), then, if `attribution`
+/// lacks them, the user Person named `user_name` and the acting agent's SoftwareAgent, in that
+/// order, which it then holds. The record is attributed to the agent when one acts, else to the
+/// Person. `title` is normalised. Reads no store: the caller checks that the path is not
+/// cataloged yet.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn catalog_quads(
     ctx: &Context,
@@ -212,20 +259,22 @@ pub(crate) fn catalog_quads(
     title: Option<&str>,
     types: &[NamedNode],
     tags: &[NamedNode],
-    person: &mut Option<NamedNode>,
+    attribution: &mut Attribution,
     user_name: &str,
     now: &str,
 ) -> Result<(NamedNode, Vec<Quad>), Error> {
     let resource = urn(&ctx.next_id());
     let catalog_record = urn(&ctx.next_id());
-    let (person, new_person) = match person {
+    let (person, new_person) = match &attribution.person {
         Some(person) => (person.clone(), false),
         None => {
             let minted = urn(&ctx.next_id());
-            *person = Some(minted.clone());
+            attribution.person = Some(minted.clone());
             (minted, true)
         }
     };
+    let agent = find_or_mint_agent(ctx, &mut attribution.agent);
+    let attributed = agent.as_ref().map_or(&person, |(agent, _)| agent).clone();
     let title = title.map_or_else(|| default_title(&facts.path), str::to_string);
     let url = NamedNode::new(file_url(&facts.path))
         .map_err(|_| Error::usage("the path does not make a valid file URL"))?;
@@ -254,7 +303,7 @@ pub(crate) fn catalog_quads(
         (
             &catalog_record,
             named(prov::WAS_ATTRIBUTED_TO),
-            person.clone().into(),
+            attributed.into(),
         ),
     ];
     for class in types {
@@ -269,6 +318,19 @@ pub(crate) fn catalog_quads(
             &person,
             named(foaf::NAME),
             Literal::new_simple_literal(user_name).into(),
+        ));
+    }
+    if let (Some((agent, true)), Some(name)) = (&agent, ctx.agent()) {
+        triples.push((agent, named(rdf::TYPE.as_str()), iri(prov::SOFTWARE_AGENT)));
+        triples.push((
+            agent,
+            named(foaf::NAME),
+            Literal::new_simple_literal(name).into(),
+        ));
+        triples.push((
+            agent,
+            named(prov::ACTED_ON_BEHALF_OF),
+            person.clone().into(),
         ));
     }
     let format;
@@ -312,7 +374,7 @@ pub fn add_all(
     let tags = resolve_tags(ctx, store, tags)?;
     let title = title.map(normalise_title).transpose()?;
     let mut seen = BTreeSet::new();
-    let mut person = user(store);
+    let mut attribution = Attribution::of(ctx, store);
     let mut now = None;
     let mut added = Vec::new();
     let mut existing = Vec::new();
@@ -332,7 +394,7 @@ pub fn add_all(
             title.as_deref(),
             &types,
             &tags,
-            &mut person,
+            &mut attribution,
             user_name,
             now,
         )?;

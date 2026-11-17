@@ -458,9 +458,13 @@ hali generate completions <bash|zsh|fish>
 - **Text mode:** `concept add` prints `would add concept <id> "<label>"`. Each mutating command prints its own conditional summary line, followed by the shared `+ <triple>` or `- <triple>` line per change, and `note: dry run; nothing was written` on stderr.
 
 ### 9.6 Agent identity
-- `--agent NAME` overrides the `HALI_AGENT` environment variable.
-- With neither set, changes are attributed to the user.
-- An unknown name mints a new `prov:SoftwareAgent` that `prov:actedOnBehalfOf` the user.
+- `--agent NAME` is a global flag, accepted before or after the subcommand, and overrides the `HALI_AGENT` environment variable. An empty or whitespace-only `HALI_AGENT` counts as unset. With neither set, the user Person is the Agent.
+- **Name rules:** the name is trimmed. An empty or whitespace-only `--agent` (`--agent ""` is not a reset), a name with a control character, or a `HALI_AGENT` that is not valid UTF-8 is a usage error (exit 2), raised before the store is read. `HALI_AGENT` is checked on every command except `schema`, which reads no identity.
+- **Minting and reuse:** an Agent is matched by a `prov:SoftwareAgent` in `resources.ttl` whose `foaf:name` equals the trimmed name exactly (case-sensitive); when several match, the first by IRI. An unknown name mints `urn:uuid:` with `a prov:SoftwareAgent`, `foaf:name` (a simple literal holding the name, never parsed as Turtle or SPARQL) and `prov:actedOnBehalfOf` the user Person, minting the Person first if absent. Ids are minted in the order Resource, catalog record, Person (first time), SoftwareAgent (first time).
+- **Scope:** attribution is written only for the catalog records hali creates: `add` and `scan` (on newly cataloged Resources). Nothing is minted unless a record is written. Every other command accepts `--agent` and ignores it: same output, no Agent minted, and an existing record's `prov:wasAttributedTo` never changes.
+- **hali itself** is never recorded as an Agent: with no name given, no SoftwareAgent is minted, and the name `hali` is not special.
+- **dry-run:** `changes` lists the Agent's triples and the `prov:wasAttributedTo` triple (§9.5); nothing is written.
+- `show` keeps its schema: `catalog_record.attributed_to` is the `id` and `name` of the Agent, whatever its kind.
 
 ### 9.7 `find` semantics
 - `--tag` matches the Concept **and every narrower Concept** (`dcterms:subject/skos:broader*`, with the `skos:broader` triples of every file, `extensions.ttl` included; cycles terminate); `--exact` turns that off for every `--tag`, and without `--tag` it does nothing. An unknown Concept is `UNKNOWN_CONCEPT`, not an empty result.
