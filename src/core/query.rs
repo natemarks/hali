@@ -75,35 +75,62 @@ pub fn parse(text: &str) -> Result<Prepared, Error> {
         }
         Err(e) => e,
     };
-    // An update is only parsed to be recognised; it is never evaluated.
-    if evaluator().parse_update(text).is_ok() {
+    // An update is only parsed to be recognised; it is never evaluated. Text with no operation
+    // (empty, comments, a prologue) asks nothing and changes nothing: a usage error.
+    if evaluator().parse_update(text).is_ok() && !has_no_operation(text) {
         return Err(Error::read_only_query());
     }
-    Err(syntax_error(&syntax.to_string()))
+    Err(invalid_query(&syntax.to_string()))
 }
 
-fn syntax_error(parser_message: &str) -> Error {
+/// Whether `text` parses as a SPARQL Update with no operation. Such text names no prefix, so it
+/// parses without the prefix table, and prints as its `BASE` line at most (one line per
+/// operation otherwise).
+#[expect(
+    deprecated,
+    reason = "oxigraph's Update is the only parser that shows the operations"
+)]
+fn has_no_operation(text: &str) -> bool {
+    oxigraph::sparql::Update::parse(text, None).is_ok_and(|u| {
+        u.to_string()
+            .lines()
+            .all(|l| l.trim().is_empty() || l.starts_with("BASE <"))
+    })
+}
+
+fn invalid_query(parser_message: &str) -> Error {
     let message: String = parser_message.chars().take(MAX_PARSER_MESSAGE).collect();
     Error::usage(&format!("invalid SPARQL query: {message}"))
 }
 
 /// Evaluates `query` over `store`, within `limits`. Reads the store only.
+///
+/// The evaluation runs on a worker thread and the caller waits at most `limits.timeout` for it,
+/// so the limit holds for every phase (joins, sorts), not only for the store scans that check
+/// the cancellation token. On timeout the token is cancelled and the worker is left behind, not
+/// joined: it works on its own in-memory copy and ends with the process.
 pub fn run(store: &Store, query: &Prepared, limits: Limits) -> Result<Answer, Error> {
     let merged = merged(store);
     let token = CancellationToken::new();
-    let (done, finished) = mpsc::channel::<()>();
-    let timer = {
+    let (sender, receiver) = mpsc::channel();
+    let worker = {
         let token = token.clone();
+        let text = query.text.clone();
         std::thread::spawn(move || {
-            if finished.recv_timeout(limits.timeout) == Err(mpsc::RecvTimeoutError::Timeout) {
-                token.cancel();
-            }
+            let _ = sender.send(evaluate(&merged, &text, token, limits.max_results));
         })
     };
-    let answer = evaluate(&merged, &query.text, token, limits.max_results);
-    drop(done);
-    let _ = timer.join();
-    answer
+    match receiver.recv_timeout(limits.timeout) {
+        Ok(answer) => answer,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            token.cancel();
+            Err(Error::query_failed("timeout", None))
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => match worker.join() {
+            Err(panic) => std::panic::resume_unwind(panic),
+            Ok(()) => unreachable!("the worker sends its answer before it ends"),
+        },
+    }
 }
 
 /// A copy of the store whose default graph is the union of its named graphs; the named graphs
@@ -133,7 +160,7 @@ fn evaluate(
     let prepared = evaluator()
         .with_cancellation_token(token)
         .parse_query(text)
-        .map_err(|e| syntax_error(&e.to_string()))?;
+        .map_err(|e| invalid_query(&e.to_string()))?;
     match prepared.on_store(store).execute().map_err(failed)? {
         QueryResults::Boolean(b) => Ok(Answer::Boolean(b)),
         QueryResults::Solutions(solutions) => {
@@ -179,7 +206,8 @@ fn failed(err: QueryEvaluationError) -> Error {
             Error::query_failed("service", Some(&term.to_string()))
         }
         QueryEvaluationError::UnboundService => Error::query_failed("service", Some("?")),
-        // The copy is in memory and has no custom functions: nothing else is expected.
-        _ => Error::store_io(None),
+        // The copy is in memory and the evaluator defines no custom function, so any other
+        // error comes from the query text (an unsupported custom function or arity).
+        other => invalid_query(&other.to_string()),
     }
 }

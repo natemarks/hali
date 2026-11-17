@@ -2906,7 +2906,7 @@ fn cell_text(term: &oxigraph::model::Term) -> String {
             cell
         }
         Term::Triple(t) => format!(
-            "<< {} {} {} >>",
+            "<<( {} {} {} )>>",
             cell_text(&t.subject.clone().into()),
             cell_text(&t.predicate.clone().into()),
             cell_text(&t.object)

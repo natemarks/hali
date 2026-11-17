@@ -11,7 +11,9 @@ pub mod walk;
 
 use crate::ontology::{CORE_TTL, PREFIXES, SHAPES_TTL};
 use oxigraph::model::vocab::rdf;
-use oxigraph::model::{GraphNameRef, Literal, NamedNode, NamedOrBlankNode, Term, Triple};
+use oxigraph::model::{
+    BlankNode, GraphNameRef, Literal, NamedNode, NamedOrBlankNode, Term, Triple,
+};
 use oxttl::{TurtleParser, TurtleSerializer};
 use std::fs;
 use std::io::ErrorKind;
@@ -143,7 +145,8 @@ pub fn to_turtle(store: &Store, file: File) -> String {
 /// Serializes triples as the Turtle of `to_turtle` without its header line (spec §3.4, §9.9): the
 /// fixed prefix table, then the triples sorted and grouped. Every character for which `escape`
 /// is true is written as a Turtle `\uXXXX` or `\UXXXXXXXX` escape, and an IRI that holds one is
-/// written whole, never as a prefixed name. The caller keeps layout characters (LF, TAB) out of
+/// written whole, never as a prefixed name. A blank node label that holds one gets a new label,
+/// since a label cannot carry an escape. The caller keeps layout characters (LF, TAB) out of
 /// `escape`.
 pub fn turtle_document(mut triples: Vec<Triple>, escape: impl Fn(char) -> bool) -> String {
     triples.sort_by_cached_key(|t| {
@@ -156,8 +159,10 @@ pub fn turtle_document(mut triples: Vec<Triple>, escape: impl Fn(char) -> bool) 
     });
 
     // An IRI with a character to escape is serialized as a stand-in that no prefix can shorten,
-    // then put back whole in angle brackets.
+    // then put back whole in angle brackets. A blank node label cannot hold an escape, so a label
+    // with such a character is replaced by a safe one. Both reach into triple terms.
     let marker = stand_in_marker(&triples);
+    let relabel_prefix = relabel_prefix(&triples, &escape);
     let mut stand_ins: Vec<String> = Vec::new();
     let mut stand_in = |iri: NamedNode| {
         if !iri.as_str().chars().any(&escape) {
@@ -166,23 +171,16 @@ pub fn turtle_document(mut triples: Vec<Triple>, escape: impl Fn(char) -> bool) 
         stand_ins.push(iri.into_string());
         NamedNode::new_unchecked(format!("{marker}{}", stand_ins.len() - 1))
     };
+    let relabel = |b: BlankNode| match &relabel_prefix {
+        Some(prefix) if b.as_str().chars().any(&escape) => {
+            let hex: String = b.as_str().bytes().map(|x| format!("{x:02x}")).collect();
+            BlankNode::new_unchecked(format!("{prefix}{hex}"))
+        }
+        _ => b,
+    };
     let triples: Vec<Triple> = triples
         .into_iter()
-        .map(|t| {
-            let subject = match t.subject {
-                NamedOrBlankNode::NamedNode(n) => NamedOrBlankNode::NamedNode(stand_in(n)),
-                other => other,
-            };
-            let object = match t.object {
-                Term::NamedNode(n) => Term::NamedNode(stand_in(n)),
-                Term::Literal(l) if l.language().is_none() => {
-                    let datatype = stand_in(l.datatype().into_owned());
-                    Term::Literal(Literal::new_typed_literal(l.value(), datatype))
-                }
-                other => other,
-            };
-            Triple::new(subject, stand_in(t.predicate), object)
-        })
+        .map(|t| safe_triple(t, &mut stand_in, &relabel))
         .collect();
 
     // oxttl orders its prefix lines by namespace length, so hali writes the prelude itself
@@ -221,6 +219,62 @@ pub fn turtle_document(mut triples: Vec<Triple>, escape: impl Fn(char) -> bool) 
     out.push('\n');
     out.push_str(&body);
     escape_turtle(&out, &escape)
+}
+
+/// `t` with every IRI passed through `stand_in` and every blank node through `relabel`, triple
+/// terms included.
+fn safe_triple(
+    t: Triple,
+    stand_in: &mut impl FnMut(NamedNode) -> NamedNode,
+    relabel: &impl Fn(BlankNode) -> BlankNode,
+) -> Triple {
+    let subject = match t.subject {
+        NamedOrBlankNode::NamedNode(n) => NamedOrBlankNode::NamedNode(stand_in(n)),
+        NamedOrBlankNode::BlankNode(b) => NamedOrBlankNode::BlankNode(relabel(b)),
+    };
+    let predicate = stand_in(t.predicate);
+    let object = match t.object {
+        Term::NamedNode(n) => Term::NamedNode(stand_in(n)),
+        Term::BlankNode(b) => Term::BlankNode(relabel(b)),
+        Term::Literal(l) if l.language().is_none() => {
+            let datatype = stand_in(l.datatype().into_owned());
+            Term::Literal(Literal::new_typed_literal(l.value(), datatype))
+        }
+        Term::Literal(l) => Term::Literal(l),
+        Term::Triple(inner) => Term::Triple(Box::new(safe_triple(*inner, stand_in, relabel))),
+    };
+    Triple::new(subject, predicate, object)
+}
+
+/// When a blank node label of `triples` holds a character to escape, a prefix that no label
+/// starts with: such a label becomes the prefix and the hex of its UTF-8 bytes, which is
+/// deterministic for the same data and never equal to another label.
+fn relabel_prefix(triples: &[Triple], escape: &impl Fn(char) -> bool) -> Option<String> {
+    fn labels(t: &Triple, out: &mut Vec<String>) {
+        if let NamedOrBlankNode::BlankNode(b) = &t.subject {
+            out.push(b.as_str().to_string());
+        }
+        match &t.object {
+            Term::BlankNode(b) => out.push(b.as_str().to_string()),
+            Term::Triple(inner) => labels(inner, out),
+            _ => {}
+        }
+    }
+    let mut all = Vec::new();
+    for t in triples {
+        labels(t, &mut all);
+    }
+    if !all.iter().any(|l| l.chars().any(escape)) {
+        return None;
+    }
+    let mut salt = 0;
+    loop {
+        let prefix = format!("h{salt}x");
+        if !all.iter().any(|l| l.starts_with(&prefix)) {
+            return Some(prefix);
+        }
+        salt += 1;
+    }
 }
 
 /// A stand-in IRI prefix that no term of `triples` contains.
