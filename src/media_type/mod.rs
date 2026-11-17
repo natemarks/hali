@@ -4,6 +4,9 @@
 //! The database is user-writable (`~/.local/share/mime`), so it is only ever matched against
 //! the bounded head of a file, and a panic inside `xdg-mime` counts as "no match".
 
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use xdg_mime::SharedMimeInfo;
 
@@ -41,6 +44,116 @@ pub fn glob_type(file_name: &str) -> Option<String> {
     })
     .flatten()
     .filter(|m| is_plain(m))
+}
+
+/// Whether `media_type` is `text/plain` or lies under it: every `text/*` type counts (the
+/// implicit rule), and so does any type with an ancestor of top-level type `text` in the
+/// subclass tree, aliases resolved (spec §5.2). The walk is breadth first with a visited set
+/// and a node cap, so a cyclic or oversized database cannot hang it. With no database only the
+/// implicit rule applies.
+///
+/// `xdg-mime` is not used for the tree: its `get_parents` answers only for aliased types and
+/// its `mime_type_subclass` recurses without a cycle check. The `subclasses` and `aliases`
+/// files are read here instead (each bounded to `MAX_DB_FILE` bytes).
+pub fn is_text(media_type: &str) -> bool {
+    /// The most types one walk looks at.
+    const MAX_NODES: usize = 256;
+    let media_type = media_type.to_ascii_lowercase();
+    if media_type.starts_with("text/") {
+        return true;
+    }
+    quietly(|| {
+        let tree = tree();
+        let canonical = |t: &str| {
+            tree.aliases
+                .get(t)
+                .cloned()
+                .unwrap_or_else(|| t.to_string())
+        };
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut queue = VecDeque::new();
+        let start = canonical(&media_type);
+        seen.insert(start.clone());
+        queue.push_back(start);
+        while let Some(current) = queue.pop_front() {
+            if current.starts_with("text/") {
+                return true;
+            }
+            for parent in tree.parents.get(&current).into_iter().flatten() {
+                let parent = canonical(parent);
+                if seen.len() < MAX_NODES && seen.insert(parent.clone()) {
+                    queue.push_back(parent);
+                }
+            }
+        }
+        false
+    })
+    .unwrap_or(false)
+}
+
+/// The most bytes read from one `subclasses` or `aliases` file; the database is user-writable.
+const MAX_DB_FILE: u64 = 4 * 1024 * 1024;
+
+#[derive(Default)]
+struct Tree {
+    /// Alias -> canonical type.
+    aliases: HashMap<String, String>,
+    /// Type -> direct parents.
+    parents: HashMap<String, Vec<String>>,
+}
+
+fn tree() -> &'static Tree {
+    static TREE: OnceLock<Tree> = OnceLock::new();
+    TREE.get_or_init(|| {
+        let mut tree = Tree::default();
+        for dir in data_dirs() {
+            for (name, parents) in [("aliases", false), ("subclasses", true)] {
+                let Some(text) = read_bounded(&dir.join("mime").join(name)) else {
+                    continue;
+                };
+                for line in text.lines() {
+                    let mut words = line.split_whitespace();
+                    let (Some(a), Some(b), None) = (words.next(), words.next(), words.next())
+                    else {
+                        continue;
+                    };
+                    let (a, b) = (a.to_ascii_lowercase(), b.to_ascii_lowercase());
+                    if !is_plain(&a) || !is_plain(&b) {
+                        continue;
+                    }
+                    if parents {
+                        tree.parents.entry(a).or_default().push(b);
+                    } else {
+                        tree.aliases.entry(a).or_insert(b);
+                    }
+                }
+            }
+        }
+        tree
+    })
+}
+
+/// The data directories of the shared-mime-info database, user first.
+fn data_dirs() -> Vec<PathBuf> {
+    let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty());
+    let mut dirs = Vec::new();
+    match var("XDG_DATA_HOME") {
+        Some(home) => dirs.push(PathBuf::from(home)),
+        None => dirs.extend(var("HOME").map(|h| PathBuf::from(h).join(".local/share"))),
+    }
+    let system = var("XDG_DATA_DIRS").unwrap_or_else(|| "/usr/local/share:/usr/share".into());
+    dirs.extend(std::env::split_paths(&system).filter(|p| p.is_absolute()));
+    dirs
+}
+
+fn read_bounded(path: &Path) -> Option<String> {
+    let mut text = String::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(MAX_DB_FILE)
+        .read_to_string(&mut text)
+        .ok()?;
+    Some(text)
 }
 
 fn database() -> &'static SharedMimeInfo {

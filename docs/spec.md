@@ -210,7 +210,7 @@ exclude = ["*.tmp", "Downloads/**"]
 include_hidden = false
 max_size = "1GiB"
 ```
-The `[user]` and `[vocabulary]` key names were not fixed on the map and are proposed here. `[files] dir` may start with `~`, which is `$HOME`; without it, `files.dir` is `$XDG_DOCUMENTS_DIR/hali` from user-dirs (`$XDG_CONFIG_HOME/user-dirs.dirs`), else `~/Documents/hali`. The others come from their deciding tickets.
+The `[user]` and `[vocabulary]` key names were not fixed on the map and are proposed here. `[files] dir` may start with `~`, which is `$HOME`; without it, `files.dir` is `$XDG_DOCUMENTS_DIR/hali` from user-dirs (`$XDG_CONFIG_HOME/user-dirs.dirs`), else `~/Documents/hali`. `[open] editor` and `[open] system` each take a list of strings, each `type/subtype` or `type/*` (case-insensitive); an entry that is not a string, an empty string, `text` with no subtype, `*/*`, or a type with parameters, or an `[open]` that is not a table, is `CONFIG_INVALID`. `[scan]` and `[open]` are described in §7 and §5.2.
 
 ---
 
@@ -227,9 +227,9 @@ Sources:
 - **No glob match:** text-looking content becomes `text/plain`; binary content becomes `application/octet-stream`.
 
 ### 5.2 Editable rule (computed at output time, never stored)
-- `editable = is_a(media_type, text/plain)` over the shared-mime-info subclass tree, with the implicit rule that every `text/*` type is a subtype of `text/plain`.
-- **Built-in exceptions** (never editable): `text/html`, `image/svg+xml`, `application/postscript`, `application/rtf`, `application/x-desktop`.
-- **Precedence:** `open.system` > `open.editor` > built-in exceptions > the `is_a` rule. Config entries are MIME types, and `type/*` wildcards are allowed.
+- `editable` is true when the media type is `text/plain` or has an ancestor of top-level type `text` in the shared-mime-info subclass tree, with the implicit rule that every `text/*` type is a subtype of `text/plain`. The walk visits the ancestors breadth first, resolves aliases at every step, keeps a visited set so a cycle in the database ends the walk, and stops after a bounded number of types. A missing, unreadable or malformed database is not an error: with no database only the implicit `text/*` rule applies. An empty media type is never editable.
+- **Built-in exceptions** (never editable): `text/html`, `image/svg+xml`, `application/postscript`, `application/rtf`, `application/x-desktop`. They match the media type exactly (`application/xhtml+xml` is not an exception), case-insensitively.
+- **Precedence:** `[open] system` > `[open] editor` > built-in exceptions > the ancestor rule. A type that matches both lists goes to the OS opener (system wins). Config entries match the media type exactly or by a `type/*` wildcard, case-insensitively; they never match subclasses or aliases. An invalid `[open]` is `CONFIG_INVALID` (§4.1).
 - txt and md are the tested and documented targets; JSON, TOML, shell scripts, source code and so on also open in Neovim.
 
 ### 5.3 Who opens

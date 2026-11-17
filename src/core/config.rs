@@ -1,7 +1,9 @@
-//! The config file (spec §4.1). Only `[user] name`, `[vocabulary] language`, `[files] dir` and
-//! the `[scan]` keys `exclude`, `include_hidden` and `max_size` are read so far.
+//! The config file (spec §4.1). Only `[user] name`, `[vocabulary] language`, `[files] dir`, the
+//! `[scan]` keys `exclude`, `include_hidden` and `max_size`, and `[open] editor` and `system`
+//! are read so far.
 
 use super::Error;
+use super::resource::{MediaPattern, parse_media_pattern};
 use oxigraph::model::Literal;
 use serde::Deserialize;
 use std::path::Path;
@@ -15,6 +17,15 @@ pub struct Config {
     pub scan: ScanConfig,
     /// `[files] dir`, as written (a leading `~` is not expanded here).
     pub files_dir: Option<String>,
+    /// The `[open]` table.
+    pub open: OpenConfig,
+}
+
+/// The `[open]` table: media types forced into the editor or to the OS opener (spec §5.2).
+#[derive(Clone, Debug, Default)]
+pub struct OpenConfig {
+    pub editor: Vec<MediaPattern>,
+    pub system: Vec<MediaPattern>,
 }
 
 /// What `hali scan` reads from the config file (spec §7).
@@ -35,6 +46,7 @@ impl Default for Config {
             user_name: None,
             scan: ScanConfig::default(),
             files_dir: None,
+            open: OpenConfig::default(),
         }
     }
 }
@@ -45,6 +57,7 @@ struct Raw {
     vocabulary: Option<Vocabulary>,
     scan: Option<Scan>,
     files: Option<Files>,
+    open: Option<toml::Value>,
 }
 
 #[derive(Deserialize)]
@@ -109,12 +122,43 @@ pub fn parse(text: &str, path: &Path) -> Result<Config, Error> {
                 .transpose()?,
         },
     };
+    let open = match raw.open {
+        None => OpenConfig::default(),
+        Some(toml::Value::Table(table)) => OpenConfig {
+            editor: open_patterns(&table, "editor", path)?,
+            system: open_patterns(&table, "system", path)?,
+        },
+        Some(_) => return Err(Error::config_invalid(path, "[open] must be a table")),
+    };
     Ok(Config {
+        open,
         language,
         user_name,
         scan,
         files_dir: raw.files.and_then(|f| f.dir),
     })
+}
+
+/// One `[open]` list: `type/subtype` or `type/*` strings.
+fn open_patterns(table: &toml::Table, key: &str, path: &Path) -> Result<Vec<MediaPattern>, Error> {
+    let bad = || {
+        Error::config_invalid(
+            path,
+            &format!("[open] {key} must be a list of type/subtype or type/* strings"),
+        )
+    };
+    match table.get(key) {
+        None => Ok(Vec::new()),
+        Some(toml::Value::Array(items)) => items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .and_then(|s| parse_media_pattern(s).ok())
+                    .ok_or_else(bad)
+            })
+            .collect(),
+        Some(_) => Err(bad()),
+    }
 }
 
 /// The name a newly minted user Person gets: config `[user] name`, else `$USER`, else
