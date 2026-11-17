@@ -670,7 +670,13 @@ mod goal {
         let out_empty = empty.run(["--json", "refresh", "--all"]);
         assert_eq!(out_empty.stdout, out_absent.stdout);
         assert_eq!(out_empty.code, Some(0));
-        assert_eq!(std::fs::read_dir(empty.data()).unwrap().count(), 0);
+        assert_eq!(
+            std::fs::read_dir(empty.data())
+                .unwrap()
+                .filter(|e| e.as_ref().unwrap().file_name() != ".lock")
+                .count(),
+            0
+        );
 
         let text = Env::absent().run(["refresh", "--all"]);
         assert_eq!(

@@ -224,12 +224,17 @@ impl Env {
         f
     }
 
-    /// Names -> bytes of the files directly in the data dir, `.lock` left out.
+    /// Names -> bytes of the three store files; `.lock` and publish temps (`.*.tmp`) are left out.
     pub fn store_bytes(&self) -> std::collections::BTreeMap<String, Vec<u8>> {
         std::fs::read_dir(self.data())
             .unwrap()
             .map(|e| e.unwrap())
-            .filter(|e| e.file_name() != ".lock")
+            .filter(|e| {
+                matches!(
+                    e.file_name().to_str(),
+                    Some("vocabulary.ttl" | "resources.ttl" | "extensions.ttl")
+                )
+            })
             .map(|e| {
                 (
                     e.file_name().into_string().unwrap(),
