@@ -51,7 +51,7 @@ const CASES: &[(&str, &str, &[&str])] = &[
     ("unrelate", "relations", &["unrelate", REL_R3, "annotates", REL_R1]),
     ("validate", "store", &["validate"]),
     ("generate man", "store", &["generate", "man"]),
-    ("generate completions bash", "store", &["generate", "completions", "bash"]),
+    ("generate completions", "store", &["generate", "completions", "bash"]),
 ];
 
 fn leaf_paths(cmd: &clap::Command, prefix: &str, out: &mut Vec<String>) {

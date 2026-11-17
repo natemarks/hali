@@ -21,7 +21,7 @@ New tests go in `tests/cli_generate.rs` under a goal-tagged `mod goal`.
 | 6 | Deterministic, no paths; needs no store or config (a broken `HALI_DATA_DIR`/config still exits 0, creates nothing) | `cli_generate::deterministic_and_storeless` |
 | 7 | `--json`/`--dry-run`/`--yes` give identical output | `cli_generate::global_flags_ignored` |
 | 8 | Schema list unchanged; `schema generate man` exits 2; hidden leaves skipped by `every_command_has_a_schema` | edited `core_schema.rs`; `.goal/checks/03-snaps.sh` (three `*schema_list_json.snap` unchanged vs merge-base) |
-| 9 | Dry-run guard covers both generate leaves | `dry_run_guard.rs` CASES `generate man`, `generate completions bash` |
+| 9 | Dry-run guard covers both generate leaves | `dry_run_guard.rs` CASES `generate man`, `generate completions` (argv with `bash`) |
 | 10 | `make install` puts the 5 files at the §4 paths, modes 0755/0644, content = `generate` output; nothing else under HOME | `.goal/checks/04-install.sh` (`HOME=$tmp make install`) |
 | 11 | Re-login warning only when BINDIR was created; a second run has none, overwrites, replaces a symlink without writing its target | `04-install.sh` |
 | 12 | Release build, `--locked`, no test-hooks; aborts on `HALI_TEST_` | `.goal/checks/05-release.sh` (`make -n install` has `--release --locked`, no `--features`; installed binary has no `HALI_TEST_`) |
