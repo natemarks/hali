@@ -103,8 +103,9 @@ fn invalid_query(parser_message: &str) -> Error {
     Error::usage(&format!("invalid SPARQL query: {message}"))
 }
 
-/// The query worker's stack: well above the 8 MiB main stack that `parse` runs on, so a query
-/// nested deeply enough to parse also evaluates, in a debug build too.
+/// The query worker's stack: well above the default 8 MiB main stack that `parse` runs on, so with
+/// that default a query nested deeply enough to parse also evaluates, in a debug build too. A
+/// larger main stack (`ulimit -s`) can let a deeper query parse and then overflow here.
 const WORKER_STACK: usize = 64 * 1024 * 1024;
 
 /// Evaluates `query` over `store`, within `limits`. Reads the store only.
