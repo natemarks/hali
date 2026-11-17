@@ -1098,6 +1098,97 @@ mod goal {
         }
     }
 
+    /// Row 33: the `BLANK_NODE_LABEL` grammar, edge by edge. `BNODE(...)` and the Turtle parser
+    /// only make labels oxrdf accepts (it rejects `-a`, `.a`, U+00D7 and the like), so the
+    /// labels reach the serializer through `turtle_document` with unchecked blank nodes. A label
+    /// that is not valid Turtle is relabelled (the output parses back); a valid one is kept.
+    #[test]
+    fn turtle_blank_node_label_grammar() {
+        use oxrdf::{BlankNode, NamedNode};
+        let p = NamedNode::new_unchecked("urn:x:p");
+        let o = NamedNode::new_unchecked("urn:x:o");
+        let docs = |label: &str| {
+            let b = || BlankNode::new_unchecked(label);
+            let inner = Triple::new(b(), p.clone(), o.clone());
+            [
+                Triple::new(NamedNode::new_unchecked("urn:x:s"), p.clone(), b()),
+                Triple::new(b(), p.clone(), o.clone()),
+                Triple::new(
+                    NamedNode::new_unchecked("urn:x:s"),
+                    p.clone(),
+                    Term::Triple(Box::new(inner)),
+                ),
+            ]
+            .map(|t| hali::storage::turtle_document(vec![t], |_| false))
+        };
+        let invalid = [
+            "a.",
+            "-a",
+            ".a",
+            "a\u{D7}b",
+            "a\u{F7}b",
+            "a\u{37E}b",
+            "a\u{2000}b",
+            "a\u{200B}b",
+            "",
+        ];
+        for label in invalid {
+            for text in docs(label) {
+                assert_eq!(parse_turtle(&text).len(), 1, "{label:?}: {text}");
+                assert!(
+                    label.is_empty() || !text.contains(&format!("_:{label}")),
+                    "{label:?}: {text}"
+                );
+            }
+        }
+        let valid = [
+            "a.b",
+            "1a",
+            "a-b",
+            "a_b",
+            "a\u{B7}",
+            "a\u{203F}b",
+            "a\u{10000}b",
+            "_a",
+            "a1",
+            "a\u{D8}b",
+            "a\u{F8}b",
+            "a\u{37F}b",
+            "a\u{37D}b",
+            "a\u{D6}b",
+            "a\u{F6}b",
+            "a\u{200C}b",
+            "a\u{2070}b",
+            "a\u{300}b",
+            "a\u{36F}b",
+        ];
+        for label in valid {
+            for text in docs(label) {
+                assert_eq!(parse_turtle(&text).len(), 1, "{label:?}: {text}");
+                assert!(text.contains(&format!("_:{label}")), "{label:?}: {text}");
+            }
+        }
+    }
+
+    /// Row 33: valid labels in a stored file survive `to_turtle` unchanged.
+    #[test]
+    fn stored_blank_node_labels_round_trip() {
+        let env = Env::empty();
+        let file = env.data.join("vocabulary.ttl");
+        let doc = "<urn:x:s> <urn:x:p> _:a.b , _:1a .\n";
+        std::fs::write(&file, doc).unwrap();
+        let store = hali::storage::load(&env.data).unwrap();
+        let first = hali::storage::to_turtle(&store, hali::storage::File::Vocabulary);
+        eprintln!("{first}");
+        assert!(first.contains("_:a.b") && first.contains("_:1a"), "{first}");
+        std::fs::write(&file, &first).unwrap();
+        let store = hali::storage::load(&env.data).unwrap();
+        assert_eq!(
+            hali::storage::to_turtle(&store, hali::storage::File::Vocabulary),
+            first
+        );
+    }
+
     /// Row 30b: a relabelled label never equals another label, even one that looks like the
     /// relabelling of it, and two relabelled labels stay apart.
     #[test]
