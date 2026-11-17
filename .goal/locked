@@ -18,3 +18,4 @@ tests/cli_shacl.rs
 tests/cli_tag.rs
 tests/cli_type.rs
 tests/snapshots/cli_lock__store_locked_json_envelope.snap
+tests/cli_lock_review.rs

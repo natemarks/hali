@@ -38,6 +38,9 @@ need '§3.3' "$s33" '.lock' '256 MiB' '`reason`' 'STORE_LOCKED' 'shared' 'exclus
     '`changed`' '`timeout`' 'O_EXCL' 'rename' 'symlink' 'FIFO' '0600' '0700' \
     'chmod go-w' 'prompt' 'STORE_IO' 'CLOEXEC' 'network'
 
+need '§3.3 (the changed message)' "$s33" \
+    'another hali process wrote the store first (lock <path>); nothing was written'
+
 describe=$(grep -E '^\*\*Describe:\*\*' "$spec" || true)
 if [ -z "$describe" ]; then
     echo "MISSING: $spec has no **Describe:** paragraph in §9.1"

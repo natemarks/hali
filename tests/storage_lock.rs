@@ -101,6 +101,38 @@ mod goal {
         assert!(names.is_empty(), "the loser left {names:?}");
     }
 
+    /// Row 14: the `changed` `STORE_LOCKED` error has its own message and the same fix text as
+    /// the `timeout` one, no suggested command (spec §3.3).
+    #[test]
+    fn changed_error_text_is_pinned() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("data");
+        let first = Writer::open(&data).unwrap();
+        let second = Writer::open(&data).unwrap();
+        let store_one = first.load().unwrap();
+        let store_two = second.load().unwrap();
+        first.save(&store_one, File::Vocabulary).unwrap();
+        drop(first);
+
+        let err = locked(second.save(&store_two, File::Vocabulary).unwrap_err());
+        let lock = data.join(".lock").display().to_string();
+        assert_eq!(
+            err.message,
+            format!(
+                "another hali process wrote the store first (lock {lock}); nothing was written"
+            )
+        );
+        assert_eq!(err.details["reason"], "changed");
+        assert_eq!(err.details["path"], lock.as_str());
+        assert_eq!(
+            err.suggested_fix.as_deref(),
+            Some(
+                "Wait for the other hali process to finish (it may be waiting at a confirmation prompt), then retry."
+            )
+        );
+        assert_eq!(err.suggested_command, None);
+    }
+
     /// Row 1: the first save into an absent dir creates it (0700) and `.lock` (0600), which stays.
     #[test]
     fn first_save_creates_dir_and_lock() {
