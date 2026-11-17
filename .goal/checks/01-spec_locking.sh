@@ -41,6 +41,10 @@ need '§3.3' "$s33" '.lock' '256 MiB' '`reason`' 'STORE_LOCKED' 'shared' 'exclus
 need '§3.3 (the changed message)' "$s33" \
     'another hali process wrote the store first (lock <path>); nothing was written'
 
+need '§3.3 (order)' "$s33" 'usage errors that need no store' '`--title`' \
+    'errors that need the store' 'after the lock' 'edit'
+need '§3.3 (data dir fsync)' "$s33" 'visible' 'survive a crash'
+
 describe=$(grep -E '^\*\*Describe:\*\*' "$spec" || true)
 if [ -z "$describe" ]; then
     echo "MISSING: $spec has no **Describe:** paragraph in §9.1"

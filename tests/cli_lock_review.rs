@@ -76,62 +76,86 @@ mod goal {
         assert_eq!(env.store_bytes(), before);
     }
 
-    /// Row 13: usage errors come before the lock (spec §3.3 "Order", §9.1): with the exclusive
-    /// lock held, each of these exits 2 at once instead of waiting 5 s for `STORE_LOCKED`.
+    /// Row 13: a usage error that needs no store comes before the lock (spec §3.3 "Order"):
+    /// `add a b --title x` exits 2 at once with the exclusive lock held, with the message it has
+    /// without a lock.
     #[test]
     fn usage_errors_come_before_the_lock() {
         let env = Env::with_resources();
         std::fs::write(env.file("four.txt"), b"four\n").unwrap();
         std::fs::write(env.file("five.txt"), b"five\n").unwrap();
-        let _held = env.hold_exclusive();
         let four = env.file("four.txt");
         let four = four.to_str().unwrap();
         let five = env.file("five.txt");
         let five = five.to_str().unwrap();
-        let cases: Vec<Vec<&str>> = vec![
-            // More than one path with --title.
-            vec!["add", four, five, "--title", "x"],
-            // The same Type, then the same Concept, both added and removed.
-            vec!["edit", R1, "--add-type", "Paper", "--remove-type", "Paper"],
-            vec!["edit", R1, "--add-tag", "ml", "--remove-tag", "ml"],
-            // Settled before the lock already; kept as the baseline of the order.
-            vec!["edit", R1],
-            vec![
-                "concept",
-                "edit",
-                "ml",
-                "--add-alt",
-                "x",
-                "--remove-alt",
-                "x",
-            ],
-            vec!["scan", "--force"],
-            vec!["relink", R1],
-        ];
-        let outs: Vec<(String, Out)> = std::thread::scope(|scope| {
-            let handles: Vec<_> = cases
-                .iter()
-                .map(|args| {
-                    let env = &env;
-                    scope.spawn(move || {
-                        let mut all = vec!["--json"];
-                        all.extend(args.iter().copied());
-                        (args.join(" "), env.run(all))
-                    })
-                })
-                .collect();
-            handles.into_iter().map(|h| h.join().unwrap()).collect()
-        });
-        let mut bad = Vec::new();
-        for (what, out) in outs {
-            if out.code != Some(2) || out.elapsed >= Duration::from_secs(3) {
-                bad.push(format!(
-                    "{what}: exit {:?} after {:?} (a usage error is checked before the lock)",
-                    out.code, out.elapsed
-                ));
-            }
-        }
-        assert!(bad.is_empty(), "{}", bad.join("\n"));
+        let args = ["--json", "add", four, five, "--title", "x"];
+        let free = env.run(args);
+        assert_eq!(free.code, Some(2), "no lock; stderr: {}", free.stderr);
+        let want = envelope(&free);
+        assert!(
+            want["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("--title takes exactly one path"),
+            "{want}"
+        );
+        let _held = env.hold_exclusive();
+        let out = env.run(args);
+        assert_eq!(out.code, Some(2), "lock held; stderr: {}", out.stderr);
+        assert!(
+            out.elapsed < Duration::from_secs(3),
+            "waited {:?} for the lock",
+            out.elapsed
+        );
+        assert_eq!(envelope(&out), want, "same error with the lock held");
+    }
+
+    /// Row 13: `edit` keeps the order the spec gives (§9.1): the reference checks (unknown
+    /// Resource, unknown Type, Types before tags) come before the "added and removed" usage
+    /// error, so these identical pairs are not reported as usage errors first. No lock is held.
+    #[test]
+    fn edit_keeps_its_error_order() {
+        let env = Env::with_resources();
+        let out = env.run([
+            "--json",
+            "edit",
+            "nosuch",
+            "--add-tag",
+            "ml",
+            "--remove-tag",
+            "ml",
+        ]);
+        let v = envelope(&out);
+        assert_eq!(v["error"]["rule"], "UNKNOWN_RESOURCE", "{v}");
+        let out = env.run([
+            "--json",
+            "edit",
+            R1,
+            "--add-type",
+            "Bogus",
+            "--remove-type",
+            "Bogus",
+        ]);
+        let v = envelope(&out);
+        assert_eq!(v["error"]["rule"], "UNKNOWN_TYPE", "{v}");
+        let out = env.run([
+            "--json",
+            "edit",
+            R1,
+            "--add-type",
+            "Paper",
+            "--remove-type",
+            "Paper",
+            "--add-tag",
+            "ml",
+            "--remove-tag",
+            "ml",
+        ]);
+        assert_eq!(out.code, Some(2), "{}", out.stderr);
+        let v = envelope(&out);
+        let msg = v["error"]["message"].as_str().unwrap();
+        assert!(msg.contains("Type"), "type lists are checked first: {msg}");
+        assert!(!msg.contains("Concept"), "{msg}");
     }
 
     /// Row 16: whatever the umask, the first write creates the data dir 0700 and the store files
