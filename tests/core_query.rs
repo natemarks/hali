@@ -772,11 +772,12 @@ mod goal {
             .join(" ")
     }
 
-    /// Row 21: the time limit holds for a query that never reads the store (a billion
+    /// Row 21: the time limit holds for a query that never reads the store (a million
     /// solutions, no scan), not only for store scans.
     #[test]
     fn timeout_covers_a_query_that_never_reads_the_store() {
-        let text = format!("SELECT (COUNT(*) AS ?c) WHERE {{ {} }}", values(9));
+        // 10^6 solutions: well over 100 ms, yet the abandoned worker ends within a second or two.
+        let text = format!("SELECT (COUNT(*) AS ?c) WHERE {{ {} }}", values(6));
         let started = Instant::now();
         let e = within(30, move || failure(&core_only(), &text, at_100ms()));
         assert!(
@@ -793,8 +794,8 @@ mod goal {
     #[test]
     fn timeout_covers_the_sort_of_a_cross_join() {
         let text = format!(
-            "SELECT ?v0 WHERE {{ {} }} ORDER BY DESC(?v0 * ?v1 + ?v2 - ?v3 * ?v4 + ?v5)",
-            values(6)
+            "SELECT ?v0 WHERE {{ {} }} ORDER BY DESC(?v0 * ?v1 + ?v2 - ?v3 * ?v4)",
+            values(5)
         );
         let started = Instant::now();
         let result = within(30, move || {
@@ -809,7 +810,9 @@ mod goal {
         });
         let e = match result {
             Err(e) => e,
-            Ok(_) => panic!("a million-row sort ran to the end although the limit is 100 ms"),
+            Ok(_) => {
+                panic!("a hundred-thousand-row sort ran to the end although the limit is 100 ms")
+            }
         };
         assert!(
             started.elapsed() < Duration::from_secs(20),
@@ -860,6 +863,8 @@ mod goal {
             "# only a comment",
             "# a\n# b\n",
             "PREFIX ex: <x:>",
+            "BASE <x:>",
+            "BASE <x:> PREFIX a: <x:b>",
         ] {
             let e = parse_err(text);
             assert_eq!(e.rule, "USAGE", "{text:?}: {}", e.message);

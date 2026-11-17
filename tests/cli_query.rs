@@ -947,7 +947,8 @@ mod goal {
     // injected values are HALI_TEST_NOW, HALI_TEST_ID_SEED and HALI_TEST_TTY), so a CLI test of
     // a timed-out query exiting cannot be written without a new hook; it is skipped. The
     // process half that is testable is the opposite one: a quick query must not wait out the
-    // limit (row 25, mutation 7).
+    // limit (row 25, mutation 7: it guards the `recv_timeout` design, an answer received at
+    // once, not `drop(done)`).
 
     #[test]
     fn a_quick_query_does_not_wait_for_the_time_limit() {
@@ -1074,6 +1075,72 @@ mod goal {
                      \"v\"^^<https://w3id.org/hali#a\u{FEFF}> )>> } WHERE {}";
         let (text, triples) = safe_turtle(&env, query);
         assert_eq!(triples.len(), 1, "{text}");
+    }
+
+    /// Row 29: a `BNODE` label that is not a Turtle BLANK_NODE_LABEL for any reason (here a
+    /// `:`), in subject, object and triple-term positions, is still valid Turtle.
+    #[test]
+    fn turtle_bnode_labels_with_a_colon_are_valid() {
+        let env = Env::absent();
+        for label in ["a:b", ":a", "a:"] {
+            for template in [
+                "<urn:x:s> <urn:x:p> ?b",
+                "?b <urn:x:p> <urn:x:o>",
+                "<urn:x:s> <urn:x:p> <<( ?b <urn:x:p> <urn:x:o> )>>",
+                "<urn:x:s> <urn:x:p> <<( <urn:x:s> <urn:x:p> ?b )>>",
+            ] {
+                let query = format!(
+                    "CONSTRUCT {{ {template} }} WHERE {{ BIND(BNODE(\"{label}\") AS ?b) }}"
+                );
+                let (text, triples) = safe_turtle(&env, &query);
+                assert_eq!(triples.len(), 1, "{label} / {template}: {text}");
+            }
+        }
+    }
+
+    /// Row 30b: a relabelled label never equals another label, even one that looks like the
+    /// relabelling of it, and two relabelled labels stay apart.
+    #[test]
+    fn relabelled_blank_nodes_never_collide() {
+        let env = Env::with_extensions(
+            "_:h0x61efbbbf62 <urn:x:p> _:a\u{FEFF}b .\n_:c\u{FEFF}d <urn:x:p> <urn:x:o> .\n",
+        );
+        let (text, triples) = safe_turtle(&env, &construct_ext());
+        assert_eq!(triples.len(), 2, "{text}");
+        let mut blanks = HashSet::new();
+        for t in &triples {
+            if let oxrdf::NamedOrBlankNode::BlankNode(b) = &t.subject {
+                blanks.insert(b.clone());
+            }
+            if let Term::BlankNode(b) = &t.object {
+                blanks.insert(b.clone());
+            }
+        }
+        // `h0x61efbbbf62`, `a<FEFF>b` and `c<FEFF>d` are three different blank nodes.
+        assert_eq!(blanks.len(), 3, "{text}");
+    }
+
+    /// Row 30c: a relabelled blank node inside a triple term (the object of the template).
+    #[test]
+    fn relabelled_blank_node_inside_a_triple_term_is_valid() {
+        let env = Env::absent();
+        let query = "CONSTRUCT { <urn:s> <urn:p> <<( ?b <urn:p> <urn:o> )>> } \
+                     WHERE { BIND(BNODE(\"a\u{FEFF}b\") AS ?b) }";
+        let (text, triples) = safe_turtle(&env, query);
+        assert_eq!(triples.len(), 1, "{text}");
+    }
+
+    /// Row 28: the evaluation thread has at least the main thread's stack, so a query nested
+    /// as deep as the main thread can take is answered, not aborted (stack overflow, exit 134).
+    #[test]
+    fn moderately_nested_query_runs() {
+        let env = Env::absent();
+        for depth in [200, 400] {
+            let query = format!("ASK {}?s ?p ?o {}", "{ ".repeat(depth), "} ".repeat(depth));
+            let out = env.run(["query", &query]);
+            assert_eq!(out.code, Some(0), "depth {depth}: {}", out.stderr);
+            assert_eq!(out.stdout, "true\n", "depth {depth}");
+        }
     }
 
     /// Row 23: an IRI with a §9.3 character is written whole in every position (subject,

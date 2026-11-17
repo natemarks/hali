@@ -13,7 +13,10 @@
 //!    (`QueryResultsFormat::from_extension`, `QueryResultsFormat::from_media_type`,
 //!    `QueryResultsSerializer`, `RdfSerializer`), the crates that hold the XML code
 //!    (`oxrdfxml`, `sparesults`, `quick_xml`), or an evaluator with default settings
-//!    (`SparqlEvaluator::default()`, which would keep the HTTP service handler); and nothing
+//!    (`SparqlEvaluator::default()`, which would keep the HTTP service handler), the
+//!    path-style calls `Store::query(` and `Store::update(`, `RdfFormat::from_extension` and
+//!    `RdfFormat::from_media_type`, and renaming `SparqlEvaluator` or `QueryResultsFormat`
+//!    with `as` (which would hide a banned name from this scan); and nothing
 //!    outside `src/core/query` (the module or directory of the query seam, where UPDATE text is
 //!    refused) names `parse_update`;
 //! 3. nothing in `src/` runs a query or an update through the store's own entry points
@@ -39,6 +42,12 @@ const ALWAYS_BANNED: &[&str] = &[
     "oxrdfxml",
     "sparesults",
     "quick_xml",
+    "RdfFormat::from_extension",
+    "RdfFormat::from_media_type",
+    "Store::query(",
+    "Store::update(",
+    "as SparqlEvaluator",
+    "as QueryResultsFormat",
 ];
 const STORE_ENTRY_POINTS: &[&str] = &[
     ".query(",
@@ -335,6 +344,12 @@ fn the_scanners_catch_violations() {
         "oxrdfxml",
         "sparesults",
         "quick_xml",
+        "RdfFormat::from_extension",
+        "RdfFormat::from_media_type",
+        "Store::query(",
+        "Store::update(",
+        "as SparqlEvaluator",
+        "as QueryResultsFormat",
     ] {
         assert_eq!(
             banned("src/core/x.rs", &format!("let x = {name};")),
