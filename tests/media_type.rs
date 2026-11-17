@@ -103,7 +103,6 @@ mod goal {
     /// #11: `is_text(media_type)` is true for `text/plain` and every type under it in the real
     /// shared-mime-info subclass tree (aliases resolved), and for any `text/*`; false for the
     /// rest. Assumed API: `hali::media_type::is_text(&str) -> bool`.
-    #[cfg(feature = "goal")]
     #[test]
     #[ignore = "needs the shared MIME database"]
     fn is_text_real_db() {

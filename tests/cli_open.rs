@@ -14,7 +14,6 @@
 //! outside software. Files get a pinned mtime of 2026-10-20T14:02:11Z. Ids come from
 //! `HALI_TEST_ID_SEED=1` (R1, C1, P, R2, C2, ...); a second process uses another seed.
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::Value;

@@ -22,7 +22,6 @@
 //! strings; anything else is `CONFIG_INVALID` (exit 3) whose fix text mentions
 //! `[open] editor and system`.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::config::{self, OpenConfig};
     use hali::core::resource::editable;
