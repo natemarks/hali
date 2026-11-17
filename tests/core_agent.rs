@@ -269,6 +269,89 @@ mod goal {
         assert_eq!(resolve(None, os("a\u{1b}[0m").as_ref()), Err(2));
         let bad = OsString::from_vec(vec![b'a', 0xff, b'b']);
         assert_eq!(resolve(None, Some(&bad)), Err(2));
+        // A valid flag does not excuse an invalid env.
+        assert_eq!(resolve(Some("claude"), os("a\nb").as_ref()), Err(2));
+        assert_eq!(resolve(Some("claude"), Some(&bad)), Err(2));
+        // Trimming comes before the control-character check.
+        assert_eq!(resolve(Some("claude\n"), None), Ok(Some("claude".into())));
+        assert_eq!(
+            resolve(None, os("claude\n").as_ref()),
+            Ok(Some("claude".into()))
+        );
+        assert_eq!(
+            resolve(Some("claude"), os("\tcodex\r\n").as_ref()),
+            Ok(Some("claude".into()))
+        );
+    }
+
+    // ---- rows 13 and 16: how the lookup picks an Agent -------------------------------------------
+
+    fn store_with(turtle: &str) -> (Store, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("resources.ttl"), turtle).unwrap();
+        (hali::storage::load(dir.path()).unwrap(), dir)
+    }
+
+    #[test]
+    fn first_by_iri_among_duplicates() {
+        let hi = "ffffffff-ffff-7fff-bfff-ffffffffffff";
+        let lo = "00000000-0000-7000-8000-000000000000";
+        let turtle = format!(
+            "<urn:uuid:{hi}> <{RDF_TYPE}> <{PROV}SoftwareAgent> ; <{NAME}> \"dup\" .\n\
+             <urn:uuid:{lo}> <{RDF_TYPE}> <{PROV}SoftwareAgent> ; <{NAME}> \"dup\" .\n"
+        );
+        let (mut store, _dir) = store_with(&turtle);
+        let want = ids(1); // Resource, record, Person
+        resource::add(
+            &ctx(1, Some("dup")),
+            &mut store,
+            &facts("/data/notes.txt"),
+            None,
+            "nate",
+        )
+        .unwrap();
+        let after = triples(&store);
+        assert_eq!(count_typed(&after, "SoftwareAgent"), 2, "no Agent minted");
+        assert!(after.contains(&nt(
+            &urn(&want[1]),
+            &format!("{PROV}wasAttributedTo"),
+            &format!("<{}>", urn(lo))
+        )));
+    }
+
+    #[test]
+    fn person_with_the_same_name_is_not_reused() {
+        let (mut store, _dir) = empty_store();
+        resource::add(
+            &ctx(1, None),
+            &mut store,
+            &facts("/data/notes.txt"),
+            None,
+            "nate",
+        )
+        .unwrap();
+        let want = ids(2); // Resource, record, SoftwareAgent
+        resource::add(
+            &ctx(2, Some("nate")),
+            &mut store,
+            &facts("/data/other.txt"),
+            None,
+            "nate",
+        )
+        .unwrap();
+        let after = triples(&store);
+        assert_eq!(count_typed(&after, "SoftwareAgent"), 1);
+        assert_eq!(count_typed(&after, "Person"), 1);
+        assert!(after.contains(&nt(
+            &urn(&want[1]),
+            &format!("{PROV}wasAttributedTo"),
+            &format!("<{}>", urn(&want[2]))
+        )));
+        assert!(after.contains(&nt(
+            &urn(&want[2]),
+            &format!("{PROV}actedOnBehalfOf"),
+            &format!("<{}>", urn(P))
+        )));
     }
 
     // ---- row 4: the same name reuses the Agent ---------------------------------------------

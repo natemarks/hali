@@ -27,3 +27,13 @@ Modestly cross-cutting (shared `catalog_quads` for add and scan): implementer on
 Guards: existing goldens unchanged (no `--agent` means byte-identical output); `hali schema` output unchanged.
 
 Tests set HOME, XDG_STATE_HOME and the data dir to temp dirs and clear `HALI_AGENT` unless a test sets it.
+
+## Reviewer rows (update)
+| # | Criterion | Check |
+|---|---|---|
+| 13 | Among several SoftwareAgents with the same name the first by IRI is used and none is minted | `core_agent::first_by_iri_among_duplicates` |
+| 14 | An Agent is minted only when a record is written: `add` of a cataloged path and `scan` with nothing new or only moves leave the store byte-identical | `cli_agent::nothing_minted_without_a_record` |
+| 15 | A valid `--agent` with an invalid `HALI_AGENT` is exit 2 | `core_agent::agent_name_rules`, `cli_agent::invalid_names_usage` |
+| 16 | An Agent named like the user Person is still minted; the Person is not reused | `core_agent::person_with_the_same_name_is_not_reused` |
+| 17 | A multi-path `add --agent` mints one SoftwareAgent for all records | `cli_agent::multi_path_add_mints_one_agent` |
+| 18 | Names are trimmed before the control-character check (`claude\n` is `claude`) | `core_agent::agent_name_rules` |

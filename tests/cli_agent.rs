@@ -507,6 +507,70 @@ mod goal {
         }
     }
 
+    // ---- rows 14 and 17: an Agent is minted only when a record is written -------------------------
+
+    #[test]
+    fn nothing_minted_without_a_record() {
+        // add of an already cataloged path
+        let env = Env::with_note();
+        let before = std::fs::read(env.resources_ttl()).unwrap();
+        let path = s(&env.files().join("notes.txt"));
+        ok(&env.run(2, &[], ["--json", "--agent", "claude", "add", &path]));
+        assert_eq!(std::fs::read(env.resources_ttl()).unwrap(), before);
+        assert_eq!(env.count_typed("SoftwareAgent"), 0);
+
+        // scan with nothing new
+        let env = Env::new();
+        env.file("a.txt", b"alpha\n");
+        ok(&env.run(1, &[], ["--json", "scan", &s(&env.files())]));
+        let before = std::fs::read(env.resources_ttl()).unwrap();
+        ok(&env.run(
+            2,
+            &[],
+            ["--json", "--agent", "claude", "scan", &s(&env.files())],
+        ));
+        assert_eq!(std::fs::read(env.resources_ttl()).unwrap(), before);
+        assert_eq!(env.count_typed("SoftwareAgent"), 0);
+
+        // scan that only relinks a moved file
+        let env = Env::new();
+        let from = env.file("a.txt", b"alpha\n");
+        ok(&env.run(1, &[], ["--json", "scan", &s(&env.files())]));
+        std::fs::create_dir(env.files().join("sub")).unwrap();
+        std::fs::rename(from, env.files().join("sub").join("a.txt")).unwrap();
+        let out = ok(&env.run(
+            2,
+            &[],
+            [
+                "--json",
+                "--agent",
+                "claude",
+                "scan",
+                &s(&env.files()),
+                "--prune",
+            ],
+        ));
+        assert_eq!(out["added"].as_array().map(Vec::len), Some(0), "{out}");
+        assert_eq!(env.count_typed("SoftwareAgent"), 0);
+        assert_eq!(env.count_typed("Person"), 1);
+    }
+
+    #[test]
+    fn multi_path_add_mints_one_agent() {
+        let env = Env::new();
+        let a = env.file("a.txt", b"alpha\n");
+        let b = env.file("b.txt", b"beta\n");
+        ok(&env.run(
+            1,
+            &[],
+            ["--json", "--agent", "claude", "add", &s(&a), &s(&b)],
+        ));
+        assert_eq!(env.count_typed("SoftwareAgent"), 1);
+        let first = env.attributed_to(&s(&a));
+        assert_eq!(first["name"], "claude");
+        assert_eq!(env.attributed_to(&s(&b))["id"], first["id"]);
+    }
+
     // ---- row 9: invalid names are usage errors, before the store is read --------------------------
 
     fn usage_error(env: &Env, envs: &[(&str, OsString)], args: &[&str], what: &str) {
@@ -585,6 +649,13 @@ mod goal {
             ] {
                 usage_error(&env, &envs, &args, &format!("HALI_AGENT {label}: {args:?}"));
             }
+            // A valid --agent does not excuse an invalid HALI_AGENT.
+            usage_error(
+                &env,
+                &envs,
+                &["--json", "--agent", "claude", "add", &p],
+                &format!("HALI_AGENT {label} with a valid --agent"),
+            );
             // `schema` does not read the identity.
             let out = env.run(5, &envs, ["--json", "schema"]);
             assert_eq!(out.code, Some(0), "HALI_AGENT {label}: {}", out.stderr);
