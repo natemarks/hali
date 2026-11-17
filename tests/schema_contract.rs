@@ -285,7 +285,6 @@ mod goal {
         "cli_scan_roots__scan_list_json",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_23: &[(&str, &str)] = &[
         ("cli_dry_run__scan_forget_root_dry_run_json", "scan"),
         ("cli_scan_roots__bare_scan_json", "scan"),
@@ -309,7 +308,6 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_22);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_21);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_24);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_23);
         // The goldens #24 rewrites are hidden without the goal feature (see `goldens`), and so
         // are their rows.
@@ -382,7 +380,6 @@ mod goal {
             pending_24 = &[];
         }
         let mut pending_23: &[&str] = GOAL_SNAPS_23;
-        #[cfg(feature = "goal")]
         {
             pending_23 = &[];
         }
@@ -518,7 +515,6 @@ mod goal {
         assert!(goldens.len() >= 79, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 85, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 89, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 94, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
@@ -2289,7 +2285,6 @@ mod goal {
     /// #23: the `scan` schema also covers the three outputs of the remembered roots: a bare scan
     /// (`roots` and `unavailable` where `root` was), `--list` and `--forget-root` (real and
     /// dry-run). `scan <root>` keeps its shape and `schema_version` stays 1.
-    #[cfg(feature = "goal")]
     #[test]
     fn scan_schema_covers_remembered_roots() {
         let entry = || {

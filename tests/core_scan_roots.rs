@@ -25,7 +25,6 @@
 //! `Scanned` is the same as for one root (counts, lists, `truncated`); the CLI adds `roots`
 //! and `unavailable` to what it prints.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::resource::{self, FileFacts, parse_media_pattern};
     use hali::core::scan::{self, Prune, RootScan, ScanOptions, Scanned, Unhashable};

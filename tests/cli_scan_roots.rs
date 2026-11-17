@@ -42,7 +42,6 @@
 //! Every run pins `HALI_TEST_NOW` and `HALI_TEST_ID_SEED=1`; setup runs use `setup`, which
 //! gives each run its own seed so that ids never repeat.
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::{Value, json};

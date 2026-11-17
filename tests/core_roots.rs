@@ -20,7 +20,6 @@
 //! JSON of that shape, has another `version`, or holds a root that is empty or not absolute is an
 //! error, and so is one whose entries have the wrong types.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::roots::{RootEntry, forget, parse, remember, serialise};
 

@@ -14,7 +14,6 @@
 //!       and the file with mode 0600, and leaves no other file behind. A failure is
 //!       `Error::Io` with a path that is, or is under, the one that failed.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::storage::Error;
     use hali::storage::state::{ROOTS_FILE, read_roots, write_roots};

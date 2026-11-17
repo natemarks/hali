@@ -5,7 +5,6 @@
 //! `$XDG_STATE_HOME/hali`, else `$HOME/.local/state/hali`; empty values and a relative
 //! `XDG_STATE_HOME` are ignored; with neither it is unresolvable.
 
-#[cfg(feature = "goal")]
 mod goal {
     use std::collections::HashMap;
     use std::path::PathBuf;
