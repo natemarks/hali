@@ -957,7 +957,7 @@ mod goal {
                     std::fs::remove_dir_all(&b).unwrap();
                     std::fs::write(&b, "now a file\n").unwrap();
                 }
-                _ => std::fs::set_permissions(&b, std::fs::Permissions::from_mode(0)).unwrap(),
+                _ => std::fs::set_permissions(&b, std::fs::Permissions::from_mode(0o000)).unwrap(),
             }
             std::fs::remove_file(env.dir("a").join("a2.txt")).unwrap();
             env.put("a", "a3.txt", b"a three\n");
