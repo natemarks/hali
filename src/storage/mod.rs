@@ -145,7 +145,8 @@ pub fn to_turtle(store: &Store, file: File) -> String {
 /// Serializes triples as the Turtle of `to_turtle` without its header line (spec §3.4, §9.9): the
 /// fixed prefix table, then the triples sorted and grouped. Every character for which `escape`
 /// is true is written as a Turtle `\uXXXX` or `\UXXXXXXXX` escape, and an IRI that holds one is
-/// written whole, never as a prefixed name. A blank node label that holds one gets a new label,
+/// written whole, never as a prefixed name. A blank node label that holds one, or that is not a
+/// Turtle `BLANK_NODE_LABEL` (such as one with `:`, which `BNODE` can make), gets a new label,
 /// since a label cannot carry an escape. The caller keeps layout characters (LF, TAB) out of
 /// `escape`.
 pub fn turtle_document(mut triples: Vec<Triple>, escape: impl Fn(char) -> bool) -> String {
@@ -160,9 +161,11 @@ pub fn turtle_document(mut triples: Vec<Triple>, escape: impl Fn(char) -> bool) 
 
     // An IRI with a character to escape is serialized as a stand-in that no prefix can shorten,
     // then put back whole in angle brackets. A blank node label cannot hold an escape, so a label
-    // with such a character is replaced by a safe one. Both reach into triple terms.
+    // with such a character, or one Turtle's grammar rejects, is replaced by a safe one. Both
+    // reach into triple terms.
     let marker = stand_in_marker(&triples);
-    let relabel_prefix = relabel_prefix(&triples, &escape);
+    let needs_relabel = |label: &str| label.chars().any(&escape) || !is_turtle_label(label);
+    let relabel_prefix = relabel_prefix(&triples, &needs_relabel);
     let mut stand_ins: Vec<String> = Vec::new();
     let mut stand_in = |iri: NamedNode| {
         if !iri.as_str().chars().any(&escape) {
@@ -172,7 +175,7 @@ pub fn turtle_document(mut triples: Vec<Triple>, escape: impl Fn(char) -> bool) 
         NamedNode::new_unchecked(format!("{marker}{}", stand_ins.len() - 1))
     };
     let relabel = |b: BlankNode| match &relabel_prefix {
-        Some(prefix) if b.as_str().chars().any(&escape) => {
+        Some(prefix) if needs_relabel(b.as_str()) => {
             let hex: String = b.as_str().bytes().map(|x| format!("{x:02x}")).collect();
             BlankNode::new_unchecked(format!("{prefix}{hex}"))
         }
@@ -246,10 +249,10 @@ fn safe_triple(
     Triple::new(subject, predicate, object)
 }
 
-/// When a blank node label of `triples` holds a character to escape, a prefix that no label
-/// starts with: such a label becomes the prefix and the hex of its UTF-8 bytes, which is
-/// deterministic for the same data and never equal to another label.
-fn relabel_prefix(triples: &[Triple], escape: &impl Fn(char) -> bool) -> Option<String> {
+/// When a blank node label of `triples` needs a new label, a prefix that no label starts with:
+/// such a label becomes the prefix and the hex of its UTF-8 bytes, which is deterministic for
+/// the same data and never equal to another label.
+fn relabel_prefix(triples: &[Triple], needs_relabel: &impl Fn(&str) -> bool) -> Option<String> {
     fn labels(t: &Triple, out: &mut Vec<String>) {
         if let NamedOrBlankNode::BlankNode(b) = &t.subject {
             out.push(b.as_str().to_string());
@@ -264,7 +267,7 @@ fn relabel_prefix(triples: &[Triple], escape: &impl Fn(char) -> bool) -> Option<
     for t in triples {
         labels(t, &mut all);
     }
-    if !all.iter().any(|l| l.chars().any(escape)) {
+    if !all.iter().any(|l| needs_relabel(l)) {
         return None;
     }
     let mut salt = 0;
@@ -275,6 +278,32 @@ fn relabel_prefix(triples: &[Triple], escape: &impl Fn(char) -> bool) -> Option<
         }
         salt += 1;
     }
+}
+
+/// Whether `label` matches Turtle's `BLANK_NODE_LABEL` after `_:`:
+/// `(PN_CHARS_U | [0-9]) ((PN_CHARS | '.')* PN_CHARS)?`.
+fn is_turtle_label(label: &str) -> bool {
+    fn pn_chars_base(c: char) -> bool {
+        matches!(c,
+            'A'..='Z' | 'a'..='z'
+            | '\u{C0}'..='\u{D6}' | '\u{D8}'..='\u{F6}' | '\u{F8}'..='\u{2FF}'
+            | '\u{370}'..='\u{37D}' | '\u{37F}'..='\u{1FFF}' | '\u{200C}'..='\u{200D}'
+            | '\u{2070}'..='\u{218F}' | '\u{2C00}'..='\u{2FEF}' | '\u{3001}'..='\u{D7FF}'
+            | '\u{F900}'..='\u{FDCF}' | '\u{FDF0}'..='\u{FFFD}' | '\u{10000}'..='\u{EFFFF}')
+    }
+    fn pn_chars(c: char) -> bool {
+        pn_chars_base(c)
+            || matches!(c, '_' | '-' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')
+    }
+    let mut chars = label.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(pn_chars_base(first) || first == '_' || first.is_ascii_digit()) {
+        return false;
+    }
+    let rest: Vec<char> = chars.collect();
+    rest.iter().all(|&c| pn_chars(c) || c == '.') && rest.last().is_none_or(|&c| pn_chars(c))
 }
 
 /// A stand-in IRI prefix that no term of `triples` contains.

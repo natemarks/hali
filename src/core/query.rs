@@ -103,6 +103,10 @@ fn invalid_query(parser_message: &str) -> Error {
     Error::usage(&format!("invalid SPARQL query: {message}"))
 }
 
+/// The query worker's stack: well above the 8 MiB main stack that `parse` runs on, so a query
+/// nested deeply enough to parse also evaluates, in a debug build too.
+const WORKER_STACK: usize = 64 * 1024 * 1024;
+
 /// Evaluates `query` over `store`, within `limits`. Reads the store only.
 ///
 /// The evaluation runs on a worker thread and the caller waits at most `limits.timeout` for it,
@@ -116,9 +120,16 @@ pub fn run(store: &Store, query: &Prepared, limits: Limits) -> Result<Answer, Er
     let worker = {
         let token = token.clone();
         let text = query.text.clone();
-        std::thread::spawn(move || {
-            let _ = sender.send(evaluate(&merged, &text, token, limits.max_results));
-        })
+        std::thread::Builder::new()
+            .name("hali-query".into())
+            .stack_size(WORKER_STACK)
+            .spawn(move || {
+                let _ = sender.send(evaluate(&merged, &text, token, limits.max_results));
+            })
+    };
+    // A worker that cannot start leaves the query unanswered for lack of resources.
+    let Ok(worker) = worker else {
+        return Err(Error::query_failed("too_large", None));
     };
     match receiver.recv_timeout(limits.timeout) {
         Ok(answer) => answer,
