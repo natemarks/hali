@@ -43,7 +43,6 @@
 //! (the state dir is not created) and the rest of the environment is cleared, so the real store,
 //! config and `~/.local/state` are never touched. The temp root is canonicalised.
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use oxrdf::{Literal, NamedNode, Term, Triple};

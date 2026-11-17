@@ -303,7 +303,6 @@ mod goal {
         "cli_query__select_json",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_9: &[(&str, &str)] = &[
         ("cli_query__ask_json", "query"),
         ("cli_query__select_json", "query"),
@@ -326,7 +325,6 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_21);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_24);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_23);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_9);
         // The goldens #24 rewrites are hidden without the goal feature (see `goldens`), and so
         // are their rows.
@@ -403,7 +401,6 @@ mod goal {
             pending_23 = &[];
         }
         let mut pending_9: &[&str] = GOAL_SNAPS_9;
-        #[cfg(feature = "goal")]
         {
             pending_9 = &[];
         }
@@ -541,7 +538,6 @@ mod goal {
         assert!(goldens.len() >= 85, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 89, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 94, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 97, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
@@ -3485,7 +3481,6 @@ mod goal {
     /// not the hali envelope (no `schema_version`), a SELECT has `head.vars` and
     /// `results.bindings`, an ASK has an empty `head` and a `boolean`, never both; a term is a
     /// `uri`, `literal`, `bnode` or `triple`.
-    #[cfg(feature = "goal")]
     #[test]
     fn query_schema_accepts_and_rejects() {
         let uri = |v: &str| json!({"type": "uri", "value": v});
@@ -3674,7 +3669,6 @@ mod goal {
     }
 
     /// #9: the schema says what the command prints, in its title and by what it leaves out.
-    #[cfg(feature = "goal")]
     #[test]
     fn query_schema_is_listed() {
         let listed = fetch_list();
@@ -3705,7 +3699,6 @@ mod goal {
     /// #9: the `error` schema has branches for the two rules `hali query` adds: `READ_ONLY_QUERY`
     /// carries no details; `QUERY_FAILED` carries a reason, and the service for the `service`
     /// reason.
-    #[cfg(feature = "goal")]
     #[test]
     fn query_error_branches() {
         let v = validator("error");

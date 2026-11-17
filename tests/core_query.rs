@@ -41,7 +41,6 @@
 //! The tests read tests/fixtures/relations (5 Resources, Concept `ml`), the embedded core alone
 //! (a data dir that does not exist) and stores built in a temp dir. Every SELECT has an ORDER BY.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::Error;
     use hali::core::query::{Answer, Limits, Prepared, parse, run};

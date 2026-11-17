@@ -1,7 +1,0 @@
-tests/core_query.rs
-tests/cli_query.rs
-tests/sparql_guard.rs
-tests/schema_contract.rs
-tests/snapshots/cli_query__select_json.snap
-tests/snapshots/cli_query__ask_json.snap
-tests/snapshots/cli_query__read_only_query_json_envelope.snap
