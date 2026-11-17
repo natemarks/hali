@@ -1,5 +1,7 @@
 .DEFAULT_GOAL := help
 SHELL := $(shell which bash)
+# A nested `make bench` (from `make goal`) would end its output with "Leaving directory".
+MAKEFLAGS += --no-print-directory
 
 help: ## Show this help
 	@fgrep -h "##" $(MAKEFILE_LIST) | fgrep -v fgrep | sed -e 's/\\$$//' | sed -e 's/##//'
@@ -33,6 +35,11 @@ test-external: ## run the #[ignore]d tests that need outside software (shared-mi
 
 integration: ## run integration tests
 	cargo test --features test-hooks --test '*'
+
+bench: ## latency benchmark: hali find --json over 1k and 10k Resources (release build)
+	HALI_BENCH=1 cargo test --release --locked --test bench_find -- --ignored --nocapture --test-threads=1
+
+.PHONY: bench
 
 static-check: fmt-check clippy dead-code unit audit shellcheck ## run all static checks, check-only (CI)
 
