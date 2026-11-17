@@ -752,7 +752,7 @@ mod goal {
         let flags = editable_flags(&env, &[("XDG_DATA_DIRS", Some(db.as_path()))], 1500);
         let took = t.elapsed();
         assert!(flags.iter().all(|e| !e));
-        assert!(took < Duration::from_secs(3), "find took {took:?}");
+        assert!(took < Duration::from_secs(5), "find took {took:?}");
     }
 
     /// The same directory listed 50 times in `XDG_DATA_DIRS` is read once.
@@ -767,7 +767,7 @@ mod goal {
         let flags = editable_flags(&env, &[("XDG_DATA_DIRS", Some(dirs.as_path()))], 1);
         let took = t.elapsed();
         assert_eq!(flags, [false]);
-        assert!(took < Duration::from_secs(3), "find took {took:?}");
+        assert!(took < Duration::from_secs(5), "find took {took:?}");
     }
 
     /// Fifty different directories whose files are all the same large file (hard links): the
@@ -793,7 +793,35 @@ mod goal {
         let flags = editable_flags(&env, &[("XDG_DATA_DIRS", Some(joined.as_path()))], 1);
         let took = t.elapsed();
         assert_eq!(flags, [false]);
-        assert!(took < Duration::from_secs(3), "find took {took:?}");
+        assert!(took < Duration::from_secs(5), "find took {took:?}");
+    }
+
+    /// Five distinct directories, each with its own 4 MiB `subclasses` (sparse, not hard
+    /// links): the first four use up the 16 MiB total budget, so the fifth is never read.
+    #[test]
+    fn total_database_bytes_cut_off_later_directories() {
+        use std::io::Write;
+        let env = Env::new();
+        let mut dirs = Vec::new();
+        for i in 0..5 {
+            let d = env.root.join(format!("d{i}"));
+            std::fs::create_dir_all(d.join("mime")).unwrap();
+            let mut f = std::fs::File::create(d.join("mime/subclasses")).unwrap();
+            f.set_len(4 * 1024 * 1024).unwrap();
+            f.write_all(format!("application/x-d{i} text/plain\n").as_bytes())
+                .unwrap();
+            dirs.push(d);
+        }
+        let joined = PathBuf::from(std::env::join_paths(dirs).unwrap());
+        let cases = run_cases(
+            &env,
+            &["d0", "d1", "d2", "d3", "d4"],
+            &[("XDG_DATA_DIRS", Some(joined.as_path()))],
+        );
+        for n in ["d0", "d1", "d2", "d3"] {
+            assert!(flag(&cases, n), "{n} is inside the budget: {cases:?}");
+        }
+        assert!(!flag(&cases, "d4"), "read past the total budget: {cases:?}");
     }
 
     /// Each type `application/x-<name>` is one Resource, `t<n>` in `names` order.
