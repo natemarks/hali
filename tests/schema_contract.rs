@@ -389,7 +389,6 @@ mod goal {
             pending_23 = &[];
         }
         let mut pending_5: &[&str] = GOAL_SNAPS_5;
-        #[cfg(feature = "goal")]
         {
             pending_5 = &[];
         }
@@ -527,7 +526,6 @@ mod goal {
         assert!(goldens.len() >= 85, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 89, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 94, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 95, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)

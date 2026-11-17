@@ -12,10 +12,8 @@
 //! is created by a real mutating run (empty, regular, 0600) and never by a reader or a dry
 //! run; when it is absent a reader reads without a lock.
 
-#[cfg(feature = "goal")]
 mod lockkit;
 
-#[cfg(feature = "goal")]
 mod goal {
     use crate::lockkit::*;
     use serde_json::{Value, json};

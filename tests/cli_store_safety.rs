@@ -8,10 +8,8 @@
 //! fine); new dirs are created 0700 and new files 0600 whatever the umask; a `.lock` that is
 //! not a regular file is `STORE_IO`. All exit 3.
 
-#[cfg(feature = "goal")]
 mod lockkit;
 
-#[cfg(feature = "goal")]
 mod goal {
     use crate::lockkit::*;
     use std::os::unix::ffi::OsStrExt;

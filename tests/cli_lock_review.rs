@@ -2,10 +2,8 @@
 //! every mutating command, the order of usage checks before the lock (spec §3.3, §9.1), the
 //! permissions of what hali creates whatever the umask, and a non-regular `.lock` for readers.
 
-#[cfg(feature = "goal")]
 mod lockkit;
 
-#[cfg(feature = "goal")]
 mod goal {
     use crate::lockkit::*;
     use serde_json::Value;

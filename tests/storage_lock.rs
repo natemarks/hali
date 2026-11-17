@@ -17,7 +17,6 @@
 //! Errors convert to the CLI's error through `hali::core::Error::from(storage_error)`, whose
 //! `rule`, `details` and `exit_code()` are what these tests read.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::Error as CoreError;
     use hali::storage::{self, File, Writer};

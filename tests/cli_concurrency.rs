@@ -6,10 +6,8 @@
 //! together; the readers keep reading (at least twice) until every writer of the round has
 //! exited. 5 rounds, so 20 writes in all. Every run uses the real binary and temp dirs.
 
-#[cfg(feature = "goal")]
 mod lockkit;
 
-#[cfg(feature = "goal")]
 mod goal {
     use crate::lockkit::*;
     use serde_json::Value;

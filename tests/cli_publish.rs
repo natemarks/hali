@@ -10,10 +10,8 @@
 //! makes a writer create the file `<marker>` just before the rename and then sleep, so a test can
 //! kill it mid-publish.
 
-#[cfg(feature = "goal")]
 mod lockkit;
 
-#[cfg(feature = "goal")]
 mod goal {
     use crate::lockkit::*;
     use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
