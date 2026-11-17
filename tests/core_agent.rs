@@ -23,7 +23,6 @@
 //!
 //! `SeededIdGen::new(1)` yields R1, C1, P, A (the fourth id) in order.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::config::agent_name;
     use hali::core::resource::{self, FileFacts};

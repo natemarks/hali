@@ -16,7 +16,6 @@
 //! Every run pins `HALI_TEST_NOW` and `HALI_TEST_ID_SEED` (a second run in one store uses
 //! another seed so that ids never repeat). The temp dir is shown as `/TMP` in captured output.
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::Value;

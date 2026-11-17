@@ -298,7 +298,6 @@ mod goal {
         "cli_dry_run__add_agent_dry_run_json",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_13: &[(&str, &str)] = &[
         ("cli_agent__show_agent_json", "show"),
         ("cli_dry_run__add_agent_dry_run_json", "add"),
@@ -321,7 +320,6 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_21);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_24);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_23);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_13);
         // The goldens #24 rewrites are hidden without the goal feature (see `goldens`), and so
         // are their rows.
@@ -398,7 +396,6 @@ mod goal {
             pending_23 = &[];
         }
         let mut pending_13: &[&str] = GOAL_SNAPS_13;
-        #[cfg(feature = "goal")]
         {
             pending_13 = &[];
         }
