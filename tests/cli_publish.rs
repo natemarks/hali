@@ -75,11 +75,10 @@ mod goal {
         std::fs::write(&target, b"hello\n").unwrap();
         let out = env.run(["--json", "add", target.to_str().unwrap()]);
         assert_eq!(out.code, Some(0), "stderr: {}", out.stderr);
-        for name in ["resources.ttl"] {
-            let meta = std::fs::symlink_metadata(env.data().join(name)).unwrap();
-            assert!(meta.file_type().is_file(), "{name}");
-            assert_eq!(meta.permissions().mode() & 0o777, 0o600, "{name}");
-        }
+        let name = "resources.ttl";
+        let meta = std::fs::symlink_metadata(env.data().join(name)).unwrap();
+        assert!(meta.file_type().is_file(), "{name}");
+        assert_eq!(meta.permissions().mode() & 0o777, 0o600, "{name}");
         let names: Vec<String> = std::fs::read_dir(env.data())
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())
