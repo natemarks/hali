@@ -42,6 +42,7 @@ mod goal {
                 "error",
                 "find",
                 "forget",
+                "new",
                 "query",
                 "refresh",
                 "relate",
@@ -71,6 +72,25 @@ mod goal {
         for unknown in ["", "concept", "nope", "Error", "concept  add"] {
             assert!(schema::get(unknown).is_none(), "{unknown:?}");
         }
+    }
+
+    /// #25: `new` is registered, between `forget` and `query`, and its schema is `hali new
+    /// --json`. (The exact list above gains `"new"` with the implementation.)
+    #[test]
+    fn new_is_registered() {
+        let names = names();
+        let at = names
+            .iter()
+            .position(|n| n == "new")
+            .expect("`new` is listed");
+        assert_eq!(names[at - 1], "forget");
+        assert_eq!(names[at + 1], "query");
+        let doc = schema::get("new").expect("a schema for `new`");
+        assert_eq!(doc["title"], "hali new --json");
+        assert_eq!(
+            doc["$schema"],
+            "https://json-schema.org/draft/2020-12/schema"
+        );
     }
 
     #[test]

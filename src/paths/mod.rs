@@ -236,3 +236,152 @@ pub fn ref_path(arg: &str) -> Option<String> {
 fn absolute(path: &Path) -> PathBuf {
     std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
 }
+
+/// Why `files.dir` cannot hold the files `hali new` creates (spec §9.1 **New:**).
+#[derive(Debug, PartialEq)]
+pub enum FilesDirError {
+    /// It cannot be resolved: `HOME` is not set.
+    Unresolved,
+    /// `[files] dir` is a relative path (as configured).
+    Relative { path: String },
+    /// Its real path is not UTF-8 (shown lossily).
+    NonUtf8 { path: String },
+    /// Something other than a directory is there (its real path).
+    NotADirectory { path: String },
+    /// It is one of `own` (hali's data dir or state dir) or inside one (its real path).
+    OwnDir { path: String },
+}
+
+/// The real path `files.dir` (see `files_dir`) has, or would have once created, for
+/// `hali new`: a relative one is refused, and so is one that is in any of the `own` dirs (each
+/// resolved the same way), that is not UTF-8, or that holds something other than a directory.
+/// Creates nothing.
+pub fn new_files_dir(
+    env: impl Fn(&str) -> Option<String>,
+    configured: Option<&str>,
+    own: &[&Path],
+) -> Result<String, FilesDirError> {
+    let lossy = |p: &Path| p.to_string_lossy().into_owned();
+    let dir = files_dir(env, configured).ok_or(FilesDirError::Unresolved)?;
+    if !dir.is_absolute() {
+        return Err(FilesDirError::Relative { path: lossy(&dir) });
+    }
+    let (real, usable) = real_target(&dir);
+    // A relative own dir (`HALI_DATA_DIR` is taken as given) is compared by its absolute form.
+    if own
+        .iter()
+        .filter_map(|d| std::path::absolute(d).ok())
+        .any(|d| real.starts_with(real_target(&d).0))
+    {
+        return Err(FilesDirError::OwnDir { path: lossy(&real) });
+    }
+    let Some(text) = real.to_str() else {
+        return Err(FilesDirError::NonUtf8 { path: lossy(&real) });
+    };
+    if !usable {
+        return Err(FilesDirError::NotADirectory {
+            path: text.to_string(),
+        });
+    }
+    Ok(text.to_string())
+}
+
+/// The real path of an absolute path that may not exist yet, walked one component at a time:
+/// each existing component is resolved through symlinks; after the first missing one the rest
+/// are applied lexically, and a `..` that pops the last missing one resumes the resolving from
+/// the real prefix. Once a component makes the path unusable, the rest (`..` included) is
+/// appended as written, so the reported path still names the blocking component. The flag is
+/// false when the deepest existing prefix is not a directory (a file, a dangling symlink,
+/// anything else), so the path cannot be a directory.
+fn real_target(path: &Path) -> (PathBuf, bool) {
+    use std::path::Component;
+    let mut real = PathBuf::from("/");
+    let mut missing = 0usize;
+    let mut usable = true;
+    for part in path.components() {
+        match part {
+            Component::Normal(name) => {
+                let next = real.join(name);
+                if missing > 0 || !usable {
+                    missing += 1;
+                    real = next;
+                } else if std::fs::symlink_metadata(&next).is_err() {
+                    missing = 1;
+                    real = next;
+                } else {
+                    match std::fs::canonicalize(&next) {
+                        Ok(resolved) => {
+                            usable = resolved.is_dir();
+                            real = resolved;
+                        }
+                        Err(_) => {
+                            usable = false;
+                            real = next;
+                        }
+                    }
+                }
+            }
+            // Past a component that makes the path unusable, `..` stays as written.
+            Component::ParentDir if !usable => real.push(".."),
+            Component::ParentDir => {
+                real.pop();
+                missing = missing.saturating_sub(1);
+            }
+            Component::RootDir => real = PathBuf::from("/"),
+            Component::CurDir | Component::Prefix(_) => {}
+        }
+    }
+    (real, usable)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_files_dir_resolves_the_real_target_without_creating_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let real = root.join("real");
+        std::fs::create_dir(&real).unwrap();
+        std::os::unix::fs::symlink(&real, root.join("link")).unwrap();
+        let home = root.to_str().unwrap().to_string();
+        let env = |k: &str| (k == "HOME").then(|| home.clone());
+        let data = root.join("data");
+        let own = [data.as_path()];
+        let get = |dir: &str| new_files_dir(env, Some(dir), &own);
+
+        // Through a symlink, and through `..` past a missing component; nothing is made.
+        let linked = format!("{home}/link/a/b");
+        assert_eq!(get(&linked), Ok(format!("{home}/real/a/b")));
+        let dotted = format!("{home}/nope/../real/c");
+        assert_eq!(get(&dotted), Ok(format!("{home}/real/c")));
+        assert!(!real.join("a").exists() && !root.join("nope").exists());
+        assert_eq!(get("~/real"), Ok(format!("{home}/real")));
+
+        assert_eq!(
+            get("docs"),
+            Err(FilesDirError::Relative {
+                path: "docs".to_string()
+            })
+        );
+        let inside = format!("{home}/data/files");
+        assert_eq!(
+            get(&inside),
+            Err(FilesDirError::OwnDir {
+                path: inside.clone()
+            })
+        );
+        std::fs::write(root.join("afile"), b"").unwrap();
+        let file = format!("{home}/afile");
+        assert_eq!(
+            get(&file),
+            Err(FilesDirError::NotADirectory { path: file.clone() })
+        );
+        let none = |_: &str| None;
+        assert_eq!(
+            new_files_dir(none, None, &own),
+            Err(FilesDirError::Unresolved)
+        );
+    }
+}

@@ -1,0 +1,5 @@
+---
+source: tests/cli_new.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"FILES_DIR_UNUSABLE","message":"cannot keep new files in docs: files.dir is not an absolute path; nothing was created","details":{"path":"docs","reason":"relative"},"suggested_fix":"Set [files] dir in the config file to an absolute path, or to one that starts with ~/.","suggested_command":null}}

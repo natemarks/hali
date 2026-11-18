@@ -731,6 +731,7 @@ mod goal {
                 "error",
                 "find",
                 "forget",
+                "new",
                 "query",
                 "refresh",
                 "relate",

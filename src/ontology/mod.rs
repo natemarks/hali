@@ -56,6 +56,7 @@ pub mod dcterms {
     pub const TITLE: &str = "http://purl.org/dc/terms/title";
     pub const MODIFIED: &str = "http://purl.org/dc/terms/modified";
     pub const ISSUED: &str = "http://purl.org/dc/terms/issued";
+    pub const CREATED: &str = "http://purl.org/dc/terms/created";
     pub const FORMAT: &str = "http://purl.org/dc/terms/format";
     pub const MEDIA_TYPE: &str = "http://purl.org/dc/terms/MediaType";
     pub const SUBJECT: &str = "http://purl.org/dc/terms/subject";
