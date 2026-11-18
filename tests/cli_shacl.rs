@@ -68,6 +68,7 @@ impl Env {
     fn files(&self) -> Vec<(String, Vec<u8>)> {
         let mut files: Vec<(String, Vec<u8>)> = std::fs::read_dir(&self.data)
             .unwrap()
+            .filter(|e| e.as_ref().unwrap().file_name() != ".lock")
             .map(|e| {
                 let e = e.unwrap();
                 (
