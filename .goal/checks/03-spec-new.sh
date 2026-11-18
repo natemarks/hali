@@ -4,7 +4,10 @@
 set -uo pipefail
 # Criterion 17 (#25): docs/spec.md states the `new` contract: the §9.1 synopsis with
 # `--path-only`, a **New:** paragraph in §9.1, §9.6 scope naming `new`, and §8 naming the
-# FILES_DIR_UNUSABLE rule, the slug cap and the symlink rule.
+# FILES_DIR_UNUSABLE rule, the slug cap and the symlink rule. Rows 19-20: the **New:** paragraph
+# says the deepest existing prefix of files.dir must be a directory (else `not_a_directory`, in a
+# dry run too), and that `..` after a missing component is resolved against the real prefix
+# (the real path is recorded, never the lexical one).
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 
 status=0
@@ -25,7 +28,8 @@ else
         'files.dir' 'user-dirs' '~/Documents/hali' 'text/markdown' 'dcterms:created' \
         'prov:wasAttributedTo' '--path-only' '--dry-run' '--json' '--yes' 'schema' 'O_EXCL' \
         'O_NOFOLLOW' 'umask' '128' 'untitled' 'usage error' 'real path' 'EDITOR' 'stdin' \
-        'dry_run' 'changes' 'lstat' 'symlink' 'created' 'would create'; do
+        'dry_run' 'changes' 'lstat' 'symlink' 'created' 'would create' \
+        'deepest existing' '`..`'; do
         if ! printf '%s\n' "$para" | grep -qF -- "$what"; then
             echo "MISSING: the **New:** paragraph does not mention: $what"
             status=1

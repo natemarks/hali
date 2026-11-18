@@ -501,4 +501,73 @@ mod goal {
             assert!(e.suggested_fix.is_some(), "{reason}");
         }
     }
+
+    // ---- row 21 and 23: the slug is only letters, digits and `-` ----------------------------------------------
+
+    fn stem(title: &str) -> String {
+        let name = picked(title);
+        name.strip_suffix(".md")
+            .unwrap_or_else(|| panic!("{title:?}: {name}"))
+            .to_string()
+    }
+
+    #[test]
+    fn the_slug_has_only_alphanumerics_and_hyphens() {
+        let many_dotted = "\u{130}".repeat(100);
+        let titles = [
+            "\u{130}STANBUL",
+            "\u{130}",
+            "\u{130}\u{130}\u{130}",
+            "I\u{130} x",
+            "x \u{130}",
+            "e\u{301}",
+            "Re\u{301}sume\u{301}",
+            "\u{301}x\u{301}",
+            "a\u{307}b",
+            "\u{1e9e}",
+            many_dotted.as_str(),
+        ];
+        for title in titles {
+            let s = stem(title);
+            assert!(!s.is_empty(), "{title:?}");
+            assert!(
+                s.chars().all(|c| c.is_alphanumeric() || c == '-'),
+                "{title:?} gives {s:?}"
+            );
+            assert!(!s.starts_with('-') && !s.ends_with('-'), "{title:?}: {s:?}");
+            assert!(s.len() <= 128, "{title:?}: {} bytes", s.len());
+        }
+        // The dotted capital I keeps its letter and loses the combining dot.
+        assert!(stem("\u{130}STANBUL").starts_with('i'));
+        assert!(stem("\u{130}STANBUL").contains("stanbul"));
+    }
+
+    #[test]
+    fn a_title_of_only_combining_marks_is_untitled() {
+        assert_eq!(picked("\u{301}"), "untitled.md");
+        assert_eq!(picked("\u{301}\u{307} \u{301}"), "untitled.md");
+        assert_eq!(picked("\u{301}-\u{307}"), "untitled.md");
+    }
+
+    #[test]
+    fn nfd_titles_drop_the_combining_accent_and_split_the_word() {
+        // Pinned: a combining mark is not alphanumeric, so it is a separator like punctuation
+        // (the accent is dropped). NFC input keeps its precomposed letter; nothing is normalised.
+        assert_eq!(picked("Re\u{301}sume\u{301}"), "re-sume.md");
+        assert_eq!(picked("R\u{e9}sum\u{e9}"), "r\u{e9}sum\u{e9}.md");
+        assert_eq!(picked("e\u{301}"), "e.md");
+    }
+
+    #[test]
+    fn sharp_s_and_final_sigma_are_pinned() {
+        // `char::to_lowercase` per character, no case folding, no context: the sharp s stays,
+        // the capital sharp s lowercases to it, and a final sigma becomes the medial one.
+        assert_eq!(picked("Stra\u{df}e"), "stra\u{df}e.md");
+        assert_eq!(picked("\u{1e9e}"), "\u{df}.md");
+        assert_eq!(picked("STRASSE"), "strasse.md");
+        assert_eq!(
+            picked("\u{39f}\u{394}\u{39f}\u{3a3}"),
+            "\u{3bf}\u{3b4}\u{3bf}\u{3c3}.md"
+        );
+    }
 }

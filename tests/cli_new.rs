@@ -1149,4 +1149,224 @@ mod goal {
         assert_eq!(mode(&env.docs()), 0o700);
         assert_eq!(mode(&env.docs().join("weekly-review.md")), 0o600);
     }
+
+    // ---- row 19: a files.dir that cannot exist is not_a_directory in every mode ----------------------
+
+    /// Everything under `dir`, without following symlinks, for "nothing changed" comparisons.
+    fn tree(dir: &Path) -> Vec<String> {
+        fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for e in entries {
+                let p = e.unwrap().path();
+                let rel = p.strip_prefix(base).unwrap().display().to_string();
+                let meta = std::fs::symlink_metadata(&p).unwrap();
+                if meta.file_type().is_symlink() {
+                    out.push(format!("{rel} -> {:?}", std::fs::read_link(&p).unwrap()));
+                } else if meta.is_dir() {
+                    out.push(format!("{rel}/"));
+                    walk(&p, base, out);
+                } else {
+                    out.push(format!("{rel} ({} B)", meta.len()));
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(dir, dir, &mut out);
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn a_files_dir_that_cannot_exist_is_not_a_directory_with_and_without_dry_run() {
+        for case in [
+            "parent_is_a_file",
+            "deeper_below_a_file",
+            "dangling_symlink",
+        ] {
+            let env = Env::new();
+            let dir = match case {
+                "parent_is_a_file" | "deeper_below_a_file" => {
+                    let file = env.root.join("afile");
+                    std::fs::write(&file, b"keep\n").unwrap();
+                    if case == "parent_is_a_file" {
+                        file.join("sub")
+                    } else {
+                        file.join("a/b")
+                    }
+                }
+                _ => {
+                    let link = env.root.join("dangling");
+                    std::os::unix::fs::symlink(env.root.join("nowhere"), &link).unwrap();
+                    link
+                }
+            };
+            env.config(&format!("[files]\ndir = \"{}\"\n", dir.display()));
+            let before = tree(&env.root);
+
+            // The JSON envelope: the same error in each mode.
+            let mut paths = Vec::new();
+            for args in [
+                vec!["--json", "new", "x"],
+                vec!["--json", "--dry-run", "new", "x"],
+                vec!["--json", "--dry-run", "--path-only", "new", "x"],
+                vec!["--json", "--path-only", "new", "x"],
+            ] {
+                let out = env.run(1, &[], args.clone());
+                let e = unusable(&out, "not_a_directory");
+                assert!(e["details"]["path"].is_string(), "{case} {args:?}: {e}");
+                paths.push(e["details"]["path"].clone());
+                assert_eq!(
+                    tree(&env.root),
+                    before,
+                    "{case} {args:?}: something changed"
+                );
+                env.assert_nothing_created(&format!("{case} {args:?}"));
+            }
+            assert!(
+                paths.windows(2).all(|w| w[0] == w[1]),
+                "{case}: the modes disagree on the path: {paths:?}"
+            );
+
+            // The text form: the same error with and without --dry-run.
+            let mut texts = Vec::new();
+            for args in [
+                vec!["new", "x"],
+                vec!["--dry-run", "new", "x"],
+                vec!["--dry-run", "--path-only", "new", "x"],
+            ] {
+                let out = env.run(1, &[], args.clone());
+                assert_eq!(out.code, Some(3), "{case} {args:?}: {}", out.stderr);
+                assert_eq!(out.stdout, "", "{case} {args:?}");
+                assert!(!out.stderr.is_empty(), "{case} {args:?}");
+                texts.push(out.stderr);
+            }
+            assert!(
+                texts.windows(2).all(|w| w[0] == w[1]),
+                "{case}: the text errors differ: {texts:?}"
+            );
+            assert_eq!(
+                tree(&env.root),
+                before,
+                "{case}: text runs changed something"
+            );
+        }
+    }
+
+    // ---- row 20: `..` after a missing component resolves against the real prefix ------------------
+
+    #[test]
+    fn dotdot_after_a_missing_component_resolves_through_symlinks() {
+        // Chosen contract: the real path is recorded (`<target>/a`), never the lexical
+        // `<home>/link/a`; `..` pops the missing component, then `link` is followed.
+        for dry in [false, true] {
+            let env = Env::new();
+            let target = env.root.join("real");
+            std::fs::create_dir(&target).unwrap();
+            std::os::unix::fs::symlink(&target, env.home().join("link")).unwrap();
+            env.config(&format!(
+                "[files]\ndir = \"{}/nope/../link/a\"\n",
+                env.home().display()
+            ));
+            let mut args = vec!["--json", "new", "Dotted"];
+            if dry {
+                args.insert(1, "--dry-run");
+            }
+            let v = ok(&env.run(1, &[], args));
+            assert_eq!(v["resource"]["path"], "/TMP/real/a/dotted.md", "dry {dry}");
+            assert!(!env.home().join("nope").exists(), "dry {dry}");
+            if dry {
+                assert!(!target.join("a").exists());
+            } else {
+                assert_eq!(names(&target.join("a")), ["dotted.md"]);
+                let ttl = std::fs::read_to_string(env.resources_ttl()).unwrap();
+                assert!(
+                    !ttl.contains("/link/"),
+                    "the lexical path is recorded: {ttl}"
+                );
+            }
+        }
+    }
+
+    // ---- row 22: own dirs through symlinks; a read-only files.dir -------------------------------------
+
+    #[test]
+    fn a_symlink_to_an_own_dir_is_own_dir() {
+        // files.dir is a symlink to a directory inside the data dir, and one into the state dir.
+        let env = Env::with_fixture("store");
+        let inside = env.data().join("files");
+        std::fs::create_dir(&inside).unwrap();
+        let notes = env.root.join("state/hali/notes");
+        std::fs::create_dir_all(&notes).unwrap();
+        let before = env.data_bytes();
+        for (target, name) in [(&inside, "to-data"), (&notes, "to-state")] {
+            let link = env.root.join(name);
+            std::os::unix::fs::symlink(target, &link).unwrap();
+            env.config(&format!("[files]\ndir = \"{}\"\n", link.display()));
+            let out = env.run(1, &[], ["--json", "new", "x"]);
+            unusable(&out, "own_dir");
+            assert_eq!(env.data_bytes(), before, "{name}");
+            assert!(names(target).is_empty(), "{name}: something was created");
+        }
+    }
+
+    #[test]
+    fn an_own_dir_that_is_itself_a_symlink_is_resolved() {
+        // The data dir and the state dir are reached through a symlink; files.dir names the
+        // real directory behind it.
+        let env = Env::new();
+        let real_data = env.root.join("datareal");
+        std::fs::create_dir(&real_data).unwrap();
+        std::os::unix::fs::symlink(&real_data, env.root.join("datalink")).unwrap();
+        env.config(&format!(
+            "[files]\ndir = \"{}\"\n",
+            real_data.join("files").display()
+        ));
+        let out = env.run(
+            1,
+            &[("HALI_DATA_DIR", env.root.join("datalink").into())],
+            ["--json", "new", "x"],
+        );
+        unusable(&out, "own_dir");
+        assert!(names(&real_data).is_empty());
+
+        let env = Env::new();
+        let real_state = env.root.join("statereal");
+        std::fs::create_dir_all(real_state.join("hali")).unwrap();
+        std::os::unix::fs::symlink(&real_state, env.root.join("statelink")).unwrap();
+        env.config(&format!(
+            "[files]\ndir = \"{}\"\n",
+            real_state.join("hali/notes").display()
+        ));
+        let out = env.run(
+            1,
+            &[("XDG_STATE_HOME", env.root.join("statelink").into())],
+            ["--json", "new", "x"],
+        );
+        unusable(&out, "own_dir");
+        assert!(names(&real_state.join("hali")).is_empty());
+    }
+
+    #[test]
+    fn a_read_only_existing_files_dir_is_cannot_create_and_changes_nothing() {
+        let env = Env::with_fixture("store");
+        let ro = env.root.join("ro");
+        std::fs::create_dir(&ro).unwrap();
+        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
+        // A root user can write there regardless.
+        let rooted = std::fs::File::create(ro.join("probe")).is_ok();
+        if !rooted {
+            let before = env.data_bytes();
+            env.config(&format!("[files]\ndir = \"{}\"\n", ro.display()));
+            for title in ["x", "y"] {
+                let out = env.run(1, &[], ["--json", "new", title]);
+                let e = unusable(&out, "cannot_create");
+                assert_eq!(e["details"]["path"], "/TMP/ro");
+                assert_eq!(env.data_bytes(), before, "the store changed");
+                assert!(names(&ro).is_empty(), "something was created");
+            }
+        }
+        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
 }
