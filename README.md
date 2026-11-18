@@ -23,7 +23,20 @@ In Neovim: `:Hali find`, `:Hali concepts`, `:Hali types`, `:Hali related`, `:Hal
 - [Architecture decisions](docs/adr/)
 - [Contributor and agent guide](AGENTS.md)
 
-Install instructions arrive with the first release (`v0.1.0`).
+## Install
+
+On x86_64 Linux, from a GitHub release (the first is `v0.1.0`), with the [`gh`](https://cli.github.com/) CLI (spec §13.5):
+
+```sh
+gh release download -R natemarks/hali -p 'hali-*-x86_64-linux.tar.gz' -p SHA256SUMS \
+  && sha256sum -c --ignore-missing SHA256SUMS && tar xzf hali-*.tar.gz && ./hali-*/install.sh
+```
+
+`install.sh` installs `hali` into `~/.local/bin`, the man page and the bash, zsh and fish completions (spec §4), and runs `hali skill install` when `~/.claude` exists. It needs no root. From a checkout, `make install` builds and installs the same files.
+
+## License
+
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
 
 ## Background
 

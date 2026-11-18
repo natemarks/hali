@@ -13,7 +13,7 @@ Read on demand (these are not imported here):
 
 ## Commands
 
-Specified in `docs/spec.md` §13.2. `make help` lists what exists so far; `make lua-test` and the release targets arrive with their tickets. Pre-commit runs betterleaks (a gitleaks-compatible secret scanner) and `make static` (`pre-commit install` once per clone).
+Specified in `docs/spec.md` §13.2. `make help` lists what exists so far; `make lua-test` arrives with its ticket. Pre-commit runs betterleaks (a gitleaks-compatible secret scanner) and `make static` (`pre-commit install` once per clone).
 
 | Command | Use |
 |---|---|
@@ -21,10 +21,13 @@ Specified in `docs/spec.md` §13.2. `make help` lists what exists so far; `make 
 | `make static-check` | What CI runs (check-only). |
 | `make unit` | `cargo test --features test-hooks`: every test that needs no outside software. |
 | `make unit-update-golden` | Accept changed `insta` snapshots, after reviewing them. |
-| `make test-external` | `cargo test --features test-hooks -- --ignored`: the tests that need outside software (the MIME database). CI runs it in its own job. |
+| `make test-external` | `cargo test --features test-hooks -- --ignored`: the tests that need outside software (the MIME database; bash, git, tar, jq, shellcheck and `cargo-edit` 0.13.14 for the release tests). CI runs it in its own job. |
 | `make bench` | Latency benchmark: `hali find --json` p50/p95 over synthetic 1k and 10k Resource stores, with a release binary (`HALI_BENCH=1`). Never in `static`, `unit`, `test-external` or CI. |
 | `make lua-test` | Plugin tests (headless Neovim + plenary). |
 | `make install` | Install the release build into `~/.local/bin`, plus the man page and bash/zsh/fish completions. |
+| `make dist` | Release artifacts in `dist/` (tarball and `SHA256SUMS`, spec §13.4). Needs `jq`. `DRY_RUN=1` previews. |
+| `make release-prepare BUMP=patch\|minor\|major` | Release step 1: open the version-bump PR (spec §13.3). Maintainer only; `DRY_RUN=1` previews. |
+| `make release-publish` | Release step 2, after the bump PR is merged: dist, annotated tag, GitHub release. Maintainer only; `DRY_RUN=1` previews. |
 
 ## Rules
 
@@ -140,7 +143,7 @@ The agent and skill files say `CLAUDE.md`; it reaches this file through its `@AG
 - `src/storage/`, `src/paths/`, `src/media_type/`
 - the `hali query` SPARQL path (read-only enforcement, `READ_ONLY_QUERY`)
 - `hali skill install`, which writes into `~/.claude`
-- `scripts/install.sh`
+- `scripts/install.sh`, and the release scripts that tag, push and publish (`scripts/release-*.sh`, `scripts/dist.sh`)
 - `Cargo.toml`, `Cargo.lock`
 - `.github/workflows/`
 
