@@ -34,6 +34,11 @@ test-external: ## run the #[ignore]d tests that need outside software (shared-mi
 integration: ## run integration tests
 	cargo test --features test-hooks --test '*'
 
+bench: ## latency benchmark: hali find --json over 1k and 10k Resources (release build)
+	HALI_BENCH=1 cargo test --release --locked --test bench_find -- --ignored --nocapture --test-threads=1
+
+.PHONY: bench
+
 static-check: fmt-check clippy dead-code unit audit shellcheck ## run all static checks, check-only (CI)
 
 static: fmt clippy dead-code unit audit shellcheck ## run all static checks with auto-format
