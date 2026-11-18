@@ -32,7 +32,7 @@ gh release download -R natemarks/hali -p 'hali-*-x86_64-linux.tar.gz' -p SHA256S
   && sha256sum -c --ignore-missing SHA256SUMS && tar xzf hali-*.tar.gz && ./hali-*/install.sh
 ```
 
-`install.sh` installs `hali` into `~/.local/bin`, the man page and the bash, zsh and fish completions (spec §4), and runs `hali skill install` when `~/.claude` exists. It needs no root. From a checkout, `make install` builds and installs the same files.
+`install.sh` installs `hali` into `~/.local/bin`, the man page and the bash, zsh and fish completions (spec §4), and runs `hali skill install` when `~/.claude` exists and `hali skill --help` succeeds. It needs no root, so do not run it with `sudo` or as root with your own `HOME`: it installs into the `HOME` of whoever runs it. From a checkout, `make install` builds and installs the same files.
 
 ## License
 
