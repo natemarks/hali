@@ -74,7 +74,7 @@ mod goal {
         }
     }
 
-    /// #25: `new` is registered, between `forget` and `refresh`, and its schema is `hali new
+    /// #25: `new` is registered, between `forget` and `query`, and its schema is `hali new
     /// --json`. (The exact list above gains `"new"` with the implementation.)
     #[cfg(feature = "goal")]
     #[test]
@@ -85,7 +85,7 @@ mod goal {
             .position(|n| n == "new")
             .expect("`new` is listed");
         assert_eq!(names[at - 1], "forget");
-        assert_eq!(names[at + 1], "refresh");
+        assert_eq!(names[at + 1], "query");
         let doc = schema::get("new").expect("a schema for `new`");
         assert_eq!(doc["title"], "hali new --json");
         assert_eq!(

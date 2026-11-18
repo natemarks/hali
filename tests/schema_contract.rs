@@ -1033,7 +1033,7 @@ mod goal {
     }
 
     /// #25: `hali schema new` is served, and `new` is in the list in sorted place, between
-    /// `forget` and `refresh`.
+    /// `forget` and `query`.
     #[cfg(feature = "goal")]
     #[test]
     fn new_schema_is_listed() {
@@ -1044,7 +1044,7 @@ mod goal {
             .position(|n| n == "new")
             .expect("new is listed");
         assert_eq!(listed[at - 1], "forget");
-        assert_eq!(listed[at + 1], "refresh");
+        assert_eq!(listed[at + 1], "query");
         assert!(listed.windows(2).all(|w| w[0] < w[1]), "sorted: {listed:?}");
         assert_eq!(fetch("new")["title"], "hali new --json");
     }
