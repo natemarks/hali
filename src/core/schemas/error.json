@@ -172,6 +172,21 @@
           }
         },
         {
+          "if": {"properties": {"rule": {"const": "FILES_DIR_UNUSABLE"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "path": {"type": ["string", "null"]},
+                  "reason": {"enum": ["unresolved", "relative", "not_a_directory", "own_dir", "cannot_create"]}
+                },
+                "required": ["path", "reason"]
+              }
+            }
+          }
+        },
+        {
           "if": {"properties": {"rule": {"const": "UNKNOWN_RESOURCE"}}, "required": ["rule"]},
           "then": {
             "properties": {

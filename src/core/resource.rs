@@ -417,6 +417,139 @@ pub fn add_all(
     })
 }
 
+/// What `new` is asked to create (spec §9.1 **New:**).
+#[derive(Clone, Debug, PartialEq)]
+pub struct NewFile {
+    /// As given: `new_resource` normalises it.
+    pub title: String,
+    /// Type references, as `add --type`.
+    pub types: Vec<String>,
+    /// Concept references, as `add --tag`.
+    pub tags: Vec<String>,
+    /// The real path of `files.dir`, UTF-8.
+    pub dir_real: String,
+    /// Names the user Person when it is minted.
+    pub user_name: String,
+}
+
+/// What `new` cataloged, and the file the caller is to create for it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Created {
+    pub record: Record,
+    /// `<dir_real>/<name>.md`.
+    pub path: String,
+    /// Exactly `# <title>\n`.
+    pub content: String,
+    /// `now`, in seconds since the Unix epoch: the mtime the file is to get.
+    pub mtime: i64,
+}
+
+/// The most bytes of a slug in a new file's name.
+const MAX_SLUG: usize = 128;
+
+/// The base name of a new file for `title`: its `slug`, cut to at most `MAX_SLUG` bytes at a
+/// character boundary with no trailing `-`, or `untitled` when nothing is left. Only letters,
+/// digits and `-`, so it can never leave the directory.
+fn file_slug(title: &str) -> String {
+    let mut slug = super::slug(title);
+    if slug.len() > MAX_SLUG {
+        let mut cut = MAX_SLUG;
+        while !slug.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        slug.truncate(cut);
+        slug.truncate(slug.trim_end_matches('-').len());
+    }
+    if slug.is_empty() {
+        "untitled".to_string()
+    } else {
+        slug
+    }
+}
+
+/// Catalogs a new markdown file for `hali new` (spec §9.1 **New:**, §9.6), without touching the
+/// filesystem: normalises the title, resolves the Types then the tags, and picks the first free
+/// name `<slug>.md`, `<slug>-2.md`, `-3`, … in `dir_real` (taken when `taken` says something is
+/// at that path, or any Resource records it). Writes what `add` writes for a `text/markdown`
+/// file holding `# <title>\n`, plus `dcterms:created` and the Resource's `prov:wasAttributedTo`
+/// the same Agent as its catalog record. Refused, with the store unchanged, if the store would
+/// not conform to the SHACL shapes.
+pub fn new_resource(
+    ctx: &Context,
+    store: &mut Store,
+    new: &NewFile,
+    taken: impl Fn(&str) -> bool,
+) -> Result<Mutation<Created>, Error> {
+    use sha2::{Digest, Sha256};
+    let title = normalise_title(&new.title)?;
+    let types = resolve_types(ctx, store, &new.types)?;
+    let tags = resolve_tags(ctx, store, &new.tags)?;
+
+    let dir = new.dir_real.trim_end_matches('/');
+    let slug = file_slug(&title);
+    let free = |path: &str| !taken(path) && by_path(store, path).is_none();
+    let mut path = format!("{dir}/{slug}.md");
+    let mut n = 2u64;
+    while !free(&path) {
+        path = format!("{dir}/{slug}-{n}.md");
+        n += 1;
+    }
+
+    let content = format!("# {title}\n");
+    let sha256: String = Sha256::digest(content.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let now = ctx.now();
+    let mtime = super::epoch_secs(&now).expect("the clock gives RFC 3339 UTC");
+    let facts = FileFacts {
+        path: path.clone(),
+        byte_size: content.len() as u64,
+        modified: now.clone(),
+        sha256,
+        media_type: "text/markdown".to_string(),
+    };
+    let mut attribution = Attribution::of(ctx, store);
+    let (resource, mut quads) = catalog_quads(
+        ctx,
+        &facts,
+        Some(&title),
+        &types,
+        &tags,
+        &mut attribution,
+        &new.user_name,
+        &now,
+    )?;
+    let who = attribution
+        .agent
+        .or(attribution.person)
+        .expect("catalog_quads holds the Person");
+    let graph = File::Resources.graph();
+    quads.push(Quad::new(
+        resource.clone(),
+        named(dcterms::CREATED),
+        Literal::new_typed_literal(now.as_str(), xsd::DATE_TIME),
+        graph.clone(),
+    ));
+    quads.push(Quad::new(
+        resource.clone(),
+        named(prov::WAS_ATTRIBUTED_TO),
+        who,
+        graph,
+    ));
+    validate::guard(store, &quads, &[])?;
+    let changes = apply(store, &quads, &[]);
+    Ok(Mutation {
+        value: Created {
+            record: record(ctx, store, &resource),
+            path,
+            content,
+            mtime,
+        },
+        changes,
+    })
+}
+
 /// Refuses an `add` that looks like a move (spec §6): the first file, in argument order, whose
 /// path no Resource records, that is not empty and that has the byte size and SHA-256 of a
 /// Missing Resource (`stat` finds no regular file at its recorded path) is `POSSIBLE_MOVE`, naming

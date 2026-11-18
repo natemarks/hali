@@ -318,3 +318,94 @@ pub fn stat(path: &Path) -> Option<(u64, i64)> {
         .filter(fs::Metadata::is_file)
         .map(|m| (m.len(), m.mtime()))
 }
+
+/// A file `create_new` made: its path, and the device and inode of the descriptor it opened.
+#[derive(Debug)]
+pub struct CreatedFile {
+    path: PathBuf,
+    dev: u64,
+    ino: u64,
+}
+
+/// Why `create_new` or `create_dirs` made nothing.
+#[derive(Debug)]
+pub enum CreateError {
+    /// Something is at the path already (a file, a directory or a symlink).
+    Exists,
+    /// It could not be created or written.
+    Io,
+}
+
+/// Whether anything is at `path`, by `lstat`: a file, a directory, a symlink (dangling or not).
+pub fn exists_at(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok()
+}
+
+/// Creates the directory `dir` and its missing parents (mode 0777 minus the umask).
+pub fn create_dirs(dir: &Path) -> Result<(), CreateError> {
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o777)
+        .create(dir)
+        .map_err(|_| CreateError::Io)
+}
+
+/// Creates the regular file at `path`, whose directory exists, with
+/// `O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_NOCTTY` (mode 0666 minus the umask): anything already
+/// there is left as it is and a symlink is never followed. Writes `bytes`, sets the mtime to
+/// `mtime` (whole seconds since the Unix epoch) and `fsync`s it. On a failure after the create,
+/// the file is removed again (see `remove_created`).
+pub fn create_new(path: &Path, bytes: &[u8], mtime: i64) -> Result<CreatedFile, CreateError> {
+    use std::io::Write;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o666)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NOCTTY)
+        .open(path)
+        .map_err(|e| match e.kind() {
+            ErrorKind::AlreadyExists => CreateError::Exists,
+            _ => CreateError::Io,
+        })?;
+    let meta = file.metadata().map_err(|_| CreateError::Io)?;
+    let created = CreatedFile {
+        path: path.to_path_buf(),
+        dev: meta.dev(),
+        ino: meta.ino(),
+    };
+    let secs = Duration::from_secs(mtime.unsigned_abs());
+    let when = if mtime >= 0 {
+        UNIX_EPOCH.checked_add(secs)
+    } else {
+        UNIX_EPOCH.checked_sub(secs)
+    };
+    let written = file.write_all(bytes).is_ok()
+        && when.is_some_and(|when| file.set_modified(when).is_ok())
+        && file.sync_all().is_ok();
+    // The path must still name the file this descriptor made.
+    if !written || !created.is_at_path() {
+        remove_created(&created);
+        return Err(CreateError::Io);
+    }
+    Ok(created)
+}
+
+impl CreatedFile {
+    /// Whether `lstat` at the path reports this file's device and inode.
+    fn is_at_path(&self) -> bool {
+        use std::os::unix::fs::MetadataExt;
+        fs::symlink_metadata(&self.path)
+            .is_ok_and(|m| m.is_file() && m.dev() == self.dev && m.ino() == self.ino)
+    }
+}
+
+/// Unlinks a file `create_new` made, only while its path still names that file (the same device
+/// and inode, by `lstat`); whatever else is there is left alone. Never removes the directory.
+pub fn remove_created(created: &CreatedFile) {
+    if created.is_at_path() {
+        let _ = fs::remove_file(&created.path);
+    }
+}

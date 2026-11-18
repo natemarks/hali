@@ -236,3 +236,75 @@ pub fn ref_path(arg: &str) -> Option<String> {
 fn absolute(path: &Path) -> PathBuf {
     std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
 }
+
+/// Why `files.dir` cannot hold the files `hali new` creates (spec §9.1 **New:**).
+#[derive(Debug, PartialEq)]
+pub enum FilesDirError {
+    /// It cannot be resolved: `HOME` is not set.
+    Unresolved,
+    /// `[files] dir` is a relative path (as configured).
+    Relative { path: String },
+    /// Its real path is not UTF-8 (shown lossily).
+    NonUtf8 { path: String },
+    /// Something other than a directory is there (its real path).
+    NotADirectory { path: String },
+    /// It is one of `own` (hali's data dir or state dir) or inside one (its real path).
+    OwnDir { path: String },
+}
+
+/// The real path `files.dir` (see `files_dir`) has, or would have once created, for
+/// `hali new`: a relative one is refused, and so is one that is in any of the `own` dirs (each
+/// resolved the same way), that is not UTF-8, or that holds something other than a directory.
+/// Creates nothing.
+pub fn new_files_dir(
+    env: impl Fn(&str) -> Option<String>,
+    configured: Option<&str>,
+    own: &[&Path],
+) -> Result<String, FilesDirError> {
+    let lossy = |p: &Path| p.to_string_lossy().into_owned();
+    let dir = files_dir(env, configured).ok_or(FilesDirError::Unresolved)?;
+    if !dir.is_absolute() {
+        return Err(FilesDirError::Relative { path: lossy(&dir) });
+    }
+    let real = real_target(&dir);
+    if own
+        .iter()
+        .filter(|d| d.is_absolute())
+        .any(|d| real.starts_with(real_target(d)))
+    {
+        return Err(FilesDirError::OwnDir { path: lossy(&real) });
+    }
+    let Some(text) = real.to_str() else {
+        return Err(FilesDirError::NonUtf8 { path: lossy(&real) });
+    };
+    if std::fs::metadata(&real).is_ok_and(|m| !m.is_dir()) {
+        return Err(FilesDirError::NotADirectory {
+            path: text.to_string(),
+        });
+    }
+    Ok(text.to_string())
+}
+
+/// The real path of an absolute path that may not exist yet: the real path of its longest
+/// prefix that resolves, with the rest of its components applied in order.
+fn real_target(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let parts: Vec<Component<'_>> = path.components().collect();
+    for i in (1..=parts.len()).rev() {
+        let prefix: PathBuf = parts[..i].iter().collect();
+        let Ok(mut real) = std::fs::canonicalize(&prefix) else {
+            continue;
+        };
+        for part in &parts[i..] {
+            match part {
+                Component::ParentDir => {
+                    real.pop();
+                }
+                Component::Normal(name) => real.push(name),
+                _ => {}
+            }
+        }
+        return real;
+    }
+    path.to_path_buf()
+}

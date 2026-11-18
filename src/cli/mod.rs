@@ -58,6 +58,20 @@ enum Command {
         #[arg(long)]
         new: bool,
     },
+    /// Create a markdown file holding `# <title>` in files.dir and catalog it; never opens it
+    New {
+        /// The title; the file is named after it (`<slug>.md`, `-2`, `-3`, … when taken)
+        title: String,
+        /// Type the new Resource with this Type (a name or a label; repeatable)
+        #[arg(long = "type", value_name = "TYPE")]
+        types: Vec<String>,
+        /// Tag the new Resource with this Concept (a slug or a label; repeatable)
+        #[arg(long = "tag", value_name = "CONCEPT")]
+        tags: Vec<String>,
+        /// Print only the path of the file (wins over --json)
+        #[arg(long)]
+        path_only: bool,
+    },
     /// Manage the Concepts of the topics scheme
     #[command(subcommand)]
     Concept(ConceptCommand),
@@ -682,6 +696,14 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
     {
         concept::check_alt_lists(add_alt, remove_alt)?;
     }
+    // `new`: the title, then files.dir, before the store is read.
+    let files_dir = match &cli.command {
+        Command::New { title, .. } => {
+            resource::normalise_title(title)?;
+            Some(new_files_dir(&config)?)
+        }
+        _ => None,
+    };
     let dir = paths::data_dir(env).map_err(|_| Error::store_io(None))?;
     let mut store = storage::load(&dir)?;
 
@@ -741,6 +763,57 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 text,
                 None,
             )?;
+        }
+        Command::New {
+            title,
+            types,
+            tags,
+            path_only,
+        } => {
+            let files_dir = files_dir.expect("files.dir is resolved for new");
+            let new = resource::NewFile {
+                title: title.clone(),
+                types: types.clone(),
+                tags: tags.clone(),
+                dir_real: files_dir.clone(),
+                user_name: core::config::user_name(&config, env),
+            };
+            let created = resource::new_resource(&ctx, &mut store, &new, |p| {
+                storage::exists_at(Path::new(p))
+            })?;
+            if !cli.dry_run {
+                let file = create_new_file(&config, &files_dir, &created.value)?;
+                if let Err(err) = storage::save(&dir, &store, storage::File::Resources) {
+                    storage::remove_created(&file);
+                    return Err(err.into());
+                }
+            }
+            let record = &created.value.record;
+            let output = ResourceOutput {
+                schema_version: SCHEMA_VERSION,
+                resource: record,
+            };
+            if *path_only {
+                println!("{}", printable(&created.value.path));
+            } else if cli.json && cli.dry_run {
+                print_json(&DryRunOutput {
+                    payload: output,
+                    dry_run: true,
+                    changes: &created.changes,
+                });
+            } else if cli.json {
+                print_json(&output);
+            } else {
+                let verb = if cli.dry_run {
+                    "would create"
+                } else {
+                    "created"
+                };
+                println!("{verb} resource {}", describe_record(record));
+                if cli.dry_run {
+                    print_changes(&created.changes);
+                }
+            }
         }
         Command::Edit {
             reference,
@@ -1483,6 +1556,49 @@ fn own_dir(root: &str, data: Option<&Path>, state: Option<&Path>) -> Option<&'st
     } else {
         None
     }
+}
+
+/// The real path of files.dir for `hali new`, which may not exist yet; never hali's data dir or
+/// state dir, or inside one.
+fn new_files_dir(config: &core::config::Config) -> Result<String, Error> {
+    use paths::FilesDirError;
+    let data = paths::data_dir(env).ok();
+    let state = paths::state_dir(env).ok();
+    let own: Vec<&Path> = data
+        .iter()
+        .chain(state.iter())
+        .map(|d| d.as_path())
+        .collect();
+    paths::new_files_dir(env, config.files_dir.as_deref(), &own).map_err(|e| match e {
+        FilesDirError::Unresolved => Error::files_dir_unusable(None, "unresolved"),
+        FilesDirError::Relative { path } => Error::files_dir_unusable(Some(&path), "relative"),
+        FilesDirError::NonUtf8 { path } => Error::non_utf8_path(&path),
+        FilesDirError::NotADirectory { path } => {
+            Error::files_dir_unusable(Some(&path), "not_a_directory")
+        }
+        FilesDirError::OwnDir { path } => Error::files_dir_unusable(Some(&path), "own_dir"),
+    })
+}
+
+/// Creates files.dir (`files_dir`, its real path) if needed, then the file `new` cataloged,
+/// never over anything that is there.
+fn create_new_file(
+    config: &core::config::Config,
+    files_dir: &str,
+    created: &resource::Created,
+) -> Result<storage::CreatedFile, Error> {
+    let unusable = || Error::files_dir_unusable(Some(files_dir), "cannot_create");
+    storage::create_dirs(Path::new(files_dir)).map_err(|_| unusable())?;
+    // Now that it exists, it must still resolve to the real path the name was chosen in.
+    if new_files_dir(config)? != files_dir {
+        return Err(unusable());
+    }
+    storage::create_new(
+        Path::new(&created.path),
+        created.content.as_bytes(),
+        created.mtime,
+    )
+    .map_err(|_| unusable())
 }
 
 /// The state dir (spec §4), and the remembered Scan roots in it: none when the file is missing.

@@ -80,6 +80,27 @@ pub fn rfc3339(secs: i64) -> String {
     )
 }
 
+/// Seconds since the Unix epoch of `YYYY-MM-DDTHH:MM:SSZ`, the inverse of `rfc3339`; `None` for
+/// any other form.
+pub(crate) fn epoch_secs(text: &str) -> Option<i64> {
+    let b = text.as_bytes();
+    if b.len() != 20 || [b[4], b[7], b[10], b[13], b[16], b[19]] != *b"--T::Z" {
+        return None;
+    }
+    let num = |from: usize, to: usize| -> Option<i64> { text.get(from..to)?.parse().ok() };
+    let (year, month, day) = (num(0, 4)?, num(5, 7)?, num(8, 10)?);
+    let (hour, minute, second) = (num(11, 13)?, num(14, 16)?, num(17, 19)?);
+    // Days since 1970-01-01 from a civil date (H. Hinnant's algorithm).
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(days * 86_400 + hour * 3600 + minute * 60 + second)
+}
+
 /// Random UUIDv7s from the system clock and RNG.
 pub struct RandomIdGen;
 
@@ -614,6 +635,45 @@ impl Error {
         .fix("Check that you can read the file and the directories above it.")
     }
 
+    /// `files.dir` cannot hold new files (spec §9.1 **New:**). `path` is the directory (the
+    /// configured value when `relative`; `None` when `unresolved`). `reason` is `unresolved`,
+    /// `relative`, `not_a_directory`, `own_dir` or `cannot_create`.
+    pub fn files_dir_unusable(path: Option<&str>, reason: &str) -> Error {
+        let (why, fix) = match reason {
+            "unresolved" => (
+                "files.dir cannot be resolved without HOME",
+                "Set HOME, or set [files] dir in the config file to an absolute path.",
+            ),
+            "relative" => (
+                "files.dir is not an absolute path",
+                "Set [files] dir in the config file to an absolute path, or to one that starts with ~/.",
+            ),
+            "not_a_directory" => (
+                "files.dir is not a directory",
+                "Point [files] dir in the config file at a directory, or remove what is in the way.",
+            ),
+            "own_dir" => (
+                "files.dir is hali's data dir or state dir, or inside one",
+                "Set [files] dir in the config file to a directory outside hali's data and state dirs.",
+            ),
+            _ => (
+                "the directory or the file cannot be created there",
+                "Check that you can write to files.dir and the directories above it, then run it again.",
+            ),
+        };
+        let message = match path {
+            Some(path) => format!("cannot keep new files in {path}: {why}; nothing was created"),
+            None => format!("cannot keep new files: {why}; nothing was created"),
+        };
+        Error::new(
+            "FILES_DIR_UNUSABLE",
+            3,
+            message,
+            json!({"path": path, "reason": reason}),
+        )
+        .fix(fix)
+    }
+
     /// A new file at `path` has the size and content of the Missing Resources `resources`
     /// (sorted): it was probably moved.
     pub fn possible_move(path: &str, resources: &[String]) -> Error {
@@ -874,4 +934,24 @@ fn levenshtein(a: &str, b: &str) -> usize {
         }
     }
     row[b.len()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn epoch_secs_inverts_rfc3339() {
+        for secs in [0, 1_792_834_200, 951_782_400, 4_107_542_399, -86_400] {
+            assert_eq!(epoch_secs(&rfc3339(secs)), Some(secs), "{secs}");
+        }
+        for bad in [
+            "",
+            "2026-10-24 09:30:00Z",
+            "2026-10-24T09:30:00",
+            "x026-10-24T09:30:00Z",
+        ] {
+            assert_eq!(epoch_secs(bad), None, "{bad:?}");
+        }
+    }
 }
