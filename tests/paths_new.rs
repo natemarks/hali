@@ -4,7 +4,6 @@
 //! missing component is resolved against the symlink-resolved prefix, so the recorded path is
 //! always the real one.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::paths::{FilesDirError, new_files_dir};
     use std::path::Path;

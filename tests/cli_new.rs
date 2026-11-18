@@ -27,7 +27,6 @@
 //! The temp dir is shown as `/TMP` in captured output. The default `files.dir` of these tests is
 //! `$HOME/Documents/hali`, and the data dir does not exist until something writes it.
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::Value;

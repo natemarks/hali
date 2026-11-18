@@ -18,7 +18,6 @@
 //! while `lstat` there still reports the dev and ino of the descriptor `create_new` opened;
 //! otherwise it leaves whatever is there. It never removes the directory.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::storage::{create_new, remove_created};
     use std::os::unix::fs::{MetadataExt, PermissionsExt};

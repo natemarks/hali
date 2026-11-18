@@ -37,7 +37,6 @@
 //! In `hali::core::Error`: `files_dir_unusable(path: Option<&str>, reason: &str) -> Error`,
 //! rule `FILES_DIR_UNUSABLE`, exit code 3, `details {"path": <string|null>, "reason": reason}`.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::resource::{self, NewFile};
     use hali::core::{Context, Error, FixedClock, SeededIdGen};

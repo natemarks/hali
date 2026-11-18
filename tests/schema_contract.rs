@@ -346,7 +346,6 @@ mod goal {
         "cli_new__new_json",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_25: &[(&str, &str)] = &[
         ("cli_dry_run__new_agent_dry_run_json", "new"),
         ("cli_dry_run__new_dry_run_json", "new"),
@@ -373,7 +372,6 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_11);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_9);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_13);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_25);
         // The goldens #24 rewrites are hidden without the goal feature (see `goldens`), and so
         // are their rows.
@@ -466,7 +464,6 @@ mod goal {
             pending_13 = &[];
         }
         let mut pending_25: &[&str] = GOAL_SNAPS_25;
-        #[cfg(feature = "goal")]
         {
             pending_25 = &[];
         }
@@ -611,7 +608,6 @@ mod goal {
         assert!(goldens.len() >= 95, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 96, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 97, "found only {} goldens", goldens.len());
-        #[cfg(feature = "goal")]
         assert!(goldens.len() >= 100, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
@@ -1034,7 +1030,6 @@ mod goal {
 
     /// #25: `hali schema new` is served, and `new` is in the list in sorted place, between
     /// `forget` and `query`.
-    #[cfg(feature = "goal")]
     #[test]
     fn new_schema_is_listed() {
         let listed = fetch_list();
@@ -1051,7 +1046,6 @@ mod goal {
 
     /// #25: what the `new` schema accepts and refuses: one Resource record, in a real or a
     /// dry-run payload, nothing else allowed.
-    #[cfg(feature = "goal")]
     #[test]
     fn new_schema_accepts_and_rejects() {
         let changes = || json!([{"op": "add", "triple": "<a:b> <a:c> <a:d> ."}]);
@@ -1144,7 +1138,6 @@ mod goal {
 
     /// #25: the `error` schema has a branch for `FILES_DIR_UNUSABLE`: the `path` (a string, or
     /// null when `HOME` is unset) and one of the five reasons.
-    #[cfg(feature = "goal")]
     #[test]
     fn files_dir_unusable_error_branch() {
         let unusable = |details: Value| error("FILES_DIR_UNUSABLE", details);

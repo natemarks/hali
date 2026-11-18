@@ -76,7 +76,6 @@ mod goal {
 
     /// #25: `new` is registered, between `forget` and `query`, and its schema is `hali new
     /// --json`. (The exact list above gains `"new"` with the implementation.)
-    #[cfg(feature = "goal")]
     #[test]
     fn new_is_registered() {
         let names = names();
