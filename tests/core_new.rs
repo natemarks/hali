@@ -543,6 +543,17 @@ mod goal {
     }
 
     #[test]
+    fn the_combining_dot_is_a_separator_with_exact_slugs() {
+        // Lowercasing U+0130 gives `i` and U+0307; the mark is a separator, never dropped.
+        assert_eq!(stem("\u{130}STANBUL"), "i-stanbul");
+        assert_eq!(stem("x.\u{130}.x"), "x-i-x");
+        assert_eq!(stem("a  b"), "a-b");
+        for title in ["\u{130}STANBUL", "x.\u{130}.x", "a  b", "I\u{130} x"] {
+            assert!(!stem(title).contains("--"), "{title:?}: {}", stem(title));
+        }
+    }
+
+    #[test]
     fn a_title_of_only_combining_marks_is_untitled() {
         assert_eq!(picked("\u{301}"), "untitled.md");
         assert_eq!(picked("\u{301}\u{307} \u{301}"), "untitled.md");

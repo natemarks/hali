@@ -8,6 +8,9 @@ set -uo pipefail
 # says the deepest existing prefix of files.dir must be a directory (else `not_a_directory`, in a
 # dry run too), and that `..` after a missing component is resolved against the real prefix
 # (the real path is recorded, never the lexical one).
+# Row 28: it also says a failed real run leaves only the store's `.lock` (§3.3), that a dry run does
+# not detect a component that cannot be searched (EACCES; the real run says cannot_create), and
+# that a relative HALI_DATA_DIR is compared by its absolute form for the own_dir rule.
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 
 status=0
@@ -29,7 +32,7 @@ else
         'prov:wasAttributedTo' '--path-only' '--dry-run' '--json' '--yes' 'schema' 'O_EXCL' \
         'O_NOFOLLOW' 'umask' '128' 'untitled' 'usage error' 'real path' 'EDITOR' 'stdin' \
         'dry_run' 'changes' 'lstat' 'symlink' 'created' 'would create' \
-        'deepest existing' '`..`'; do
+        'deepest existing' '`..`' '`.lock`' '§3.3' 'EACCES' 'cannot be searched' 'absolute form'; do
         if ! printf '%s\n' "$para" | grep -qF -- "$what"; then
             echo "MISSING: the **New:** paragraph does not mention: $what"
             status=1

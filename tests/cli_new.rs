@@ -181,6 +181,18 @@ mod goal {
             self.out(cmd.output().unwrap())
         }
 
+        /// `run`, with `cwd` as the working directory of the process.
+        fn run_in<I, S>(&self, cwd: &Path, envs: &[(&str, OsString)], args: I) -> Out
+        where
+            I: IntoIterator<Item = S>,
+            S: AsRef<OsStr>,
+        {
+            let mut cmd = Command::cargo_bin("hali").unwrap();
+            self.apply(&mut cmd, 1, envs, &[]);
+            cmd.current_dir(cwd).args(args);
+            self.out(cmd.output().unwrap())
+        }
+
         /// Every triple of resources.ttl as canonical N-Triples (empty when absent).
         fn triples(&self) -> BTreeSet<String> {
             let Ok(bytes) = std::fs::read(self.resources_ttl()) else {
@@ -217,14 +229,15 @@ mod goal {
             )
         }
 
-        /// Nothing was created: `$HOME` is empty and the data dir does not exist.
+        /// A real run that failed or stopped before writing created nothing: `$HOME` is empty and
+        /// the data dir holds at most the store's `.lock`, which a real run takes before it
+        /// loads (spec section 3.3). For dry runs use `assert_dry_run_created_nothing`.
         fn assert_nothing_created(&self, what: &str) {
             let home: Vec<_> = std::fs::read_dir(self.home())
                 .unwrap()
                 .map(|e| e.unwrap().file_name())
                 .collect();
             assert!(home.is_empty(), "{what}: $HOME holds {home:?}");
-            // The lock file alone may appear: the run locks the store before it loads.
             let data: Vec<_> = std::fs::read_dir(self.data())
                 .map(|d| d.map(|e| e.unwrap().file_name()).collect())
                 .unwrap_or_default();
@@ -232,6 +245,20 @@ mod goal {
                 data.iter().all(|n| n == ".lock"),
                 "{what}: the data dir holds {data:?}"
             );
+        }
+
+        /// A dry run created nothing: `$HOME` is empty and the data dir is absent or empty (not
+        /// even the `.lock`: a dry run never takes the writer).
+        fn assert_dry_run_created_nothing(&self, what: &str) {
+            let home: Vec<_> = std::fs::read_dir(self.home())
+                .unwrap()
+                .map(|e| e.unwrap().file_name())
+                .collect();
+            assert!(home.is_empty(), "{what}: $HOME holds {home:?}");
+            let data: Vec<_> = std::fs::read_dir(self.data())
+                .map(|d| d.map(|e| e.unwrap().file_name()).collect())
+                .unwrap_or_default();
+            assert!(data.is_empty(), "{what}: the data dir holds {data:?}");
         }
     }
 
@@ -571,7 +598,7 @@ mod goal {
             ],
         );
         snapshot("cli_dry_run__new_agent_dry_run_json", &out, 0, "stdout");
-        env.assert_nothing_created("an agent dry run");
+        env.assert_dry_run_created_nothing("an agent dry run");
     }
 
     #[test]
@@ -759,7 +786,7 @@ mod goal {
         let out = env.run(1, &[], ["--dry-run", "new", "Weekly review", "--path-only"]);
         assert_eq!(out.code, Some(0), "{}", out.stderr);
         assert_eq!(out.stdout, "/TMP/home/Documents/hali/weekly-review.md\n");
-        env.assert_nothing_created("--dry-run --path-only");
+        env.assert_dry_run_created_nothing("--dry-run --path-only");
 
         // The same under --json.
         let out = env.run(
@@ -769,7 +796,7 @@ mod goal {
         );
         assert_eq!(out.code, Some(0), "{}", out.stderr);
         assert_eq!(out.stdout, "/TMP/home/Documents/hali/weekly-review.md\n");
-        env.assert_nothing_created("--dry-run --json --path-only");
+        env.assert_dry_run_created_nothing("--dry-run --json --path-only");
     }
 
     #[test]
@@ -788,7 +815,24 @@ mod goal {
         let env = Env::new();
         let out = env.run(1, &[], ["--json", "--dry-run", "new", "Weekly review"]);
         snapshot("cli_dry_run__new_dry_run_json", &out, 0, "stdout");
-        env.assert_nothing_created("a dry run");
+        env.assert_dry_run_created_nothing("a dry run");
+    }
+
+    #[test]
+    fn a_dry_run_in_an_existing_store_takes_no_writer() {
+        // With the data dir present a writer would create `.lock` there; a dry run must not.
+        let env = Env::with_fixture("store");
+        let before = names(&env.data());
+        assert!(!before.contains(&".lock".to_string()), "{before:?}");
+        for args in [
+            vec!["--json", "--dry-run", "new", "Weekly review"],
+            vec!["--dry-run", "new", "Weekly review", "--path-only"],
+        ] {
+            let out = env.run(1, &[], args.clone());
+            assert_eq!(out.code, Some(0), "{args:?}: {}", out.stderr);
+            assert_eq!(names(&env.data()), before, "{args:?}");
+            assert!(!env.docs().exists());
+        }
     }
 
     #[test]
@@ -796,7 +840,7 @@ mod goal {
         let env = Env::new();
         let dry = ok(&env.run(1, &[], ["--json", "--dry-run", "new", "Weekly review"]));
         assert_eq!(dry["dry_run"], true);
-        env.assert_nothing_created("a dry run");
+        env.assert_dry_run_created_nothing("a dry run");
 
         let before = env.triples();
         let real = ok(&env.run(1, &[], ["--json", "new", "Weekly review"]));
@@ -1110,7 +1154,7 @@ mod goal {
         );
         assert!(lines[1..].iter().all(|l| l.starts_with("+ <")), "{lines:?}");
         assert_eq!(out.stderr, "note: dry run; nothing was written\n");
-        env.assert_nothing_created("a text dry run");
+        env.assert_dry_run_created_nothing("a text dry run");
     }
 
     // ---- row 15: the schema --------------------------------------------------------------------------
@@ -1224,7 +1268,11 @@ mod goal {
                     before,
                     "{case} {args:?}: something changed"
                 );
-                env.assert_nothing_created(&format!("{case} {args:?}"));
+                if args.contains(&"--dry-run") {
+                    env.assert_dry_run_created_nothing(&format!("{case} {args:?}"));
+                } else {
+                    env.assert_nothing_created(&format!("{case} {args:?}"));
+                }
             }
             assert!(
                 paths.windows(2).all(|w| w[0] == w[1]),
@@ -1370,5 +1418,65 @@ mod goal {
             }
         }
         std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    // ---- row 24: a relative HALI_DATA_DIR is compared by its absolute form ------------------------------
+
+    #[test]
+    fn a_relative_data_dir_cannot_be_bypassed_as_files_dir() {
+        // cwd = the temp root, HALI_DATA_DIR=reldata, and files.dir the absolute form of it
+        // (and a directory inside it): both are own_dir, and no file lands beside resources.ttl.
+        for sub in ["", "/inner"] {
+            let env = Env::new();
+            env.config(&format!(
+                "[files]\ndir = \"{}/reldata{sub}\"\n",
+                env.root.display()
+            ));
+            let rel = [("HALI_DATA_DIR", OsString::from("reldata"))];
+            for args in [
+                vec!["--json", "new", "hello"],
+                vec!["--json", "--dry-run", "new", "hello"],
+            ] {
+                let out = env.run_in(&env.root, &rel, args.clone());
+                let e = unusable(&out, "own_dir");
+                assert_eq!(
+                    e["details"]["path"],
+                    format!("/TMP/reldata{sub}"),
+                    "{args:?}"
+                );
+                assert!(
+                    !env.root.join("reldata/hello.md").exists(),
+                    "{args:?}: hello.md was created in the data dir"
+                );
+                assert!(!env.root.join("reldata/inner").exists(), "{args:?}");
+            }
+        }
+    }
+
+    // ---- row 25: the path reported when a `..` follows a blocking file ----------------------------------
+
+    #[test]
+    fn a_dotdot_after_a_blocking_file_is_reported_as_written() {
+        // afile is a regular file, so `<home>/afile/../notes` is not_a_directory; the reported
+        // path is not the innocent `<home>/notes`.
+        let env = Env::new();
+        std::fs::write(env.home().join("afile"), b"keep\n").unwrap();
+        env.config(&format!(
+            "[files]\ndir = \"{}/afile/../notes\"\n",
+            env.home().display()
+        ));
+        let mut seen = Vec::new();
+        for args in [
+            vec!["--json", "new", "x"],
+            vec!["--json", "--dry-run", "new", "x"],
+        ] {
+            let out = env.run(1, &[], args.clone());
+            let e = unusable(&out, "not_a_directory");
+            seen.push(e["details"]["path"].clone());
+            assert!(!env.home().join("notes").exists(), "{args:?}");
+        }
+        for path in seen {
+            assert_eq!(path, "/TMP/home/afile/../notes");
+        }
     }
 }

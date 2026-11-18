@@ -62,4 +62,30 @@ mod goal {
         );
         assert!(!root.join("new").exists() && !root.join("nowhere").exists());
     }
+
+    #[test]
+    fn a_dotdot_after_a_blocking_file_stays_in_the_reported_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        std::fs::write(root.join("afile"), b"x").unwrap();
+        std::os::unix::fs::symlink(root.join("nowhere"), root.join("dangling")).unwrap();
+        let home = root.to_str().unwrap().to_string();
+        let env = |k: &str| (k == "HOME").then(|| home.clone());
+        let own: [&Path; 0] = [];
+
+        for (dir, shown) in [
+            ("afile/../notes", "afile/../notes"),
+            ("afile/a/../../notes", "afile/a/../../notes"),
+            ("dangling/../notes", "dangling/../notes"),
+        ] {
+            assert_eq!(
+                new_files_dir(env, Some(&format!("{home}/{dir}")), &own),
+                Err(FilesDirError::NotADirectory {
+                    path: format!("{home}/{shown}")
+                }),
+                "{dir}"
+            );
+        }
+        assert!(!root.join("notes").exists());
+    }
 }
