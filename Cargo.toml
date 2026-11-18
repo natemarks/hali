@@ -4,6 +4,7 @@ version = "0.0.0"
 edition = "2024"
 rust-version = "1.89"
 description = "Keeps a standards-based RDF ontology describing local files in place"
+license = "MIT OR Apache-2.0"
 publish = false
 
 [features]
