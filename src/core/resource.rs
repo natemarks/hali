@@ -1039,6 +1039,38 @@ impl std::fmt::Display for MediaPattern {
     }
 }
 
+/// Types never editable unless `open.editor` says so (spec §5.2), matched exactly.
+const NEVER_EDITABLE: [&str; 5] = [
+    "text/html",
+    "image/svg+xml",
+    "application/postscript",
+    "application/rtf",
+    "application/x-desktop",
+];
+
+/// The editable rule (spec §5.2): `open.system`, then `open.editor`, then the built-in
+/// exceptions, then `is_text`. Entries match exactly or by `type/*`, case-insensitively.
+pub fn editable(
+    media_type: &str,
+    open: &super::config::OpenConfig,
+    is_text: impl Fn(&str) -> bool,
+) -> bool {
+    if media_type.is_empty() {
+        return false;
+    }
+    let media_type = media_type.to_ascii_lowercase();
+    if open.system.iter().any(|p| p.matches(&media_type)) {
+        return false;
+    }
+    if open.editor.iter().any(|p| p.matches(&media_type)) {
+        return true;
+    }
+    if NEVER_EDITABLE.contains(&media_type.as_str()) {
+        return false;
+    }
+    is_text(&media_type)
+}
+
 impl MediaPattern {
     pub(crate) fn matches(&self, media_type: &str) -> bool {
         match media_type.split_once('/') {
@@ -1483,7 +1515,7 @@ pub(crate) fn record(ctx: &Context, store: &Store, resource: &NamedNode) -> Reco
         id: id_of(resource),
         path,
         title: first_literal(store, resource, dcterms::TITLE).unwrap_or_default(),
-        editable: media_type.starts_with("text/"),
+        editable: editable(&media_type, ctx.open(), crate::media_type::is_text),
         media_type,
         missing: false,
         stale: false,

@@ -99,4 +99,35 @@ mod goal {
             "application/x-shellscript"
         );
     }
+
+    /// #11: `is_text(media_type)` is true for `text/plain` and every type under it in the real
+    /// shared-mime-info subclass tree (aliases resolved), and for any `text/*`; false for the
+    /// rest. Assumed API: `hali::media_type::is_text(&str) -> bool`.
+    #[test]
+    #[ignore = "needs the shared MIME database"]
+    fn is_text_real_db() {
+        use hali::media_type::is_text;
+        for ty in [
+            "text/plain",
+            "text/markdown",
+            "text/x-unknown-but-text",
+            "application/x-shellscript",
+            "application/json",
+            "application/toml",
+            "application/xml",
+            // an alias of application/yaml
+            "application/x-yaml",
+        ] {
+            assert!(is_text(ty), "{ty} should be text");
+        }
+        for ty in [
+            "application/pdf",
+            "application/octet-stream",
+            "image/png",
+            "",
+            "nonsense",
+        ] {
+            assert!(!is_text(ty), "{ty} should not be text");
+        }
+    }
 }
