@@ -333,6 +333,9 @@ mod goal {
         fn walk(dir: &Path, base: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
             for e in std::fs::read_dir(dir).unwrap() {
                 let path = e.unwrap().path();
+                if path.file_name().is_some_and(|n| n == ".lock") {
+                    continue;
+                }
                 let name = path.strip_prefix(base).unwrap().display().to_string();
                 let meta = std::fs::symlink_metadata(&path).unwrap();
                 if meta.is_dir() {

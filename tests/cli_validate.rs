@@ -71,8 +71,10 @@ impl Env {
 
     /// Every file in the data dir with its bytes, sorted by name.
     fn files(&self) -> Vec<(String, Vec<u8>)> {
+        // The store lock a real run creates (spec §3.3) is not a store file.
         let mut files: Vec<(String, Vec<u8>)> = std::fs::read_dir(&self.data)
             .unwrap()
+            .filter(|e| e.as_ref().unwrap().file_name() != ".lock")
             .map(|e| {
                 let e = e.unwrap();
                 (

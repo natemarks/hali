@@ -45,6 +45,21 @@
           }
         },
         {
+          "if": {"properties": {"rule": {"const": "STORE_LOCKED"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "path": {"type": "string"},
+                  "reason": {"enum": ["timeout", "changed"]}
+                },
+                "required": ["path", "reason"]
+              }
+            }
+          }
+        },
+        {
           "if": {"properties": {"rule": {"const": "SHAPES_INVALID"}}, "required": ["rule"]},
           "then": {
             "properties": {

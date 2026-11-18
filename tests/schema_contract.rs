@@ -292,6 +292,11 @@ mod goal {
         ("cli_scan_roots__scan_list_json", "scan"),
     ];
 
+    /// Snapshots written by the active goal (#5): hidden from a build without the goal feature
+    /// (the `STORE_LOCKED` envelope only validates once the `error` schema has its branch).
+    /// It is a stderr snapshot, so it needs no stdout row.
+    const GOAL_SNAPS_5: &[&str] = &["cli_lock__store_locked_json_envelope"];
+
     /// Snapshots written by the active goal (#13): hidden from a build without the goal feature.
     const GOAL_SNAPS_13: &[&str] = &[
         "cli_agent__show_agent_json",
@@ -414,6 +419,10 @@ mod goal {
         {
             pending_23 = &[];
         }
+        let mut pending_5: &[&str] = GOAL_SNAPS_5;
+        {
+            pending_5 = &[];
+        }
         let mut pending_13: &[&str] = GOAL_SNAPS_13;
         {
             pending_13 = &[];
@@ -443,6 +452,7 @@ mod goal {
                 || pending_21.contains(&stem.as_str())
                 || pending_24.contains(&stem.as_str())
                 || pending_23.contains(&stem.as_str())
+                || pending_5.contains(&stem.as_str())
                 || pending_13.contains(&stem.as_str())
                 || pending_25.contains(&stem.as_str())
             {
@@ -558,6 +568,7 @@ mod goal {
         assert!(goldens.len() >= 85, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 89, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 94, "found only {} goldens", goldens.len());
+        assert!(goldens.len() >= 95, "found only {} goldens", goldens.len());
         #[cfg(feature = "goal")]
         assert!(goldens.len() >= 100, "found only {} goldens", goldens.len());
         for g in &goldens {
