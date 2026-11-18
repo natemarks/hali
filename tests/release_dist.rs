@@ -2,10 +2,8 @@
 //! named `hali`, then the spec §13.5 fresh-machine sequence with a local copy instead of
 //! `gh release download`.
 
-#[cfg(feature = "goal")]
 mod release_support;
 
-#[cfg(feature = "goal")]
 mod dist {
     use std::collections::BTreeSet;
     use std::fs;

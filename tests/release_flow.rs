@@ -2,10 +2,8 @@
 //! throwaway fixture repo with a local bare `origin` and a fake `gh`. Nothing here contacts GitHub,
 //! tags or pushes in this repository, or runs the real release targets.
 
-#[cfg(feature = "goal")]
 mod release_support;
 
-#[cfg(feature = "goal")]
 mod flow {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;

@@ -2,10 +2,8 @@
 //! use sudo, and never pipe a download into a shell. This reads the files; it needs no outside
 //! software, so it is not ignored.
 
-#[cfg(feature = "goal")]
 mod release_support;
 
-#[cfg(feature = "goal")]
 mod scripts {
     use crate::release_support::read_script;
 

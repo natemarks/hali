@@ -4,10 +4,8 @@
 //! tags and validates the merge commit id. Everything runs against throwaway fixtures with a fake
 //! `gh`; nothing tags, pushes or contacts GitHub.
 
-#[cfg(feature = "goal")]
 mod release_support;
 
-#[cfg(feature = "goal")]
 mod hardening {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;

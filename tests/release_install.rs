@@ -1,10 +1,8 @@
 //! Goal of #33 (criteria 12 and 13): `scripts/install.sh`, run from a staged directory with a shell
 //! stub `hali` and a temporary HOME. Spec §4 gives the install locations.
 
-#[cfg(feature = "goal")]
 mod release_support;
 
-#[cfg(feature = "goal")]
 mod install {
     use std::collections::BTreeMap;
     use std::fs;
