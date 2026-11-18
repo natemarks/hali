@@ -267,10 +267,11 @@ pub fn new_files_dir(
         return Err(FilesDirError::Relative { path: lossy(&dir) });
     }
     let (real, usable) = real_target(&dir);
+    // A relative own dir (`HALI_DATA_DIR` is taken as given) is compared by its absolute form.
     if own
         .iter()
-        .filter(|d| d.is_absolute())
-        .any(|d| real.starts_with(real_target(d).0))
+        .filter_map(|d| std::path::absolute(d).ok())
+        .any(|d| real.starts_with(real_target(&d).0))
     {
         return Err(FilesDirError::OwnDir { path: lossy(&real) });
     }
@@ -288,8 +289,10 @@ pub fn new_files_dir(
 /// The real path of an absolute path that may not exist yet, walked one component at a time:
 /// each existing component is resolved through symlinks; after the first missing one the rest
 /// are applied lexically, and a `..` that pops the last missing one resumes the resolving from
-/// the real prefix. The flag is false when the deepest existing prefix is not a directory (a
-/// file, a dangling symlink, anything else), so the path cannot be a directory.
+/// the real prefix. Once a component makes the path unusable, the rest (`..` included) is
+/// appended as written, so the reported path still names the blocking component. The flag is
+/// false when the deepest existing prefix is not a directory (a file, a dangling symlink,
+/// anything else), so the path cannot be a directory.
 fn real_target(path: &Path) -> (PathBuf, bool) {
     use std::path::Component;
     let mut real = PathBuf::from("/");
@@ -318,6 +321,8 @@ fn real_target(path: &Path) -> (PathBuf, bool) {
                     }
                 }
             }
+            // Past a component that makes the path unusable, `..` stays as written.
+            Component::ParentDir if !usable => real.push(".."),
             Component::ParentDir => {
                 real.pop();
                 missing = missing.saturating_sub(1);
