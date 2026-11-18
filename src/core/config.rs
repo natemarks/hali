@@ -4,6 +4,7 @@
 use super::Error;
 use oxigraph::model::Literal;
 use serde::Deserialize;
+use std::ffi::OsStr;
 use std::path::Path;
 
 pub struct Config {
@@ -127,6 +128,47 @@ pub fn user_name(config: &Config, env: impl Fn(&str) -> Option<String>) -> Strin
         .or_else(|| env("USER").filter(usable))
         .or_else(|| env("LOGNAME").filter(usable))
         .unwrap_or_else(|| "user".to_string())
+}
+
+/// The acting AI agent's name (spec §9.6): `flag` (`--agent`) wins over `env` (`HALI_AGENT`, as
+/// read with `var_os`); an empty or whitespace-only `env` counts as unset. The name is trimmed.
+/// An empty flag, a control character in either trimmed name, or a non-UTF-8 `env` is a usage
+/// error; `env` is checked even when the flag wins.
+pub fn agent_name(flag: Option<&str>, env: Option<&OsStr>) -> Result<Option<String>, Error> {
+    let env = match env {
+        None => None,
+        Some(value) => {
+            let value = value
+                .to_str()
+                .ok_or_else(|| Error::usage("HALI_AGENT is not valid UTF-8"))?
+                .trim();
+            if value.chars().any(char::is_control) {
+                return Err(Error::usage(
+                    "HALI_AGENT must not contain control characters",
+                ));
+            }
+            Some(value).filter(|name| !name.is_empty())
+        }
+    };
+    match flag {
+        Some(flag) => check_agent_flag(flag)
+            .map(Some)
+            .map_err(|message| Error::usage(&message)),
+        None => Ok(env.map(str::to_string)),
+    }
+}
+
+/// Checks an `--agent` value and returns it trimmed: it must not be empty or whitespace-only
+/// and must not contain control characters. The argument parser uses it too.
+pub fn check_agent_flag(value: &str) -> Result<String, String> {
+    let name = value.trim();
+    if name.is_empty() {
+        return Err("an agent name must not be empty".to_string());
+    }
+    if name.chars().any(char::is_control) {
+        return Err("an agent name must not contain control characters".to_string());
+    }
+    Ok(name.to_string())
 }
 
 #[cfg(test)]

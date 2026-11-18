@@ -129,11 +129,13 @@ impl IdGen for SeededIdGen {
     }
 }
 
-/// What every operation runs with: the configured language and the injected clock and ids.
+/// What every operation runs with: the configured language, the injected clock and ids, and the
+/// acting AI agent's name, if one identified itself (spec §9.6).
 pub struct Context {
     language: String,
     clock: Box<dyn Clock>,
     ids: Box<dyn IdGen>,
+    agent: Option<String>,
 }
 
 impl Context {
@@ -142,7 +144,19 @@ impl Context {
             language: language.to_ascii_lowercase(),
             clock,
             ids,
+            agent: None,
         }
+    }
+
+    /// Sets the acting AI agent's name, already resolved by `config::agent_name`.
+    pub fn with_agent(mut self, agent: Option<String>) -> Context {
+        self.agent = agent;
+        self
+    }
+
+    /// The acting AI agent's name; `None` when the user acts.
+    pub fn agent(&self) -> Option<&str> {
+        self.agent.as_deref()
     }
 
     /// The language tag of new labels, lowercase.
