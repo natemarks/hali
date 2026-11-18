@@ -15,11 +15,13 @@ note() {
 }
 
 case "${HOME-}" in
+*[[:cntrl:]]*) die "HOME contains a newline or another control character; refusing to install" ;;
 /*) ;;
 *) die "HOME must be an absolute path, but it is '${HOME-}'" ;;
 esac
 
-here=$(cd -- "$(dirname -- "$0")" && pwd -P)
+unset CDPATH
+here=$(cd -P -- "$(dirname -- "$0")" && pwd -P)
 umask 022
 
 bin_dir=$HOME/.local/bin
@@ -35,12 +37,25 @@ files="0755 hali $bin_dir/hali
 0644 completions/_hali $zsh_dir/_hali
 0644 completions/hali.fish $fish_dir/hali.fish"
 
+# Every existing component of a destination's directory chain must be a directory (or a symlink to
+# one), so that `mkdir -p` cannot fail halfway through the install.
+need_dirs() { # <directory>
+    d=$1
+    while [ "$d" != / ] && [ ! -d "$d" ]; do
+        if [ -e "$d" ] || [ -L "$d" ]; then
+            die "$d is not a directory; move it aside and run install.sh again"
+        fi
+        d=$(dirname -- "$d")
+    done
+}
+
 # Check everything before writing anything.
 while read -r mode src dest; do
     [ -f "$here/$src" ] || die "$here/$src is missing; run install.sh from the unpacked release tarball"
     if [ -d "$dest" ] && [ ! -L "$dest" ]; then
         die "$dest is a directory; remove it and run install.sh again"
     fi
+    need_dirs "$(dirname -- "$dest")"
 done <<EOF
 $files
 EOF

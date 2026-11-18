@@ -82,16 +82,17 @@ install: ## developer-local install: release build to $(BINDIR), plus man page a
 GH ?= gh
 RELEASE_STATIC ?= static-check
 CARGO_EDIT_VERSION := 0.13.14
-RELEASE_ENV = BUMP='$(BUMP)' DRY_RUN='$(DRY_RUN)' GH='$(GH)' RELEASE_STATIC='$(RELEASE_STATIC)' CARGO_EDIT_VERSION='$(CARGO_EDIT_VERSION)'
+# Exported, never spliced into the recipe: a value reaches the scripts as data, whatever it holds.
+export BUMP DRY_RUN GH RELEASE_STATIC CARGO_EDIT_VERSION
 
 dist: ## release artifacts in dist/: hali-vX.Y.Z-x86_64-linux.tar.gz and SHA256SUMS (DRY_RUN=1 to preview)
-	@$(RELEASE_ENV) scripts/dist.sh
+	@scripts/dist.sh
 
 release-prepare: ## release step 1: open the version-bump PR (BUMP=patch|minor|major, DRY_RUN=1 to preview)
-	@$(RELEASE_ENV) scripts/release-prepare.sh
+	@scripts/release-prepare.sh
 
 release-publish: ## release step 2, after the bump PR is merged: dist, tag, GitHub release (DRY_RUN=1 to preview)
-	@$(RELEASE_ENV) scripts/release-publish.sh
+	@scripts/release-publish.sh
 
 .PHONY: dist release-prepare release-publish
 

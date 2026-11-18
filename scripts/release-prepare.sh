@@ -3,7 +3,8 @@
 # open the version-bump PR: branch release/vX.Y.Z, `cargo set-version --bump`, one commit touching
 # only Cargo.toml and Cargo.lock, push the branch, `gh pr create`, back to main. Every preflight
 # runs before anything changes; DRY_RUN=1 runs them and prints the rest.
-here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+unset CDPATH # a relative `cd` must not search CDPATH (or print the directory it found)
+here=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source-path=SCRIPTDIR source=release-lib.sh
 . "$here/release-lib.sh"
 

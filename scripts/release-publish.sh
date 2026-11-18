@@ -4,7 +4,8 @@
 # and SHA256SUMS. A rerun resumes: a tag vX.Y.Z already at HEAD (locally or on origin) is kept, never
 # moved or recreated. Every preflight runs before anything changes; DRY_RUN=1 runs them and prints
 # the rest.
-here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+unset CDPATH # a relative `cd` must not search CDPATH (or print the directory it found)
+here=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source-path=SCRIPTDIR source=release-lib.sh
 . "$here/release-lib.sh"
 
@@ -40,11 +41,13 @@ fi
 merge=$("$GH" pr list --state merged --base main --head "release/$tag" --json number,mergeCommit \
     --jq '.[0].mergeCommit.oid // empty') || die "gh pr list failed"
 [ -n "$merge" ] || die "no merged pull request for release/$tag into main; merge the PR from make release-prepare first"
+[[ $merge =~ ^[0-9a-f]{40}$ ]] ||
+    die "gh reported a malformed merge commit id for the release/$tag PR (not 40 lowercase hex digits): '$merge'"
 git merge-base --is-ancestor "$merge" HEAD 2>/dev/null ||
     die "the merge commit $merge of the release/$tag PR is not an ancestor of HEAD; pull main first"
 
 if "$GH" release view "$tag" >/dev/null 2>&1; then
-    die "a GitHub release $tag already exists; nothing to publish"
+    die "a GitHub release $tag already exists; nothing to publish (if it looks half-uploaded, inspect it with gh release view $tag, or delete it by hand and rerun)"
 fi
 need_licenses
 need_bench_results "$version"

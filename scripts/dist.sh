@@ -2,7 +2,8 @@
 # make dist (spec §13.4): build the release artifacts for x86_64-unknown-linux-gnu from a clean
 # commit into dist/: hali-vX.Y.Z-x86_64-linux.tar.gz (reproducible: sorted, owner 0, mtime = the
 # commit time, gzip -n) and SHA256SUMS. Needs bash, git, cargo, jq, tar, gzip and sha256sum.
-here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+unset CDPATH # a relative `cd` must not search CDPATH (or print the directory it found)
+here=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source-path=SCRIPTDIR source=release-lib.sh
 . "$here/release-lib.sh"
 
@@ -58,7 +59,8 @@ env -i "$bin" generate completions bash >"$top/completions/hali.bash"
 env -i "$bin" generate completions zsh >"$top/completions/_hali"
 env -i "$bin" generate completions fish >"$top/completions/hali.fish"
 chmod 0644 -- "$top/hali.1" "$top/completions/hali.bash" "$top/completions/_hali" "$top/completions/hali.fish"
-chmod 0755 -- "$top" "$top/completions"
+# Symbolic, with g-s: a numeric chmod keeps the setgid bit that a setgid TMPDIR passes on.
+chmod u=rwx,go=rx,g-s -- "$top" "$top/completions"
 
 tar -C "$stage" --sort=name --owner=0 --group=0 --numeric-owner --format=gnu \
     --mtime="@$epoch" -cf - "hali-v$version" | gzip -n -9 >"$stage/$name"
