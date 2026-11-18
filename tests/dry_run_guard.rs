@@ -51,6 +51,8 @@ const CASES: &[(&str, &str, &[&str])] = &[
     ("type remove", "store", &["type", "remove", "Paper"]),
     ("unrelate", "relations", &["unrelate", REL_R3, "annotates", REL_R1]),
     ("validate", "store", &["validate"]),
+    ("generate man", "store", &["generate", "man"]),
+    ("generate completions", "store", &["generate", "completions", "bash"]),
 ];
 
 fn leaf_paths(cmd: &clap::Command, prefix: &str, out: &mut Vec<String>) {
@@ -129,6 +131,7 @@ fn run_case(name: &str, fixture: &str, argv: &[&str], with_store: bool, json: bo
         .unwrap();
     let ctx = format!("`{name}` {args:?} (store: {with_store}, json: {json})");
     assert_eq!(snapshot(root.path()), before, "{ctx}: a dry run wrote");
+    assert!(out.status.code().is_some(), "{ctx}: killed by a signal");
     if with_store {
         assert!(
             out.status.success(),
