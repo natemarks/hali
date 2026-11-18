@@ -694,7 +694,9 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
         },
         None => core::config::Config::default(),
     };
-    let ctx = Context::new(&config.language, clock, ids).with_agent(agent);
+    let ctx = Context::new(&config.language, clock, ids)
+        .with_open(config.open.clone())
+        .with_agent(agent);
     if let Command::Scan { .. } = &cli.command {
         return scan(cli, &ctx, &config, config_path.as_deref());
     }

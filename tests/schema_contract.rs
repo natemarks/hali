@@ -292,6 +292,18 @@ mod goal {
         ("cli_scan_roots__scan_list_json", "scan"),
     ];
 
+    /// Snapshots written by the active goal (#11): hidden from a build without the goal feature
+    /// (the `editable` values they hold are only right when the goal is met).
+    const GOAL_SNAPS_11: &[&str] = &[
+        "cli_open__add_editable_json",
+        "cli_open__find_open_config_json",
+    ];
+
+    const GOAL_STDOUT_GOLDENS_11: &[(&str, &str)] = &[
+        ("cli_open__add_editable_json", "add"),
+        ("cli_open__find_open_config_json", "find"),
+    ];
+
     /// Snapshots written by the active goal (#9): hidden from a build without the goal feature
     /// (the `query` schema they name, and the `READ_ONLY_QUERY` branch of `error`, do not exist
     /// until the goal is met). Two are the W3C SPARQL Results JSON of `hali query`, which the
@@ -358,6 +370,7 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_21);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_24);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_23);
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_11);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_9);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_13);
         #[cfg(feature = "goal")]
@@ -436,6 +449,10 @@ mod goal {
         {
             pending_23 = &[];
         }
+        let mut pending_11: &[&str] = GOAL_SNAPS_11;
+        {
+            pending_11 = &[];
+        }
         let mut pending_9: &[&str] = GOAL_SNAPS_9;
         {
             pending_9 = &[];
@@ -473,6 +490,7 @@ mod goal {
                 || pending_21.contains(&stem.as_str())
                 || pending_24.contains(&stem.as_str())
                 || pending_23.contains(&stem.as_str())
+                || pending_11.contains(&stem.as_str())
                 || pending_9.contains(&stem.as_str())
                 || pending_5.contains(&stem.as_str())
                 || pending_13.contains(&stem.as_str())
@@ -591,6 +609,7 @@ mod goal {
         assert!(goldens.len() >= 89, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 94, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 95, "found only {} goldens", goldens.len());
+        assert!(goldens.len() >= 96, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 97, "found only {} goldens", goldens.len());
         #[cfg(feature = "goal")]
         assert!(goldens.len() >= 100, "found only {} goldens", goldens.len());

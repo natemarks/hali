@@ -157,6 +157,7 @@ pub struct Context {
     language: String,
     clock: Box<dyn Clock>,
     ids: Box<dyn IdGen>,
+    open: config::OpenConfig,
     agent: Option<String>,
 }
 
@@ -166,8 +167,20 @@ impl Context {
             language: language.to_ascii_lowercase(),
             clock,
             ids,
+            open: config::OpenConfig::default(),
             agent: None,
         }
+    }
+
+    /// The same context with the `[open]` config (spec §5.2).
+    pub fn with_open(mut self, open: config::OpenConfig) -> Context {
+        self.open = open;
+        self
+    }
+
+    /// The `[open]` config.
+    pub fn open(&self) -> &config::OpenConfig {
+        &self.open
     }
 
     /// Sets the acting AI agent's name, already resolved by `config::agent_name`.
@@ -652,7 +665,7 @@ impl Error {
             json!({"path": path.display().to_string()}),
         )
         .fix(
-            "Fix the config file; only [user] name, [vocabulary] language, [files] dir and [scan] exclude, include_hidden and max_size are read.",
+            "Fix the config file; only [user] name, [vocabulary] language, [files] dir, [scan] exclude, include_hidden and max_size, and [open] editor and system are read.",
         )
     }
 
