@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# fake-gh: the test double for `gh` used by the release tests (goal of #33). It never touches the
+# network. Every call is appended, as one line of space-joined arguments, to the file named by
+# FAKE_GH_LOG. Answers come from environment variables:
+#
+#   auth status     exit ${FAKE_GH_AUTH_EXIT:-0}
+#   pr list         prints ${FAKE_GH_PR_LIST:-[]} (a JSON array of objects with number, state,
+#                   headRefName, baseRefName, mergeCommit.oid), filtered by --head and --state when
+#                   given, then by --jq/-q when given (through jq -r), else printed as JSON
+#   pr create       exit ${FAKE_GH_PR_CREATE_EXIT:-0}, prints a fake URL
+#   release view    exit ${FAKE_GH_RELEASE_VIEW_EXIT:-1} (1 = no such release)
+#   release create  exit ${FAKE_GH_RELEASE_CREATE_EXIT:-0}; when FAKE_GH_ORIGIN (a bare repo) is set
+#                   the tag must exist there and every asset path must be a file, else exit 1
+#
+# Anything else exits 99, so a script that reaches for another gh verb fails loudly.
+set -u
+
+if [ -n "${FAKE_GH_LOG:-}" ]; then
+    printf '%s\n' "$*" >>"$FAKE_GH_LOG"
+fi
+
+cmd="${1:-} ${2:-}"
+case "$cmd" in
+"auth status")
+    code="${FAKE_GH_AUTH_EXIT:-0}"
+    if [ "$code" != 0 ]; then
+        echo "You are not logged into any GitHub hosts. To log in, run: gh auth login" >&2
+    fi
+    exit "$code"
+    ;;
+"pr list")
+    head=""
+    state=""
+    jqexpr=""
+    args=("$@")
+    for ((i = 2; i < ${#args[@]}; i++)); do
+        case "${args[$i]}" in
+        --head | -H) head="${args[$((i + 1))]:-}" ;;
+        --head=*) head="${args[$i]#--head=}" ;;
+        --state | -s) state="${args[$((i + 1))]:-}" ;;
+        --state=*) state="${args[$i]#--state=}" ;;
+        --jq | -q) jqexpr="${args[$((i + 1))]:-}" ;;
+        --jq=*) jqexpr="${args[$i]#--jq=}" ;;
+        esac
+    done
+    answer="${FAKE_GH_PR_LIST:-[]}"
+    answer=$(printf '%s' "$answer" | jq -c --arg h "$head" --arg s "$state" \
+        '[.[] | select(($h == "" or .headRefName == $h) and ($s == "" or $s == "all" or (.state | ascii_downcase) == ($s | ascii_downcase)))]')
+    if [ -n "$jqexpr" ]; then
+        printf '%s\n' "$answer" | jq -r "$jqexpr"
+    else
+        printf '%s\n' "$answer"
+    fi
+    exit 0
+    ;;
+"pr create")
+    code="${FAKE_GH_PR_CREATE_EXIT:-0}"
+    if [ "$code" = 0 ]; then echo "https://example.invalid/natemarks/hali/pull/1"; fi
+    exit "$code"
+    ;;
+"release view")
+    code="${FAKE_GH_RELEASE_VIEW_EXIT:-1}"
+    if [ "$code" != 0 ]; then echo "release not found" >&2; fi
+    exit "$code"
+    ;;
+"release create")
+    code="${FAKE_GH_RELEASE_CREATE_EXIT:-0}"
+    if [ "$code" != 0 ]; then
+        echo "fake-gh: release create failed on request" >&2
+        exit "$code"
+    fi
+    tag="${3:-}"
+    if [ -n "${FAKE_GH_ORIGIN:-}" ]; then
+        if ! git --git-dir="$FAKE_GH_ORIGIN" rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "fake-gh: tag $tag is not on origin (--verify-tag)" >&2
+            exit 1
+        fi
+        args=("$@")
+        for ((i = 3; i < ${#args[@]}; i++)); do
+            case "${args[$i]}" in
+            --title | -t | --notes | -n | --notes-file | -F | --target | --discussion-category | --notes-start-tag) i=$((i + 1)) ;;
+            -*) ;;
+            *)
+                if [ ! -f "${args[$i]}" ]; then
+                    echo "fake-gh: asset ${args[$i]} is not a file" >&2
+                    exit 1
+                fi
+                ;;
+            esac
+        done
+    fi
+    echo "https://example.invalid/natemarks/hali/releases/tag/$tag"
+    exit 0
+    ;;
+esac
+echo "fake-gh: unsupported: gh $*" >&2
+exit 99

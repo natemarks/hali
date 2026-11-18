@@ -19,8 +19,11 @@ dead-code: ## check for dead code
 audit: ## scan for vulnerable dependencies
 	cargo audit
 
-shellcheck: ## check shell scripts
+RELEASE_SCRIPTS := scripts/install.sh scripts/release-lib.sh scripts/dist.sh scripts/release-prepare.sh scripts/release-publish.sh
+
+shellcheck: ## check shell scripts (the release scripts and install.sh at default severity)
 	git ls-files 'scripts/*.sh' | xargs -r shellcheck --severity=error --format=gcc
+	git ls-files -- $(RELEASE_SCRIPTS) | xargs -r shellcheck --external-sources --format=gcc
 
 unit: ## run unit and CLI tests that need no outside software (with test-hooks)
 	cargo test --features test-hooks
@@ -28,7 +31,7 @@ unit: ## run unit and CLI tests that need no outside software (with test-hooks)
 unit-update-golden: ## accept changed insta snapshots (review them first)
 	INSTA_UPDATE=always cargo test --features test-hooks
 
-test-external: ## run the #[ignore]d tests that need outside software (shared-mime-info)
+test-external: ## run the #[ignore]d tests that need outside software (shared-mime-info; bash, git, tar, jq, shellcheck, cargo-edit)
 	cargo test --features test-hooks -- --ignored
 
 integration: ## run integration tests
@@ -74,6 +77,24 @@ install: ## developer-local install: release build to $(BINDIR), plus man page a
 	put 0644 "$$stage/fish" "$$FISH_COMPDIR/hali.fish"; \
 	if $$bin_new; then echo "warning: created $$BINDIR; log out and back in (or start a new login shell) so it is on PATH" >&2; fi; \
 	if $$zsh_new; then echo "note: add $$ZSH_COMPDIR to fpath before compinit in ~/.zshrc for zsh completions" >&2; fi
+
+# Release (spec §13.3-13.5): thin wrappers over scripts/. GH and RELEASE_STATIC are test seams.
+GH ?= gh
+RELEASE_STATIC ?= static-check
+CARGO_EDIT_VERSION := 0.13.14
+# Exported, never spliced into the recipe: a value reaches the scripts as data, whatever it holds.
+export BUMP DRY_RUN GH RELEASE_STATIC CARGO_EDIT_VERSION
+
+dist: ## release artifacts in dist/: hali-vX.Y.Z-x86_64-linux.tar.gz and SHA256SUMS (DRY_RUN=1 to preview)
+	@scripts/dist.sh
+
+release-prepare: ## release step 1: open the version-bump PR (BUMP=patch|minor|major, DRY_RUN=1 to preview)
+	@scripts/release-prepare.sh
+
+release-publish: ## release step 2, after the bump PR is merged: dist, tag, GitHub release (DRY_RUN=1 to preview)
+	@scripts/release-publish.sh
+
+.PHONY: dist release-prepare release-publish
 
 clean-cache: ## clean Rust build artifacts
 	cargo clean
