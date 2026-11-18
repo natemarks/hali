@@ -56,6 +56,19 @@ for t in dist release-prepare release-publish; do
     want "$out" "$t (BUMP from the environment)" "BUMP=patch"
 done
 
+# --- quoting (security finding 5): a value with a quote must reach the script as data, never run as
+# a command. Each variable in turn gets "x'; touch <marker>; '" on the make command line; the marker
+# must not appear and the stub must print the value unchanged.
+for t in dist release-prepare release-publish; do
+    for var in BUMP DRY_RUN GH RELEASE_STATIC; do
+        marker="$tmp/pwned-$t-$var"
+        val="x'; touch $marker; '"
+        out=$(cd "$tmp/wire" && make --no-print-directory "$t" "$var=$val" 2>&1)
+        [ ! -e "$marker" ] || fail "make $t: $var=\"...'; touch ...; '\" was run as a shell command (the Makefile splices values into the command line; export them instead)"
+        case "$out" in *"$var=$val "*) ;; *) fail "make $t: $var did not reach the script unchanged; got: $out" ;; esac
+    done
+done
+
 # --- shellcheck target covers install.sh at default severity
 if [ ! -f scripts/install.sh ]; then
     fail "scripts/install.sh does not exist"

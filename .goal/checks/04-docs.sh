@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016  # backticks in the quoted wording are literal
 set -uo pipefail
 # Criterion 16 (#33): licenses, Cargo.toml, spec §13.3/§13.4/§16, README Install, AGENTS.md,
 # .gitignore and CI. Everything is a read of files in this worktree.
@@ -74,6 +75,29 @@ fi
 for t in 'make dist' 'make release-prepare' 'make release-publish'; do
     grep -qF "\`$t" AGENTS.md || fail "AGENTS.md command table does not list \`$t\`"
 done
+
+# --- review round (criterion 25): wording that matches what the scripts do
+readme_install=$(awk '/^## Install/ { on = 1; next } /^## / { on = 0 } on' README.md)
+printf '%s\n' "$readme_install" | grep -qF 'skill --help' ||
+    fail 'README Install does not say that the skill step is guarded by `hali skill --help`'
+printf '%s\n' "$readme_install" | grep -Eqi 'not run[^.]*(sudo|as root)' ||
+    fail 'README Install does not say not to run install.sh under sudo or as root (it installs into the HOME of whoever runs it)'
+s135=$(section '^### 13\.5 ' '^---')
+if ! printf '%s\n%s\n' "$s134" "$s135" | grep -Eqi 'not run[^.]*(sudo|as root)'; then
+    fail 'spec §13.4/§13.5 does not say not to run install.sh under sudo or as root'
+fi
+printf '%s\n' "$s133" | grep -qF 'above every `vX.Y.Z` tag' ||
+    fail 'spec §13.3 does not say "above every `vX.Y.Z` tag" (only vX.Y.Z tags count)'
+if printf '%s\n' "$s133" | grep -qF 'every other `v*` tag'; then
+    fail 'spec §13.3 still says "every other `v*` tag"; only vX.Y.Z tags count'
+fi
+s132=$(section '^### 13\.2 ' '^### 13\.3 ')
+printf '%s\n' "$s132" | grep -E 'DRY_RUN' | grep -Eq 'static-check[^.]*release-prepare|release-prepare[^.]*static-check' ||
+    fail 'spec §13.2 DRY_RUN sentence does not say that `make static-check` runs for release-prepare only'
+printf '%s\n' "$s133" | awk 'tolower($0) ~ /(delete|remove)/ && /release\/vX\.Y\.Z/ && tolower($0) ~ /branch/ && tolower($0) ~ /(origin|remote)/ && tolower($0) ~ /local/ { found = 1 } END { exit !found }' ||
+    fail 'spec §13.3 does not document the release-prepare recovery (delete the local and remote release/vX.Y.Z branch by hand) on one line'
+printf '%s\n' "$s133" | grep -Eqi 'half-uploaded|partially uploaded' ||
+    fail 'spec §13.3 does not document the release-publish recovery for a release that exists but looks half-uploaded'
 
 # --- .gitignore
 grep -qx '/dist' .gitignore || fail ".gitignore does not ignore /dist"

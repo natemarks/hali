@@ -18,7 +18,7 @@ Approved by the maintainer on 2026-11-18, with all eleven defaults. The contract
 
 ## Goal map
 
-All `tests/release_{install,dist,flow}.rs` tests are goal-tagged (`#[cfg(feature = "goal")]` on its own line) and `#[ignore = "needs bash, git, tar, shellcheck, jq, cargo-edit (make test-external)"]`. Because `make goal-tests` skips ignored tests, `.goal/checks/01-release-tests.sh` runs them with `-- --ignored`. "spawn NotFound" means the script does not exist yet.
+All `tests/release_{install,dist,flow,hardening}.rs` tests are goal-tagged (`#[cfg(feature = "goal")]` on its own line) and `#[ignore = "needs bash, git, tar, shellcheck, jq, cargo-edit (make test-external)"]`. Because `make goal-tests` skips ignored tests, `.goal/checks/01-release-tests.sh` runs them with `-- --ignored`. "spawn NotFound" means the script does not exist yet.
 
 | # | Acceptance criterion | Kind | Check | Expected failure |
 |---|---|---|---|---|
@@ -38,6 +38,15 @@ All `tests/release_{install,dist,flow}.rs` tests are goal-tagged (`#[cfg(feature
 | 14 | install.sh is shellcheck-clean at default severity, and `make shellcheck` covers it | check | `02-make-wiring.sh` | `scripts/install.sh: does not exist` |
 | 15 | The §13.5 sequence (local copy instead of `gh release download`) installs into a temp HOME | test | `release_dist::fresh_machine_install` | spawn NotFound |
 | 16 | `LICENSE-MIT` / `LICENSE-APACHE` content, `Cargo.toml` license field, spec §13.3/§13.4/§16, README `## Install`, AGENTS.md, `/dist` ignored, CI pins cargo-edit 0.13.14 | check | `04-docs.sh` | `no "## Install"`, no license files |
+| 17 | install.sh with `~/.local/share/man/man1` a regular file: non-zero, message prefixed `install.sh:`, nothing installed or left behind (review A1) | test | `release_hardening::install_refuses_a_file_where_a_directory_is_needed` | stderr is `mkdir: Already exists` with no `install.sh:` prefix; `hali` already installed |
+| 18 | install.sh with a HOME containing a newline: refused, nothing written (security 1) | test | `release_hardening::install_refuses_a_home_with_a_newline` | exits 0 and installs |
+| 19 | install.sh writes every destination through `mktemp` in its own directory and `mv -f -T`; no `rm -f "$dest"`, `cp`, `ln -sf` (regression guard; already holds) | test | `release_scripts::install_writes_atomically` (not ignored) | none: passes today |
+| 20 | dist, release-prepare, release-publish run by a relative path with `CDPATH` set to a decoy holding `scripts/` still source their own `release-lib.sh` (review A2) | test | `release_hardening::scripts_ignore_cdpath` | `here` gets two lines; `release-lib.sh: No such file`, `parse_dry_run: command not found` |
+| 21 | dist with TMPDIR a setgid directory: tarball directories exactly 0755, bytes equal to a normal-TMPDIR build (review A6; skipped when the filesystem refuses setgid) | test | `release_hardening::dist_ignores_a_setgid_tmpdir` | `hali-v0.2.0/` mode `rwxr-sr-x` |
+| 22 | publish orders versions numerically (0.9.1 refused over v0.10.0, 0.10.1 accepted over v0.9.0); only vX.Y.Z tags count (`v0.3.0-rc1`, `vfoo`, `v0.4.0-beta` ignored) (review A7/A13; regression guards, already hold) | test | `release_hardening::{publish_orders_versions_numerically,publish_counts_only_vx_y_z_tags}` | none: pass today |
+| 23 | publish refuses a merge-commit id that is not 40 lowercase hex (`--help`, short, uppercase, non-hex) with a message other than the ancestor refusal (security 7) | test | `release_hardening::publish_refuses_a_malformed_merge_commit_id` | `--help` is passed to `git merge-base`: publishes (exit 0) |
+| 24 | Makefile values with a `'` reach the scripts as data, never as a shell command (security 5) | check | `02-make-wiring.sh` | the marker file is created; `bash: : command not found` |
+| 25 | Docs: README skill guard and no-sudo note; spec §13.4/§13.5 no-sudo; §13.3 "above every `vX.Y.Z` tag"; §13.2 static-check only for release-prepare; §13.3 release-prepare and half-uploaded recoveries | check | `04-docs.sh` | eight `MISSING:` lines |
 
 ## Approach (for the implementer)
 

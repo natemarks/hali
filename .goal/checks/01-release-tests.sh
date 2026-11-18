@@ -18,7 +18,7 @@ done
 
 echo "--- release tests that need outside software (--ignored)"
 cargo test --no-fail-fast --features test-hooks,goal \
-    --test release_install --test release_dist --test release_flow \
+    --test release_install --test release_dist --test release_flow --test release_hardening \
     -- --ignored || status=1
 
 echo "--- release_scripts (not ignored)"

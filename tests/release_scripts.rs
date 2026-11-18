@@ -53,6 +53,37 @@ mod scripts {
         None
     }
 
+    /// Criterion 19: install.sh writes every destination through a temp file in the destination's
+    /// own directory and a rename, never in place. Read from the file; deliberately not a model of
+    /// the shell.
+    #[test]
+    fn install_writes_atomically() {
+        let text = read_script("install.sh");
+        let code: Vec<&str> = text
+            .lines()
+            .filter(|l| !l.trim().starts_with('#'))
+            .collect();
+        let has = |needle: &str| code.iter().any(|l| l.contains(needle));
+        assert!(
+            code.iter()
+                .any(|l| l.contains("mktemp") && l.contains("$dir/")),
+            "install.sh must create each temp file with mktemp in the destination directory"
+        );
+        assert!(has("mv -f -T"), "install.sh must rename with `mv -f -T`");
+        for bad in ["rm -f \"$dest\"", "ln -sf", "ln -s -f", "install -m"] {
+            assert!(
+                !has(bad),
+                "install.sh must not use `{bad}` on a destination"
+            );
+        }
+        assert!(
+            !code
+                .iter()
+                .any(|l| l.trim_start().starts_with("cp ") || l.contains("; cp ")),
+            "install.sh must not cp onto a destination"
+        );
+    }
+
     #[test]
     fn never_delete_or_force_tags() {
         // The detector first: each of these must be flagged, and ordinary lines must not be.
