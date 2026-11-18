@@ -1212,8 +1212,8 @@ mod goal {
             for args in [
                 vec!["--json", "new", "x"],
                 vec!["--json", "--dry-run", "new", "x"],
-                vec!["--json", "--dry-run", "--path-only", "new", "x"],
-                vec!["--json", "--path-only", "new", "x"],
+                vec!["--json", "--dry-run", "new", "x", "--path-only"],
+                vec!["--json", "new", "x", "--path-only"],
             ] {
                 let out = env.run(1, &[], args.clone());
                 let e = unusable(&out, "not_a_directory");
@@ -1236,7 +1236,7 @@ mod goal {
             for args in [
                 vec!["new", "x"],
                 vec!["--dry-run", "new", "x"],
-                vec!["--dry-run", "--path-only", "new", "x"],
+                vec!["--dry-run", "new", "x", "--path-only"],
             ] {
                 let out = env.run(1, &[], args.clone());
                 assert_eq!(out.code, Some(3), "{case} {args:?}: {}", out.stderr);
