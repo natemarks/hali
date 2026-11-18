@@ -1,0 +1,6 @@
+tests/release_dist.rs
+tests/release_flow.rs
+tests/release_install.rs
+tests/release_scripts.rs
+tests/release_support/mod.rs
+tests/fixtures/release/fake-gh
