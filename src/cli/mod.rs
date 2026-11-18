@@ -31,6 +31,9 @@ struct Cli {
     /// Confirm a destructive command without asking
     #[arg(long, global = true)]
     yes: bool,
+    /// Attribute new catalog records to this AI agent (overrides HALI_AGENT)
+    #[arg(long, global = true, value_name = "NAME", value_parser = agent_flag)]
+    agent: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
@@ -513,6 +516,11 @@ fn env(key: &str) -> Option<String> {
     std::env::var(key).ok()
 }
 
+/// The `--agent` value parser: trimmed, non-empty, no control characters (spec §9.6).
+fn agent_flag(value: &str) -> Result<String, String> {
+    core::config::check_agent_flag(value)
+}
+
 /// The clap command tree, for tests that enumerate every subcommand.
 pub fn command() -> clap::Command {
     Cli::command().styles(clap::builder::Styles::plain())
@@ -641,6 +649,11 @@ fn show_schema(cli: &Cli, words: &[String]) -> ExitCode {
 }
 
 fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), Error> {
+    // Checked on every command but `schema`, before the store is read.
+    let agent = core::config::agent_name(
+        cli.agent.as_deref(),
+        std::env::var_os("HALI_AGENT").as_deref(),
+    )?;
     if let Command::Scan { .. } = &cli.command {
         scan_usage(&cli.command)?;
     }
@@ -653,7 +666,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
         },
         None => core::config::Config::default(),
     };
-    let ctx = Context::new(&config.language, clock, ids);
+    let ctx = Context::new(&config.language, clock, ids).with_agent(agent);
     if let Command::Scan { .. } = &cli.command {
         return scan(cli, &ctx, &config, config_path.as_deref());
     }

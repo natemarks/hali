@@ -292,6 +292,17 @@ mod goal {
         ("cli_scan_roots__scan_list_json", "scan"),
     ];
 
+    /// Snapshots written by the active goal (#13): hidden from a build without the goal feature.
+    const GOAL_SNAPS_13: &[&str] = &[
+        "cli_agent__show_agent_json",
+        "cli_dry_run__add_agent_dry_run_json",
+    ];
+
+    const GOAL_STDOUT_GOLDENS_13: &[(&str, &str)] = &[
+        ("cli_agent__show_agent_json", "show"),
+        ("cli_dry_run__add_agent_dry_run_json", "add"),
+    ];
+
     /// Every stdout snapshot's row.
     #[allow(unused_assignments, unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
@@ -309,6 +320,7 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_21);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_24);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_23);
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_13);
         // The goldens #24 rewrites are hidden without the goal feature (see `goldens`), and so
         // are their rows.
         let mut hidden_24: &[&str] = GOAL_SNAPS_24;
@@ -383,6 +395,10 @@ mod goal {
         {
             pending_23 = &[];
         }
+        let mut pending_13: &[&str] = GOAL_SNAPS_13;
+        {
+            pending_13 = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -403,6 +419,7 @@ mod goal {
                 || pending_21.contains(&stem.as_str())
                 || pending_24.contains(&stem.as_str())
                 || pending_23.contains(&stem.as_str())
+                || pending_13.contains(&stem.as_str())
             {
                 continue;
             }
@@ -587,6 +604,11 @@ mod goal {
         // (#23): the `scan` schema too.
         if command == "scan_forget_root" {
             return "scan".to_string();
+        }
+        // `cli_dry_run__add_agent_dry_run_json` is the dry run of `add --agent` (#13): the `add`
+        // schema.
+        if command == "add_agent" {
+            return "add".to_string();
         }
         command.replace('_', " ")
     }

@@ -466,15 +466,23 @@ pub fn scan_roots<I: IntoIterator<Item = Walked>>(
         removed_quads.extend(resource::forget_quads(store, r, &leaving));
     }
 
-    let mut person = resource::user(store);
+    let mut attribution = resource::Attribution::of(ctx, store);
     let mut added: Vec<NamedNode> = Vec::new();
     let mut media_types: BTreeMap<String, usize> = BTreeMap::new();
     for (i, facts) in new.iter().enumerate() {
         if taken.contains(&i) {
             continue;
         }
-        let (r, quads) =
-            resource::catalog_quads(ctx, facts, None, &[], &[], &mut person, user_name, &now)?;
+        let (r, quads) = resource::catalog_quads(
+            ctx,
+            facts,
+            None,
+            &[],
+            &[],
+            &mut attribution,
+            user_name,
+            &now,
+        )?;
         added_quads.extend(quads);
         added.push(r);
         *media_types.entry(facts.media_type.clone()).or_default() += 1;
