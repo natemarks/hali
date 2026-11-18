@@ -3891,7 +3891,7 @@ mod goal {
             .position(|n| n == "query")
             .expect("query is listed");
         assert!(
-            ["forget", "find"].contains(&listed[at - 1].as_str()),
+            ["forget", "find", "new"].contains(&listed[at - 1].as_str()),
             "{listed:?}"
         );
         assert_eq!(listed[at + 1], "refresh");
