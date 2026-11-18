@@ -14,7 +14,7 @@ if [ -z "$row" ]; then
     exit 1
 fi
 got=$(printf '%s\n' "$row" | tr -d ' ')
-if ! printf '%s\n' "$got" | grep -qE -- '"store".*&\["new","guard probe"\]'; then
+if ! printf '%s\n' "$got" | grep -qE -- '"store".*&\["new","guardprobe"\]'; then
     echo "MISSING: the \"new\" row in $guard must name the \"store\" fixture and have the argv [\"new\", \"guard probe\"]; found: $row"
     exit 1
 fi
