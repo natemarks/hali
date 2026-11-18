@@ -447,11 +447,16 @@ pub struct Created {
 /// The most bytes of a slug in a new file's name.
 const MAX_SLUG: usize = 128;
 
-/// The base name of a new file for `title`: its `slug`, cut to at most `MAX_SLUG` bytes at a
-/// character boundary with no trailing `-`, or `untitled` when nothing is left. Only letters,
-/// digits and `-`, so it can never leave the directory.
+/// The base name of a new file for `title`: its `slug`, in which anything lowercasing made that
+/// is not alphanumeric (the combining dot of `İ`) is a separator too, cut to at most `MAX_SLUG`
+/// bytes at a character boundary with no trailing `-`, or `untitled` when nothing is left. Only
+/// letters, digits and `-`, so it can never leave the directory.
 fn file_slug(title: &str) -> String {
-    let mut slug = super::slug(title);
+    let mut slug = super::slug(title)
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
     if slug.len() > MAX_SLUG {
         let mut cut = MAX_SLUG;
         while !slug.is_char_boundary(cut) {

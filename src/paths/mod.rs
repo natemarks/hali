@@ -266,18 +266,18 @@ pub fn new_files_dir(
     if !dir.is_absolute() {
         return Err(FilesDirError::Relative { path: lossy(&dir) });
     }
-    let real = real_target(&dir);
+    let (real, usable) = real_target(&dir);
     if own
         .iter()
         .filter(|d| d.is_absolute())
-        .any(|d| real.starts_with(real_target(d)))
+        .any(|d| real.starts_with(real_target(d).0))
     {
         return Err(FilesDirError::OwnDir { path: lossy(&real) });
     }
     let Some(text) = real.to_str() else {
         return Err(FilesDirError::NonUtf8 { path: lossy(&real) });
     };
-    if std::fs::metadata(&real).is_ok_and(|m| !m.is_dir()) {
+    if !usable {
         return Err(FilesDirError::NotADirectory {
             path: text.to_string(),
         });
@@ -285,28 +285,48 @@ pub fn new_files_dir(
     Ok(text.to_string())
 }
 
-/// The real path of an absolute path that may not exist yet: the real path of its longest
-/// prefix that resolves, with the rest of its components applied in order.
-fn real_target(path: &Path) -> PathBuf {
+/// The real path of an absolute path that may not exist yet, walked one component at a time:
+/// each existing component is resolved through symlinks; after the first missing one the rest
+/// are applied lexically, and a `..` that pops the last missing one resumes the resolving from
+/// the real prefix. The flag is false when the deepest existing prefix is not a directory (a
+/// file, a dangling symlink, anything else), so the path cannot be a directory.
+fn real_target(path: &Path) -> (PathBuf, bool) {
     use std::path::Component;
-    let parts: Vec<Component<'_>> = path.components().collect();
-    for i in (1..=parts.len()).rev() {
-        let prefix: PathBuf = parts[..i].iter().collect();
-        let Ok(mut real) = std::fs::canonicalize(&prefix) else {
-            continue;
-        };
-        for part in &parts[i..] {
-            match part {
-                Component::ParentDir => {
-                    real.pop();
+    let mut real = PathBuf::from("/");
+    let mut missing = 0usize;
+    let mut usable = true;
+    for part in path.components() {
+        match part {
+            Component::Normal(name) => {
+                let next = real.join(name);
+                if missing > 0 || !usable {
+                    missing += 1;
+                    real = next;
+                } else if std::fs::symlink_metadata(&next).is_err() {
+                    missing = 1;
+                    real = next;
+                } else {
+                    match std::fs::canonicalize(&next) {
+                        Ok(resolved) => {
+                            usable = resolved.is_dir();
+                            real = resolved;
+                        }
+                        Err(_) => {
+                            usable = false;
+                            real = next;
+                        }
+                    }
                 }
-                Component::Normal(name) => real.push(name),
-                _ => {}
             }
+            Component::ParentDir => {
+                real.pop();
+                missing = missing.saturating_sub(1);
+            }
+            Component::RootDir => real = PathBuf::from("/"),
+            Component::CurDir | Component::Prefix(_) => {}
         }
-        return real;
     }
-    path.to_path_buf()
+    (real, usable)
 }
 
 #[cfg(test)]
