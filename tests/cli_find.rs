@@ -715,14 +715,14 @@ mod goal {
         assert_eq!(
             out.stdout,
             "{\"schema_version\":1,\"schemas\":[\"add\",\"concept add\",\"concept edit\",\
-             \"concept list\",\"concept remove\",\"concept rename\",\"concept show\",\"describe\",\"edit\",\"error\",\"find\",\"forget\",\"new\",\"refresh\",\"relate\",\
+             \"concept list\",\"concept remove\",\"concept rename\",\"concept show\",\"describe\",\"edit\",\"error\",\"find\",\"forget\",\"new\",\"query\",\"refresh\",\"relate\",\
              \"relation add\",\"relation list\",\"relation remove\",\"relink\",\"scan\",\"schema\",\"show\",\
              \"type add\",\"type list\",\"type remove\",\"unrelate\",\"validate\"]}\n"
         );
         let out = env.run(["schema"]);
         assert_eq!(
             out.stdout,
-            "add\nconcept add\nconcept edit\nconcept list\nconcept remove\nconcept rename\nconcept show\ndescribe\nedit\nerror\nfind\nforget\nnew\nrefresh\nrelate\nrelation add\nrelation list\nrelation remove\nrelink\nscan\nschema\nshow\ntype add\ntype list\ntype remove\nunrelate\nvalidate\n"
+            "add\nconcept add\nconcept edit\nconcept list\nconcept remove\nconcept rename\nconcept show\ndescribe\nedit\nerror\nfind\nforget\nnew\nquery\nrefresh\nrelate\nrelation add\nrelation list\nrelation remove\nrelink\nscan\nschema\nshow\ntype add\ntype list\ntype remove\nunrelate\nvalidate\n"
         );
     }
 

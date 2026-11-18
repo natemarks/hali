@@ -852,6 +852,7 @@ mod goal {
                 "find",
                 "forget",
                 "new",
+                "query",
                 "refresh",
                 "relate",
                 "relation add",
@@ -868,7 +869,7 @@ mod goal {
                 "validate"
             ])
         );
-        assert_eq!(v["schemas"].as_array().unwrap().len(), 27);
+        assert_eq!(v["schemas"].as_array().unwrap().len(), 28);
         let out = env.run(["schema", "refresh"]);
         assert_eq!(out.code, Some(0), "{}", out.stderr);
         assert_eq!(out.stderr, "");

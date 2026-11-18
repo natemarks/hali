@@ -292,6 +292,22 @@ mod goal {
         ("cli_scan_roots__scan_list_json", "scan"),
     ];
 
+    /// Snapshots written by the active goal (#9): hidden from a build without the goal feature
+    /// (the `query` schema they name, and the `READ_ONLY_QUERY` branch of `error`, do not exist
+    /// until the goal is met). Two are the W3C SPARQL Results JSON of `hali query`, which the
+    /// `query` schema describes and which is not the hali envelope; the third is the error
+    /// envelope of an UPDATE.
+    const GOAL_SNAPS_9: &[&str] = &[
+        "cli_query__ask_json",
+        "cli_query__read_only_query_json_envelope",
+        "cli_query__select_json",
+    ];
+
+    const GOAL_STDOUT_GOLDENS_9: &[(&str, &str)] = &[
+        ("cli_query__ask_json", "query"),
+        ("cli_query__select_json", "query"),
+    ];
+
     /// Snapshots written by the active goal (#5): hidden from a build without the goal feature
     /// (the `STORE_LOCKED` envelope only validates once the `error` schema has its branch).
     /// It is a stderr snapshot, so it needs no stdout row.
@@ -342,6 +358,7 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_21);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_24);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_23);
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_9);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_13);
         #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_25);
@@ -419,6 +436,10 @@ mod goal {
         {
             pending_23 = &[];
         }
+        let mut pending_9: &[&str] = GOAL_SNAPS_9;
+        {
+            pending_9 = &[];
+        }
         let mut pending_5: &[&str] = GOAL_SNAPS_5;
         {
             pending_5 = &[];
@@ -452,6 +473,7 @@ mod goal {
                 || pending_21.contains(&stem.as_str())
                 || pending_24.contains(&stem.as_str())
                 || pending_23.contains(&stem.as_str())
+                || pending_9.contains(&stem.as_str())
                 || pending_5.contains(&stem.as_str())
                 || pending_13.contains(&stem.as_str())
                 || pending_25.contains(&stem.as_str())
@@ -569,6 +591,7 @@ mod goal {
         assert!(goldens.len() >= 89, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 94, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 95, "found only {} goldens", goldens.len());
+        assert!(goldens.len() >= 97, "found only {} goldens", goldens.len());
         #[cfg(feature = "goal")]
         assert!(goldens.len() >= 100, "found only {} goldens", goldens.len());
         for g in &goldens {
@@ -3657,6 +3680,266 @@ mod goal {
             ),
             (taken(json!({})), false),
         ] {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema error` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #9: `hali schema query` is the W3C SPARQL 1.1 Query Results JSON of a SELECT or ASK. It is
+    /// not the hali envelope (no `schema_version`), a SELECT has `head.vars` and
+    /// `results.bindings`, an ASK has an empty `head` and a `boolean`, never both; a term is a
+    /// `uri`, `literal`, `bnode` or `triple`.
+    #[test]
+    fn query_schema_accepts_and_rejects() {
+        let uri = |v: &str| json!({"type": "uri", "value": v});
+        let select = || {
+            json!({"head": {"vars": ["a", "b"]}, "results": {"bindings": [
+                {"a": uri("urn:x:a"),
+                 "b": {"type": "literal", "value": "v", "xml:lang": "en"}},
+                {"a": uri("urn:x:c")}]}})
+        };
+        let ask = |b: bool| json!({"head": {}, "boolean": b});
+        let with = |mut v: Value, path: &[&str], value: Value| {
+            let mut at = &mut v;
+            for key in &path[..path.len() - 1] {
+                at = &mut at[*key];
+            }
+            at[path[path.len() - 1]] = value;
+            v
+        };
+        let without = |mut v: Value, path: &[&str]| {
+            let mut at = &mut v;
+            for key in &path[..path.len() - 1] {
+                at = &mut at[*key];
+            }
+            at.as_object_mut().unwrap().remove(path[path.len() - 1]);
+            v
+        };
+        let binding =
+            |term: Value| json!({"head": {"vars": ["a"]}, "results": {"bindings": [{"a": term}]}});
+        let cases: Vec<(&str, Value, bool)> = vec![
+            ("select", select(), true),
+            ("ask true", ask(true), true),
+            ("ask false", ask(false), true),
+            (
+                "select, no rows",
+                json!({"head": {"vars": ["a"]}, "results": {"bindings": []}}),
+                true,
+            ),
+            (
+                "select, no variables",
+                json!({"head": {"vars": []}, "results": {"bindings": [{}]}}),
+                true,
+            ),
+            (
+                "typed literal",
+                binding(json!({"type": "literal", "value": "5",
+                    "datatype": "http://www.w3.org/2001/XMLSchema#integer"})),
+                true,
+            ),
+            (
+                "plain literal",
+                binding(json!({"type": "literal", "value": "t"})),
+                true,
+            ),
+            (
+                "blank node",
+                binding(json!({"type": "bnode", "value": "b0"})),
+                true,
+            ),
+            (
+                "triple term",
+                binding(json!({"type": "triple", "value": {
+                    "subject": uri("urn:x:s"), "predicate": uri("urn:x:p"),
+                    "object": {"type": "literal", "value": "o"}}})),
+                true,
+            ),
+            // The hali envelope is not this format.
+            (
+                "select with schema_version",
+                with(select(), &["schema_version"], json!(1)),
+                false,
+            ),
+            (
+                "ask with schema_version",
+                with(ask(true), &["schema_version"], json!(1)),
+                false,
+            ),
+            (
+                "enveloped select",
+                json!({"schema_version": 1, "results": select()}),
+                false,
+            ),
+            ("select without head", without(select(), &["head"]), false),
+            ("ask without head", json!({"boolean": true}), false),
+            (
+                "select without vars",
+                without(select(), &["head", "vars"]),
+                false,
+            ),
+            (
+                "select without results",
+                without(select(), &["results"]),
+                false,
+            ),
+            (
+                "select without bindings",
+                without(select(), &["results", "bindings"]),
+                false,
+            ),
+            ("empty object", json!({}), false),
+            ("head only", json!({"head": {}}), false),
+            (
+                "ask boolean a string",
+                with(ask(true), &["boolean"], json!("true")),
+                false,
+            ),
+            (
+                "ask boolean null",
+                with(ask(true), &["boolean"], Value::Null),
+                false,
+            ),
+            (
+                "select and ask in one",
+                with(select(), &["boolean"], json!(true)),
+                false,
+            ),
+            (
+                "ask with results",
+                with(ask(true), &["results"], json!({"bindings": []})),
+                false,
+            ),
+            (
+                "bindings not an array",
+                with(select(), &["results", "bindings"], json!({})),
+                false,
+            ),
+            (
+                "vars not strings",
+                with(select(), &["head", "vars"], json!([1])),
+                false,
+            ),
+            (
+                "vars a string",
+                with(select(), &["head", "vars"], json!("a")),
+                false,
+            ),
+            (
+                "unknown term type",
+                binding(json!({"type": "iri", "value": "urn:x:a"})),
+                false,
+            ),
+            (
+                "term without type",
+                binding(json!({"value": "urn:x:a"})),
+                false,
+            ),
+            ("term without value", binding(json!({"type": "uri"})), false),
+            (
+                "term value a number",
+                binding(json!({"type": "uri", "value": 1})),
+                false,
+            ),
+            ("term a string", binding(json!("urn:x:a")), false),
+            (
+                "literal datatype a number",
+                binding(json!({"type": "literal", "value": "5", "datatype": 5})),
+                false,
+            ),
+            (
+                "literal xml:lang a number",
+                binding(json!({"type": "literal", "value": "x", "xml:lang": 5})),
+                false,
+            ),
+            (
+                "triple without object",
+                binding(json!({"type": "triple", "value": {
+                    "subject": uri("urn:x:s"), "predicate": uri("urn:x:p")}})),
+                false,
+            ),
+            (
+                "extra top-level key",
+                with(select(), &["extra"], json!(1)),
+                false,
+            ),
+            ("a list", json!([select()]), false),
+        ];
+        let v = validator("query");
+        for (name, instance, valid) in cases {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema query` should {} {name}: {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #9: the schema says what the command prints, in its title and by what it leaves out.
+    #[test]
+    fn query_schema_is_listed() {
+        let listed = fetch_list();
+        assert!(listed.len() >= 27, "{listed:?}");
+        let at = listed
+            .iter()
+            .position(|n| n == "query")
+            .expect("query is listed");
+        assert!(
+            ["forget", "find"].contains(&listed[at - 1].as_str()),
+            "{listed:?}"
+        );
+        assert_eq!(listed[at + 1], "refresh");
+        assert!(listed.windows(2).all(|w| w[0] < w[1]), "sorted: {listed:?}");
+        let schema = fetch("query");
+        let title = schema["title"].as_str().expect("a title");
+        for word in ["CONSTRUCT", "DESCRIBE", "Turtle"] {
+            assert!(title.contains(word), "title must mention {word}: {title}");
+        }
+        let text = schema.to_string();
+        assert!(
+            !text.contains("schema_version"),
+            "the W3C format has no schema_version: {text}"
+        );
+        assert!(!text.contains("\"$id\""), "{text}");
+    }
+
+    /// #9: the `error` schema has branches for the two rules `hali query` adds: `READ_ONLY_QUERY`
+    /// carries no details; `QUERY_FAILED` carries a reason, and the service for the `service`
+    /// reason.
+    #[test]
+    fn query_error_branches() {
+        let v = validator("error");
+        let read_only = |details: Value| error("READ_ONLY_QUERY", details);
+        let failed = |details: Value| error("QUERY_FAILED", details);
+        let cases: Vec<(Value, bool)> = vec![
+            (read_only(json!({})), true),
+            (read_only(json!({"x": 1})), false),
+            (read_only(json!([])), false),
+            (read_only(json!("x")), false),
+            (read_only(Value::Null), false),
+            (
+                failed(json!({"reason": "service", "service": "http://127.0.0.1:9/"})),
+                true,
+            ),
+            (failed(json!({"reason": "timeout"})), true),
+            (failed(json!({"reason": "too_large"})), true),
+            (failed(json!({})), false),
+            (failed(json!({"reason": "service"})), false),
+            (failed(json!({"reason": "service", "service": 5})), false),
+            (failed(json!({"service": "http://127.0.0.1:9/"})), false),
+            (failed(json!({"reason": "nope"})), false),
+            (failed(json!({"reason": 1})), false),
+            (failed(json!({"reason": null})), false),
+            (failed(json!("timeout")), false),
+            (failed(Value::Null), false),
+        ];
+        for (instance, valid) in cases {
             let errs = problems(&v, &instance);
             assert_eq!(
                 errs.is_empty(),

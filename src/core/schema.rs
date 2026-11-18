@@ -5,7 +5,7 @@
 use serde_json::{Map, Value};
 
 /// (name, document), sorted by name.
-const SCHEMAS: [(&str, &str); 27] = [
+const SCHEMAS: [(&str, &str); 28] = [
     ("add", include_str!("schemas/add.json")),
     ("concept add", include_str!("schemas/concept_add.json")),
     ("concept edit", include_str!("schemas/concept_edit.json")),
@@ -25,6 +25,7 @@ const SCHEMAS: [(&str, &str); 27] = [
     ("find", include_str!("schemas/find.json")),
     ("forget", include_str!("schemas/forget.json")),
     ("new", include_str!("schemas/new.json")),
+    ("query", include_str!("schemas/query.json")),
     ("refresh", include_str!("schemas/refresh.json")),
     ("relate", include_str!("schemas/relate.json")),
     ("relation add", include_str!("schemas/relation_add.json")),

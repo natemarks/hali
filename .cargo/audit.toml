@@ -26,6 +26,13 @@ ignore = [
     # sparesults require quick-xml 0.37, and no oxigraph feature setting removes
     # them, so the version cannot be bumped from here.
     #
+    # The `hali query` evaluator (#9) is hali's own: it is built with
+    # SparqlEvaluator::without_default_http_service_handler(), so a SERVICE clause
+    # in user text cannot reach the network or fetch SPARQL XML, and hali query
+    # prints W3C JSON results or Turtle only. tests/sparql_guard.rs scans src/
+    # for any evaluator built without that call and for any use of the XML
+    # result or RDF/XML formats and parsers.
+    #
     # Remove when oxigraph releases a version that depends on quick-xml >= 0.41.
     # Until then, nothing in hali may parse RDF/XML or SPARQL XML input.
     "RUSTSEC-2026-0194",

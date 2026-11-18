@@ -35,6 +35,7 @@ const CASES: &[(&str, &str, &[&str])] = &[
     ("find", "store", &["find", "--limit", "1"]),
     ("forget", "store", &["forget", STORED]),
     ("new", "store", &["new", "guard probe"]),
+    ("query", "relations", &["query", "ASK {}"]),
     ("refresh", "store", &["refresh", "--all"]),
     ("relate", "relations", &["relate", REL_R5, "annotates", REL_R2]),
     ("relation add", "relations", &["relation", "add", "guard-probe", "--parent", "dcterms:relation"]),

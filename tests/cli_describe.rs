@@ -732,6 +732,7 @@ mod goal {
                 "find",
                 "forget",
                 "new",
+                "query",
                 "refresh",
                 "relate",
                 "relation add",
