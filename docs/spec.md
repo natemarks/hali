@@ -717,7 +717,9 @@ About 8 overlapping reader and writer processes run on one store, each writer ad
 - a held lock leads to exit 3 after 5 s.
 
 ### 14.5 Benchmark (`make bench`)
-- An `#[ignore]`d test: release binary, synthetic stores of 1k and 10k Resources, 30 fresh `hali find --json` processes per size, reporting p50 and p95.
+- An `#[ignore]`d test (`bench_find_latency` in `tests/bench_find.rs`): release binary, synthetic stores of 1k and 10k Resources, 30 fresh `hali find --json` processes per size, reporting p50 and p95. `make bench` runs it with `HALI_BENCH=1` in a release build without `test-hooks`; with `HALI_BENCH=1`, a debug or `test-hooks` build fails.
+- **Method:** each size gets one untimed warm-up `find` (it must exit 0 with `total` equal to the store size), then 30 timed processes (spawn, wait and stdout read), each exiting 0, on a warm page cache. Percentiles are nearest-rank: sample number ceil(q·n) of the sorted samples (p50 is sample 15 and p95 sample 29 of 30). The store is built deterministically through the `core` API, and the processes run with a cleared environment.
+- **Output:** a header line, a `resources`, `p50_ms`, `p95_ms` table (tab separated), and last a verdict line: `p95 <x> ms <= 200 ms` says the in-memory store stays, strictly above says the on-disk fallback is a v0.1 task and to file a follow-up issue. The run exits 0 either way.
 - **It must run natively before `v0.1.0`.**
 - p95 over 200 ms at 10k makes the on-disk storage fallback a v0.1 task.
 
@@ -729,6 +731,7 @@ About 8 overlapping reader and writer processes run on one store, each writer ad
 ### 14.7 Environment-dependent tests and CI
 - **Outside software:** a test that needs software outside the repository, such as the MIME database (`/usr/share/mime`) for detection tests, is `#[ignore = "<reason>"]`, so `make unit` runs without it. `make test-external` runs those tests.
 - **CI** (`ubuntu-latest`): installs `shared-mime-info` and runs `make test-external` in its own job, apart from `static-check`; it also installs Neovim 0.12 (via a setup action pinned to a commit), stylua and the toolchain from `rust-toolchain.toml`. `lua-install-test` clones lazy.nvim at a pinned commit. `bench` and `coverage` never run in CI.
+- **Benchmark:** the benchmark is `#[ignore]`d too, but `make test-external` does not run it: without `HALI_BENCH=1` it prints `skipped: run with make bench` and passes.
 
 ---
 

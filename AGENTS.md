@@ -13,7 +13,7 @@ Read on demand (these are not imported here):
 
 ## Commands
 
-Specified in `docs/spec.md` §13.2. `make help` lists what exists so far; `make bench`, `make lua-test` and the release targets arrive with their tickets. Pre-commit runs betterleaks (a gitleaks-compatible secret scanner) and `make static` (`pre-commit install` once per clone).
+Specified in `docs/spec.md` §13.2. `make help` lists what exists so far; `make lua-test` and the release targets arrive with their tickets. Pre-commit runs betterleaks (a gitleaks-compatible secret scanner) and `make static` (`pre-commit install` once per clone).
 
 | Command | Use |
 |---|---|
@@ -22,6 +22,7 @@ Specified in `docs/spec.md` §13.2. `make help` lists what exists so far; `make 
 | `make unit` | `cargo test --features test-hooks`: every test that needs no outside software. |
 | `make unit-update-golden` | Accept changed `insta` snapshots, after reviewing them. |
 | `make test-external` | `cargo test --features test-hooks -- --ignored`: the tests that need outside software (the MIME database). CI runs it in its own job. |
+| `make bench` | Latency benchmark: `hali find --json` p50/p95 over synthetic 1k and 10k Resource stores, with a release binary (`HALI_BENCH=1`). Never in `static`, `unit`, `test-external` or CI. |
 | `make lua-test` | Plugin tests (headless Neovim + plenary). |
 | `make install` | Install the release build into `~/.local/bin`, plus the man page and bash/zsh/fish completions. |
 
