@@ -1,0 +1,5 @@
+---
+source: tests/cli_query.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"READ_ONLY_QUERY","message":"hali query is read-only; SPARQL Update is refused and nothing was run","details":{},"suggested_fix":"Use SELECT, ASK, CONSTRUCT or DESCRIBE to read the store, or change it with hali's own commands.","suggested_command":null}}

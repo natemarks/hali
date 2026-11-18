@@ -171,14 +171,15 @@ mod goal {
         fn state(&self) -> Vec<(String, Vec<u8>)> {
             let mut files: Vec<_> = std::fs::read_dir(self.data())
                 .map(|rd| {
-                    rd.map(|e| {
-                        let e = e.unwrap();
-                        (
-                            e.file_name().into_string().unwrap(),
-                            std::fs::read(e.path()).unwrap(),
-                        )
-                    })
-                    .collect()
+                    rd.filter(|e| e.as_ref().unwrap().file_name() != ".lock")
+                        .map(|e| {
+                            let e = e.unwrap();
+                            (
+                                e.file_name().into_string().unwrap(),
+                                std::fs::read(e.path()).unwrap(),
+                            )
+                        })
+                        .collect()
                 })
                 .unwrap_or_default();
             files.sort();

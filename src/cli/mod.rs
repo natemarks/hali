@@ -7,6 +7,7 @@ use crate::core::{
 };
 use crate::{media_type, ontology, paths, storage};
 use clap::{CommandFactory, Parser, Subcommand};
+mod generate;
 use serde::Serialize;
 use std::ffi::OsString;
 use std::io::{BufRead, IsTerminal, Read, Write};
@@ -31,6 +32,9 @@ struct Cli {
     /// Confirm a destructive command without asking
     #[arg(long, global = true)]
     yes: bool,
+    /// Attribute new catalog records to this AI agent (overrides HALI_AGENT)
+    #[arg(long, global = true, value_name = "NAME", value_parser = agent_flag)]
+    agent: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
@@ -176,6 +180,12 @@ enum Command {
         #[arg(long)]
         brief: bool,
     },
+    /// Run a read-only SPARQL query (SELECT, ASK, CONSTRUCT, DESCRIBE) over all named graphs
+    Query {
+        /// The SPARQL query text; the §3.4 prefixes are predeclared
+        #[arg(value_name = "SPARQL")]
+        query: String,
+    },
     /// Manage the relation kinds: the standard relations and their sub-properties
     #[command(subcommand)]
     Relation(RelationCommand),
@@ -262,6 +272,10 @@ enum Command {
         #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
         offset: usize,
     },
+    /// Print the man page or shell completions
+    #[command(hide = true, subcommand_required = true, arg_required_else_help = true)]
+    #[command(subcommand)]
+    Generate(generate::Generate),
 }
 
 /// Field names in record order; a newtype so clap reads it as one value, not a list.
@@ -513,6 +527,11 @@ fn env(key: &str) -> Option<String> {
     std::env::var(key).ok()
 }
 
+/// The `--agent` value parser: trimmed, non-empty, no control characters (spec §9.6).
+fn agent_flag(value: &str) -> Result<String, String> {
+    core::config::check_agent_flag(value)
+}
+
 /// The clap command tree, for tests that enumerate every subcommand.
 pub fn command() -> clap::Command {
     Cli::command().styles(clap::builder::Styles::plain())
@@ -593,6 +612,9 @@ pub fn run() -> ExitCode {
     if let Command::Schema { name } = &cli.command {
         return show_schema(&cli, name);
     }
+    if let Command::Generate(what) = &cli.command {
+        return generate::run(what);
+    }
     let (clock, ids) = match injected() {
         Ok(injected) => injected,
         Err(message) => {
@@ -641,6 +663,11 @@ fn show_schema(cli: &Cli, words: &[String]) -> ExitCode {
 }
 
 fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), Error> {
+    // Checked on every command but `schema`, before the store is read.
+    let agent = core::config::agent_name(
+        cli.agent.as_deref(),
+        std::env::var_os("HALI_AGENT").as_deref(),
+    )?;
     if let Command::Scan { .. } = &cli.command {
         scan_usage(&cli.command)?;
     }
@@ -653,12 +680,17 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
         },
         None => core::config::Config::default(),
     };
-    let ctx = Context::new(&config.language, clock, ids).with_open(config.open.clone());
+    let ctx = Context::new(&config.language, clock, ids)
+        .with_open(config.open.clone())
+        .with_agent(agent);
     if let Command::Scan { .. } = &cli.command {
         return scan(cli, &ctx, &config, config_path.as_deref());
     }
     if let Command::Relink { .. } = &cli.command {
         return relink(cli, &ctx, &config);
+    }
+    if let Command::Query { query } = &cli.command {
+        return run_query(cli, query);
     }
     // Usage errors come before the store is read.
     if let Command::Concept(ConceptCommand::Edit {
@@ -669,8 +701,15 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
     {
         concept::check_alt_lists(add_alt, remove_alt)?;
     }
+    if let Command::Add { paths, title, .. } = &cli.command
+        && title.is_some()
+        && paths.len() > 1
+    {
+        return Err(Error::usage("--title takes exactly one path"));
+    }
     let dir = paths::data_dir(env).map_err(|_| Error::store_io(None))?;
-    let mut store = storage::load(&dir)?;
+    let writer = open_writer(cli, &dir)?;
+    let mut store = load_store(writer.as_ref(), &dir)?;
 
     match &cli.command {
         Command::Add {
@@ -680,9 +719,6 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             tags,
             new,
         } => {
-            if title.is_some() && paths.len() > 1 {
-                return Err(Error::usage("--title takes exactly one path"));
-            }
             let files = inspect_all(paths)?;
             if !new {
                 resource::check_moves(&store, &files, |p| storage::stat(Path::new(p)))?;
@@ -720,7 +756,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             };
             mutated(
                 cli,
-                &dir,
+                writer.as_ref(),
                 &store,
                 storage::File::Resources,
                 output,
@@ -766,7 +802,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             };
             mutated(
                 cli,
-                &dir,
+                writer.as_ref(),
                 &store,
                 storage::File::Resources,
                 output,
@@ -803,7 +839,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             };
             mutated(
                 cli,
-                &dir,
+                writer.as_ref(),
                 &store,
                 storage::File::Resources,
                 output,
@@ -871,7 +907,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             };
             mutated(
                 cli,
-                &dir,
+                writer.as_ref(),
                 &store,
                 storage::File::Resources,
                 output,
@@ -1008,7 +1044,10 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                     print_changes(&added.changes);
                 }
             } else {
-                storage::save(&dir, &store, storage::File::Vocabulary)?;
+                let writer = writer
+                    .as_ref()
+                    .expect("a real run of a mutating command holds the writer");
+                writer.save(&store, storage::File::Vocabulary)?;
                 if cli.json {
                     print_json(&output);
                 } else {
@@ -1045,7 +1084,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             let renamed = concept::rename(&ctx, &mut store, reference, label)?;
             concept_mutated(
                 cli,
-                &dir,
+                writer.as_ref(),
                 &store,
                 &renamed,
                 ["renamed", "would rename"],
@@ -1066,7 +1105,14 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 remove_broader: remove_broader.clone(),
             };
             let edited = concept::edit(&ctx, &mut store, reference, &change)?;
-            concept_mutated(cli, &dir, &store, &edited, ["edited", "would edit"], None)?;
+            concept_mutated(
+                cli,
+                writer.as_ref(),
+                &store,
+                &edited,
+                ["edited", "would edit"],
+                None,
+            )?;
         }
         Command::Concept(ConceptCommand::Remove { reference }) => {
             let removed = concept::remove(&ctx, &mut store, reference)?;
@@ -1082,7 +1128,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             };
             concept_mutated(
                 cli,
-                &dir,
+                writer.as_ref(),
                 &store,
                 &removed,
                 ["removed", "would remove"],
@@ -1111,7 +1157,14 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
         }
         Command::Type(TypeCommand::Add { name, parent }) => {
             let added = types::add(&ctx, &mut store, name, parent.as_deref())?;
-            type_mutated(cli, &dir, &store, &added, ["added", "would add"], None)?;
+            type_mutated(
+                cli,
+                writer.as_ref(),
+                &store,
+                &added,
+                ["added", "would add"],
+                None,
+            )?;
         }
         Command::Type(TypeCommand::List { limit, offset }) => {
             let page = types::list(&ctx, &store, *offset, *limit);
@@ -1152,7 +1205,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             };
             type_mutated(
                 cli,
-                &dir,
+                writer.as_ref(),
                 &store,
                 &removed,
                 ["removed", "would remove"],
@@ -1199,7 +1252,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             };
             mutated(
                 cli,
-                &dir,
+                writer.as_ref(),
                 &store,
                 storage::File::Resources,
                 output,
@@ -1210,7 +1263,14 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
         }
         Command::Relation(RelationCommand::Add { name, parent }) => {
             let added = relation::add(&ctx, &mut store, name, parent)?;
-            relation_mutated(cli, &dir, &store, &added, ["added", "would add"], None)?;
+            relation_mutated(
+                cli,
+                writer.as_ref(),
+                &store,
+                &added,
+                ["added", "would add"],
+                None,
+            )?;
         }
         Command::Relation(RelationCommand::List { limit, offset }) => {
             let page = relation::list(&ctx, &store, *offset, *limit);
@@ -1251,15 +1311,17 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
             };
             relation_mutated(
                 cli,
-                &dir,
+                writer.as_ref(),
                 &store,
                 &removed,
                 ["removed", "would remove"],
                 Some(&confirmation),
             )?;
         }
-        Command::Schema { .. } => unreachable!("handled before the store is loaded"),
-        Command::Scan { .. } | Command::Relink { .. } => {
+        Command::Schema { .. } | Command::Generate(_) => {
+            unreachable!("handled before the store is loaded")
+        }
+        Command::Scan { .. } | Command::Relink { .. } | Command::Query { .. } => {
             unreachable!("handled before the store is loaded")
         }
         Command::Describe { brief } => {
@@ -1338,6 +1400,55 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
         }
     }
     Ok(())
+}
+
+/// Whether a real run of `command` writes the store, so takes the exclusive lock before it
+/// loads (spec §3.3). Only called for commands that load the store.
+fn writes_store(command: &Command) -> bool {
+    // A positive list: a new command is a reader until it is added here.
+    matches!(
+        command,
+        Command::Add { .. }
+            | Command::Edit { .. }
+            | Command::Forget { .. }
+            | Command::Refresh { .. }
+            | Command::Relate { .. }
+            | Command::Unrelate { .. }
+            | Command::Relink { .. }
+            | Command::Scan { .. }
+            | Command::Concept(
+                ConceptCommand::Add { .. }
+                    | ConceptCommand::Rename { .. }
+                    | ConceptCommand::Edit { .. }
+                    | ConceptCommand::Remove { .. },
+            )
+            | Command::Type(TypeCommand::Add { .. } | TypeCommand::Remove { .. })
+            | Command::Relation(RelationCommand::Add { .. } | RelationCommand::Remove { .. })
+    )
+}
+
+/// The writer of a real run of a mutating command, holding the exclusive store lock until the
+/// process ends; `None` for a reader or a dry run. A test-hooks build steers its publish with
+/// `HALI_TEST_PUBLISH_STALL` (spec §14.2).
+fn open_writer(cli: &Cli, dir: &Path) -> Result<Option<storage::Writer>, Error> {
+    if cli.dry_run || !writes_store(&cli.command) {
+        return Ok(None);
+    }
+    #[cfg_attr(not(feature = "test-hooks"), allow(unused_mut))]
+    let mut writer = storage::Writer::open(dir)?;
+    #[cfg(feature = "test-hooks")]
+    if let Some(marker) = env("HALI_TEST_PUBLISH_STALL") {
+        writer.stall_publish(marker.into());
+    }
+    Ok(Some(writer))
+}
+
+/// Loads the store: under the writer's exclusive lock, else under a shared one.
+fn load_store(writer: Option<&storage::Writer>, dir: &Path) -> Result<storage::Store, Error> {
+    Ok(match writer {
+        Some(writer) => writer.load()?,
+        None => storage::load(dir)?,
+    })
 }
 
 /// Resolves, checks and inspects each path argument in order, stopping at the first error. A
@@ -1748,7 +1859,8 @@ fn scan_one(
         return Err(Error::usage(&format!("scan root {root} is {why}")));
     }
     let (state, remembered) = remembered_roots()?;
-    let mut store = storage::load(&dir)?;
+    let writer = open_writer(cli, &dir)?;
+    let mut store = load_store(writer.as_ref(), &dir)?;
 
     // A data dir or state dir under the root is never entered, so scan never catalogs its own
     // store or state.
@@ -1797,7 +1909,7 @@ fn scan_one(
     if cli.dry_run {
         return mutated(
             cli,
-            &dir,
+            None,
             &store,
             storage::File::Resources,
             output,
@@ -1847,7 +1959,8 @@ fn scan_one(
         confirm(cli, &confirmation)?;
     }
     if !done.changes.is_empty() {
-        storage::save(&dir, &store, storage::File::Resources)?;
+        let writer = writer.as_ref().expect("a real scan holds the writer");
+        writer.save(&store, storage::File::Resources)?;
     }
     // A real scan that succeeded remembers its root with the flags given on the command line.
     let entry = core::roots::RootEntry {
@@ -1953,7 +2066,8 @@ fn scan_remembered(cli: &Cli, ctx: &Context, config: &core::config::Config) -> R
         planned.push((options, walk));
     }
     planned.sort_by(|a, b| a.0.root.cmp(&b.0.root));
-    let mut store = storage::load(&dir)?;
+    let writer = open_writer(cli, &dir)?;
+    let mut store = load_store(writer.as_ref(), &dir)?;
 
     // Every walk runs to the end on this thread before anything is hashed.
     let mut progress = Progress::new(!cli.json && progress_shown());
@@ -2017,7 +2131,7 @@ fn scan_remembered(cli: &Cli, ctx: &Context, config: &core::config::Config) -> R
     });
     mutated(
         cli,
-        &dir,
+        writer.as_ref(),
         &store,
         storage::File::Resources,
         output,
@@ -2105,7 +2219,8 @@ fn relink(cli: &Cli, ctx: &Context, config: &core::config::Config) -> Result<(),
         }
         paths::state_dir(env).ok()
     };
-    let mut store = storage::load(&dir)?;
+    let writer = open_writer(cli, &dir)?;
+    let mut store = load_store(writer.as_ref(), &dir)?;
     // Relink walks with its own settings; the data dir and the state dir are never entered.
     let never_walked = data
         .into_iter()
@@ -2176,7 +2291,7 @@ fn relink(cli: &Cli, ctx: &Context, config: &core::config::Config) -> Result<(),
     };
     mutated(
         cli,
-        &dir,
+        writer.as_ref(),
         &store,
         storage::File::Resources,
         output,
@@ -2196,7 +2311,8 @@ fn relink_explicit(
     path: &OsString,
     force: bool,
 ) -> Result<(), Error> {
-    let mut store = storage::load(dir)?;
+    let writer = open_writer(cli, dir)?;
+    let mut store = load_store(writer.as_ref(), dir)?;
     let id = resource::resolve_ref(&store, reference, paths::ref_path)?;
     let file = inspect_all(std::slice::from_ref(path))?.remove(0);
     let hashed = resource::Hashed {
@@ -2229,7 +2345,7 @@ fn relink_explicit(
     };
     mutated(
         cli,
-        dir,
+        writer.as_ref(),
         &store,
         storage::File::Resources,
         output,
@@ -2420,7 +2536,7 @@ struct Summary<'a> {
 /// The end of a mutating command on `vocabulary.ttl`.
 fn vocabulary_mutated(
     cli: &Cli,
-    dir: &Path,
+    writer: Option<&storage::Writer>,
     store: &storage::Store,
     output: impl Serialize,
     summary: &Summary<'_>,
@@ -2442,7 +2558,7 @@ fn vocabulary_mutated(
     };
     mutated(
         cli,
-        dir,
+        writer,
         store,
         storage::File::Vocabulary,
         output,
@@ -2455,7 +2571,7 @@ fn vocabulary_mutated(
 /// The end of `concept rename|edit|remove`.
 fn concept_mutated(
     cli: &Cli,
-    dir: &Path,
+    writer: Option<&storage::Writer>,
     store: &storage::Store,
     done: &core::Mutation<concept::Concept>,
     verbs: [&str; 2],
@@ -2474,7 +2590,7 @@ fn concept_mutated(
     };
     vocabulary_mutated(
         cli,
-        dir,
+        writer,
         store,
         output,
         &summary,
@@ -2486,7 +2602,7 @@ fn concept_mutated(
 /// The end of `type add|remove`.
 fn type_mutated(
     cli: &Cli,
-    dir: &Path,
+    writer: Option<&storage::Writer>,
     store: &storage::Store,
     done: &core::Mutation<types::Type>,
     verbs: [&str; 2],
@@ -2505,7 +2621,7 @@ fn type_mutated(
     };
     vocabulary_mutated(
         cli,
-        dir,
+        writer,
         store,
         output,
         &summary,
@@ -2517,7 +2633,7 @@ fn type_mutated(
 /// The end of `relation add|remove`.
 fn relation_mutated(
     cli: &Cli,
-    dir: &Path,
+    writer: Option<&storage::Writer>,
     store: &storage::Store,
     done: &core::Mutation<relation::RelationKind>,
     verbs: [&str; 2],
@@ -2536,7 +2652,7 @@ fn relation_mutated(
     };
     vocabulary_mutated(
         cli,
-        dir,
+        writer,
         store,
         output,
         &summary,
@@ -2552,7 +2668,7 @@ fn relation_mutated(
 #[allow(clippy::too_many_arguments)]
 fn mutated(
     cli: &Cli,
-    dir: &Path,
+    writer: Option<&storage::Writer>,
     store: &storage::Store,
     file: storage::File,
     output: impl Serialize,
@@ -2577,7 +2693,9 @@ fn mutated(
         if let Some(what) = confirmation {
             confirm(cli, what)?;
         }
-        storage::save(dir, store, file)?;
+        writer
+            .expect("a real run of a mutating command holds the writer")
+            .save(store, file)?;
     }
     if cli.json {
         print_json(&output);
@@ -2807,6 +2925,102 @@ struct FindOutput {
 struct ErrorOutput<'a> {
     schema_version: u32,
     error: &'a Error,
+}
+
+/// `hali query`: the text is parsed after the config and before the store is read; an absent data
+/// dir is queried as the core graph alone. `--dry-run` and `--yes` change nothing.
+fn run_query(cli: &Cli, text: &str) -> Result<(), Error> {
+    use core::query::{self, Answer, Limits};
+    let prepared = query::parse(text)?;
+    let dir = paths::data_dir(env).map_err(|_| Error::store_io(None))?;
+    let store = storage::load(&dir)?;
+    match query::run(&store, &prepared, Limits::default())? {
+        Answer::Boolean(b) if cli.json => println!("{{\"head\":{{}},\"boolean\":{b}}}"),
+        Answer::Boolean(b) => println!("{b}"),
+        Answer::Solutions { variables, rows } if cli.json => {
+            let bindings: Vec<serde_json::Value> = rows
+                .iter()
+                .map(|row| {
+                    let cells = variables
+                        .iter()
+                        .zip(row)
+                        .filter_map(|(v, cell)| Some((v.clone(), result_term(cell.as_ref()?))));
+                    serde_json::Value::Object(cells.collect())
+                })
+                .collect();
+            print_json(&serde_json::json!({
+                "head": {"vars": variables},
+                "results": {"bindings": bindings},
+            }));
+        }
+        Answer::Solutions { variables, rows } => {
+            let header: Vec<String> = variables.iter().map(|v| printable(v)).collect();
+            println!("{}", header.join("\t"));
+            for row in &rows {
+                let cells: Vec<String> = row
+                    .iter()
+                    .map(|cell| cell.as_ref().map_or(String::new(), cell_text))
+                    .collect();
+                println!("{}", cells.join("\t"));
+            }
+        }
+        Answer::Triples(triples) => {
+            let keep_layout = |c: char| escaped(c) && c != '\n' && c != '\t';
+            print!("{}", storage::turtle_document(triples, keep_layout));
+        }
+    }
+    Ok(())
+}
+
+/// A term in the W3C SPARQL 1.1 Query Results JSON format.
+fn result_term(term: &oxigraph::model::Term) -> serde_json::Value {
+    use oxigraph::model::Term;
+    use serde_json::json;
+    match term {
+        Term::NamedNode(n) => json!({"type": "uri", "value": n.as_str()}),
+        Term::BlankNode(b) => json!({"type": "bnode", "value": b.as_str()}),
+        Term::Literal(l) => {
+            if let Some(language) = l.language() {
+                json!({"type": "literal", "value": l.value(), "xml:lang": language})
+            } else if l.datatype() == oxigraph::model::vocab::xsd::STRING {
+                json!({"type": "literal", "value": l.value()})
+            } else {
+                json!({"type": "literal", "value": l.value(), "datatype": l.datatype().as_str()})
+            }
+        }
+        Term::Triple(t) => json!({"type": "triple", "value": {
+            "subject": result_term(&t.subject.clone().into()),
+            "predicate": result_term(&t.predicate.clone().into()),
+            "object": result_term(&t.object),
+        }}),
+    }
+}
+
+/// A SELECT cell in text mode: the N-Triples form of the term, IRIs shortened through the
+/// prefix table, every part escaped for the terminal (spec §9.3).
+fn cell_text(term: &oxigraph::model::Term) -> String {
+    use oxigraph::model::Term;
+    match term {
+        Term::NamedNode(n) => printable(&compact(&format!("<{}>", n.as_str()))),
+        Term::BlankNode(b) => printable(&format!("_:{}", b.as_str())),
+        Term::Literal(l) => {
+            let value = l.value().replace('\\', "\\\\").replace('"', "\\\"");
+            let mut cell = format!("\"{}\"", printable(&value));
+            if let Some(language) = l.language() {
+                cell.push_str(&format!("@{}", printable(language)));
+            } else if l.datatype() != oxigraph::model::vocab::xsd::STRING {
+                let datatype = compact(&format!("<{}>", l.datatype().as_str()));
+                cell.push_str(&format!("^^{}", printable(&datatype)));
+            }
+            cell
+        }
+        Term::Triple(t) => format!(
+            "<<( {} {} {} )>>",
+            cell_text(&t.subject.clone().into()),
+            cell_text(&t.predicate.clone().into()),
+            cell_text(&t.object)
+        ),
+    }
 }
 
 fn print_json(value: &impl Serialize) {

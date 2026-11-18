@@ -1,0 +1,5 @@
+---
+source: tests/cli_query.rs
+expression: out.stdout
+---
+{"head":{},"boolean":true}

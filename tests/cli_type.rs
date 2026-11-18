@@ -180,6 +180,7 @@ mod goal {
         fn state(&self) -> BTreeMap<String, Vec<u8>> {
             std::fs::read_dir(self.data())
                 .unwrap()
+                .filter(|e| e.as_ref().unwrap().file_name() != ".lock")
                 .map(|e| {
                     let e = e.unwrap();
                     (
@@ -1087,7 +1088,7 @@ mod goal {
             );
         }
         let v = ok(&env.run(["schema", "--json"]));
-        assert_eq!(v["schemas"].as_array().unwrap().len(), 26, "{v}");
+        assert_eq!(v["schemas"].as_array().unwrap().len(), 27, "{v}");
         for name in ["type add", "type list", "type remove"] {
             let words: Vec<&str> = name.split(' ').collect();
             let mut args = vec!["schema"];

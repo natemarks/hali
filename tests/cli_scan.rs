@@ -257,6 +257,7 @@ mod goal {
         Some(
             std::fs::read_dir(dir)
                 .unwrap()
+                .filter(|e| e.as_ref().unwrap().file_name() != ".lock")
                 .map(|e| {
                     let e = e.unwrap();
                     let name = e.file_name().into_string().unwrap();
@@ -278,6 +279,9 @@ mod goal {
         fn walk(dir: &Path, root: &Path, out: &mut Print) {
             for entry in std::fs::read_dir(dir).unwrap() {
                 let path = entry.unwrap().path();
+                if path.file_name().is_some_and(|n| n == ".lock") {
+                    continue;
+                }
                 let meta = std::fs::symlink_metadata(&path).unwrap();
                 let name = path.strip_prefix(root).unwrap().display().to_string();
                 let (kind, bytes) = if meta.is_dir() {

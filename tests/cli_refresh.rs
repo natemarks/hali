@@ -188,6 +188,7 @@ mod goal {
         fn state(&self) -> Fingerprint {
             std::fs::read_dir(self.data())
                 .unwrap()
+                .filter(|e| e.as_ref().unwrap().file_name() != ".lock")
                 .map(|e| {
                     let e = e.unwrap();
                     (
@@ -669,7 +670,13 @@ mod goal {
         let out_empty = empty.run(["--json", "refresh", "--all"]);
         assert_eq!(out_empty.stdout, out_absent.stdout);
         assert_eq!(out_empty.code, Some(0));
-        assert_eq!(std::fs::read_dir(empty.data()).unwrap().count(), 0);
+        assert_eq!(
+            std::fs::read_dir(empty.data())
+                .unwrap()
+                .filter(|e| e.as_ref().unwrap().file_name() != ".lock")
+                .count(),
+            0
+        );
 
         let text = Env::absent().run(["refresh", "--all"]);
         assert_eq!(
@@ -844,6 +851,7 @@ mod goal {
                 "error",
                 "find",
                 "forget",
+                "query",
                 "refresh",
                 "relate",
                 "relation add",
@@ -860,7 +868,7 @@ mod goal {
                 "validate"
             ])
         );
-        assert_eq!(v["schemas"].as_array().unwrap().len(), 26);
+        assert_eq!(v["schemas"].as_array().unwrap().len(), 27);
         let out = env.run(["schema", "refresh"]);
         assert_eq!(out.code, Some(0), "{}", out.stderr);
         assert_eq!(out.stderr, "");

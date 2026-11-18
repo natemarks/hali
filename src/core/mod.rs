@@ -4,6 +4,7 @@
 pub mod concept;
 pub mod config;
 pub mod describe;
+pub mod query;
 pub mod relation;
 pub mod relink;
 pub mod resource;
@@ -129,12 +130,14 @@ impl IdGen for SeededIdGen {
     }
 }
 
-/// What every operation runs with: the configured language and the injected clock and ids.
+/// What every operation runs with: the configured language, the injected clock and ids, and the
+/// acting AI agent's name, if one identified itself (spec §9.6).
 pub struct Context {
     language: String,
     clock: Box<dyn Clock>,
     ids: Box<dyn IdGen>,
     open: config::OpenConfig,
+    agent: Option<String>,
 }
 
 impl Context {
@@ -144,6 +147,7 @@ impl Context {
             clock,
             ids,
             open: config::OpenConfig::default(),
+            agent: None,
         }
     }
 
@@ -156,6 +160,17 @@ impl Context {
     /// The `[open]` config.
     pub fn open(&self) -> &config::OpenConfig {
         &self.open
+    }
+
+    /// Sets the acting AI agent's name, already resolved by `config::agent_name`.
+    pub fn with_agent(mut self, agent: Option<String>) -> Context {
+        self.agent = agent;
+        self
+    }
+
+    /// The acting AI agent's name; `None` when the user acts.
+    pub fn agent(&self) -> Option<&str> {
+        self.agent.as_deref()
     }
 
     /// The language tag of new labels, lowercase.
@@ -343,6 +358,41 @@ impl Error {
         err
     }
 
+    /// SPARQL Update text given to `hali query`: refused, nothing was run.
+    pub fn read_only_query() -> Error {
+        Error::new(
+            "READ_ONLY_QUERY",
+            1,
+            "hali query is read-only; SPARQL Update is refused and nothing was run".to_string(),
+            json!({}),
+        )
+        .fix("Use SELECT, ASK, CONSTRUCT or DESCRIBE to read the store, or change it with hali's own commands.")
+    }
+
+    /// A query that could not be answered: `reason` is `service` (with the service IRI),
+    /// `timeout` or `too_large`.
+    pub fn query_failed(reason: &str, service: Option<&str>) -> Error {
+        let (message, fix) = match reason {
+            "service" => (
+                "the query uses SERVICE, which hali never runs; hali opens no network connection",
+                "Remove the SERVICE clause, or use SERVICE SILENT.",
+            ),
+            "timeout" => (
+                "the query ran longer than 30 seconds and was cancelled",
+                "Make the query cheaper: add more specific patterns or a LIMIT.",
+            ),
+            _ => (
+                "the query returned more than 100000 results",
+                "Add LIMIT to the query, or make its patterns more specific.",
+            ),
+        };
+        let details = match service {
+            Some(service) => json!({"reason": reason, "service": service}),
+            None => json!({"reason": reason}),
+        };
+        Error::new("QUERY_FAILED", 1, message.to_string(), details).fix(fix)
+    }
+
     /// The shapes cannot be used. The message gives no reason: rudof's text is never echoed.
     pub fn shapes_invalid() -> Error {
         Error::new(
@@ -493,6 +543,51 @@ impl Error {
             json!({"path": path.map(|p| p.display().to_string())}),
         )
         .fix("Check that the data dir is a directory you can read and write.")
+    }
+
+    /// Another process holds the store lock `path` (`reason` `timeout`), or wrote the store
+    /// first while this writer had no data dir to lock (`changed`); nothing was written.
+    pub fn store_locked(path: &Path, reason: storage::LockReason) -> Error {
+        let (message, reason) = match reason {
+            storage::LockReason::Timeout => (
+                format!(
+                    "another hali process holds the store lock {}; gave up after 5 s",
+                    path.display()
+                ),
+                "timeout",
+            ),
+            storage::LockReason::Changed => (
+                format!(
+                    "another hali process wrote the store first (lock {}); nothing was written",
+                    path.display()
+                ),
+                "changed",
+            ),
+        };
+        Error::new(
+            "STORE_LOCKED",
+            3,
+            message,
+            json!({"path": path.display().to_string(), "reason": reason}),
+        )
+        .fix("Wait for the other hali process to finish (it may be waiting at a confirmation prompt), then retry.")
+    }
+
+    /// The data dir is not owned by the user, or is group- or world-writable: `STORE_IO`.
+    pub fn store_dir_unsafe(path: &Path, reason: &str) -> Error {
+        Error::new(
+            "STORE_IO",
+            3,
+            format!(
+                "the data dir {} is {reason}; hali will not use it",
+                path.display()
+            ),
+            json!({"path": path.display().to_string()}),
+        )
+        .fix(&format!(
+            "Make the data dir your own and not writable by others (chmod go-w {}), then retry.",
+            shell_quote(&path.display().to_string())
+        ))
     }
 
     /// The state dir (spec §4) cannot be resolved from the environment.
@@ -766,6 +861,8 @@ impl From<storage::Error> for Error {
             storage::Error::Unparseable { file, line, column } => {
                 Error::store_unparseable(&file, line, column)
             }
+            storage::Error::Locked { path, reason } => Error::store_locked(&path, reason),
+            storage::Error::UnsafeDir { path, reason } => Error::store_dir_unsafe(&path, reason),
         }
     }
 }

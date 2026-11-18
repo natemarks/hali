@@ -181,6 +181,7 @@ mod goal {
         fn state(&self) -> BTreeMap<String, Vec<u8>> {
             std::fs::read_dir(self.data())
                 .unwrap()
+                .filter(|e| e.as_ref().unwrap().file_name() != ".lock")
                 .map(|e| {
                     let e = e.unwrap();
                     (
@@ -1739,7 +1740,7 @@ mod goal {
             .iter()
             .map(|n| n.as_str().unwrap())
             .collect();
-        assert_eq!(names.len(), 26, "{names:?}");
+        assert_eq!(names.len(), 27, "{names:?}");
         let mut sorted = names.clone();
         sorted.sort_unstable();
         assert_eq!(names, sorted, "the names are sorted");

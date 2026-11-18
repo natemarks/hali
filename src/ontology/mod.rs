@@ -83,6 +83,8 @@ pub mod spdx {
 /// PROV-O terms.
 pub mod prov {
     pub const PERSON: &str = "http://www.w3.org/ns/prov#Person";
+    pub const SOFTWARE_AGENT: &str = "http://www.w3.org/ns/prov#SoftwareAgent";
+    pub const ACTED_ON_BEHALF_OF: &str = "http://www.w3.org/ns/prov#actedOnBehalfOf";
     pub const WAS_ATTRIBUTED_TO: &str = "http://www.w3.org/ns/prov#wasAttributedTo";
     pub const WAS_DERIVED_FROM: &str = "http://www.w3.org/ns/prov#wasDerivedFrom";
 }

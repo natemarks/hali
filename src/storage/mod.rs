@@ -6,16 +6,22 @@
 //! It also reads cataloged files (`inspect`, `stat`), only ever read-only, and walks
 //! directories for them (`walk`).
 
+mod lock;
 pub mod state;
+mod store_file;
 pub mod walk;
+
+pub use lock::Writer;
+pub use store_file::dir_problem;
 
 use crate::ontology::{CORE_TTL, PREFIXES, SHAPES_TTL};
 use oxigraph::model::vocab::rdf;
-use oxigraph::model::{GraphNameRef, NamedNode, Triple};
+use oxigraph::model::{
+    BlankNode, GraphNameRef, Literal, NamedNode, NamedOrBlankNode, Term, Triple,
+};
 use oxttl::{TurtleParser, TurtleSerializer};
 use std::fs;
 use std::io::ErrorKind;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 
 pub use oxigraph::store::Store;
@@ -67,38 +73,27 @@ pub enum Error {
         line: u64,
         column: u64,
     },
+    /// The store lock `path` (`<data dir>/.lock`) was not got, or the store changed under it.
+    Locked { path: PathBuf, reason: LockReason },
+    /// The data dir is someone else's, or group- or world-writable (`dir_problem`).
+    UnsafeDir { path: PathBuf, reason: &'static str },
 }
 
-/// Loads the embedded core ontology and shapes, and the files in `dir`. A missing dir or file
-/// is an empty graph; nothing is created.
-pub fn load(dir: &Path) -> Result<Store, Error> {
-    let io = |path: &Path| Error::Io {
-        path: path.to_path_buf(),
-    };
-    let store = Store::new().map_err(|_| io(dir))?;
-    for core in [CORE_TTL, SHAPES_TTL] {
-        parse_into(&store, core.as_bytes(), graph("core").as_ref().into())
-            .expect("the embedded core ontology and shapes are valid Turtle");
-    }
+/// Why a lock attempt failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LockReason {
+    /// Another process held the lock for the whole 5 s wait.
+    Timeout,
+    /// The data dir was absent at first, and a store file appeared before this writer locked.
+    Changed,
+}
 
-    match fs::metadata(dir) {
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(store),
-        Err(_) => return Err(io(dir)),
-        Ok(meta) if !meta.is_dir() => return Err(io(dir)),
-        Ok(_) => {}
-    }
-    for name in ["vocabulary", "resources", "extensions"] {
-        let file = format!("{name}.ttl");
-        let path = dir.join(&file);
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == ErrorKind::NotFound => continue,
-            Err(_) => return Err(io(&path)),
-        };
-        parse_into(&store, &bytes, graph(name).as_ref().into())
-            .map_err(|(line, column)| Error::Unparseable { file, line, column })?;
-    }
-    Ok(store)
+/// Loads the embedded core ontology and shapes, and the files in `dir`, under a shared lock on
+/// `<dir>/.lock` held only while loading (spec §3.3). A missing dir or file is an empty graph, a
+/// missing `.lock` is read without a lock, and nothing is created.
+pub fn load(dir: &Path) -> Result<Store, Error> {
+    let _shared = lock::shared(dir)?;
+    store_file::load_files(dir)
 }
 
 /// Parses Turtle into one named graph. On a syntax error, returns its 1-based line and column.
@@ -131,10 +126,23 @@ fn position_of(bytes: &[u8], offset: usize) -> (u64, u64) {
 /// with `rdf:type` first per subject.
 pub fn to_turtle(store: &Store, file: File) -> String {
     let graph = file.graph();
-    let mut triples: Vec<Triple> = store
+    let triples: Vec<Triple> = store
         .quads_for_pattern(None, None, None, Some(graph.as_ref().into()))
         .map(|q| Triple::from(q.expect("reading the in-memory store")))
         .collect();
+    let mut out = String::from(HEADER);
+    out.push_str(&turtle_document(triples, |_| false));
+    out
+}
+
+/// Serializes triples as the Turtle of `to_turtle` without its header line (spec §3.4, §9.9): the
+/// fixed prefix table, then the triples sorted and grouped. Every character for which `escape`
+/// is true is written as a Turtle `\uXXXX` or `\UXXXXXXXX` escape, and an IRI that holds one is
+/// written whole, never as a prefixed name. A blank node label that holds one, or that is not a
+/// Turtle `BLANK_NODE_LABEL` (such as one with `:`, which `BNODE` can make), gets a new label,
+/// since a label cannot carry an escape. The caller keeps layout characters (LF, TAB) out of
+/// `escape`.
+pub fn turtle_document(mut triples: Vec<Triple>, escape: impl Fn(char) -> bool) -> String {
     triples.sort_by_cached_key(|t| {
         (
             t.subject.to_string(),
@@ -143,6 +151,33 @@ pub fn to_turtle(store: &Store, file: File) -> String {
             t.object.to_string(),
         )
     });
+
+    // An IRI with a character to escape is serialized as a stand-in that no prefix can shorten,
+    // then put back whole in angle brackets. A blank node label cannot hold an escape, so a label
+    // with such a character, or one Turtle's grammar rejects, is replaced by a safe one. Both
+    // reach into triple terms.
+    let marker = stand_in_marker(&triples);
+    let needs_relabel = |label: &str| label.chars().any(&escape) || !is_turtle_label(label);
+    let relabel_prefix = relabel_prefix(&triples, &needs_relabel);
+    let mut stand_ins: Vec<String> = Vec::new();
+    let mut stand_in = |iri: NamedNode| {
+        if !iri.as_str().chars().any(&escape) {
+            return iri;
+        }
+        stand_ins.push(iri.into_string());
+        NamedNode::new_unchecked(format!("{marker}{}", stand_ins.len() - 1))
+    };
+    let relabel = |b: BlankNode| match &relabel_prefix {
+        Some(prefix) if needs_relabel(b.as_str()) => {
+            let hex: String = b.as_str().bytes().map(|x| format!("{x:02x}")).collect();
+            BlankNode::new_unchecked(format!("{prefix}{hex}"))
+        }
+        _ => b,
+    };
+    let triples: Vec<Triple> = triples
+        .into_iter()
+        .map(|t| safe_triple(t, &mut stand_in, &relabel))
+        .collect();
 
     // oxttl orders its prefix lines by namespace length, so hali writes the prelude itself
     // and keeps the serializer's prefixes only for abbreviation.
@@ -165,31 +200,132 @@ pub fn to_turtle(store: &Store, file: File) -> String {
     } else {
         PREFIXES.len()
     };
-    let body: String = body
+    let mut body: String = body
         .split_inclusive('\n')
         .skip(prelude_lines)
         .collect::<String>();
+    for (n, iri) in stand_ins.iter().enumerate() {
+        body = body.replace(&format!("<{marker}{n}>"), &format!("<{iri}>"));
+    }
 
-    let mut out = String::from(HEADER);
+    let mut out = String::new();
     for (name, iri) in PREFIXES {
         out.push_str(&format!("@prefix {name}: <{iri}> .\n"));
     }
     out.push('\n');
     out.push_str(&body);
-    out
+    escape_turtle(&out, &escape)
 }
 
-/// Writes one file's graph into `dir`, creating `dir` (mode 0700) if needed.
-pub fn save(dir: &Path, store: &Store, file: File) -> Result<(), Error> {
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(dir)
-        .map_err(|_| Error::Io {
-            path: dir.to_path_buf(),
-        })?;
-    let path = dir.join(file.name());
-    fs::write(&path, to_turtle(store, file)).map_err(|_| Error::Io { path })
+/// `t` with every IRI passed through `stand_in` and every blank node through `relabel`, triple
+/// terms included.
+fn safe_triple(
+    t: Triple,
+    stand_in: &mut impl FnMut(NamedNode) -> NamedNode,
+    relabel: &impl Fn(BlankNode) -> BlankNode,
+) -> Triple {
+    let subject = match t.subject {
+        NamedOrBlankNode::NamedNode(n) => NamedOrBlankNode::NamedNode(stand_in(n)),
+        NamedOrBlankNode::BlankNode(b) => NamedOrBlankNode::BlankNode(relabel(b)),
+    };
+    let predicate = stand_in(t.predicate);
+    let object = match t.object {
+        Term::NamedNode(n) => Term::NamedNode(stand_in(n)),
+        Term::BlankNode(b) => Term::BlankNode(relabel(b)),
+        Term::Literal(l) if l.language().is_none() => {
+            let datatype = stand_in(l.datatype().into_owned());
+            Term::Literal(Literal::new_typed_literal(l.value(), datatype))
+        }
+        Term::Literal(l) => Term::Literal(l),
+        Term::Triple(inner) => Term::Triple(Box::new(safe_triple(*inner, stand_in, relabel))),
+    };
+    Triple::new(subject, predicate, object)
+}
+
+/// When a blank node label of `triples` needs a new label, a prefix that no label starts with:
+/// such a label becomes the prefix and the hex of its UTF-8 bytes, which is deterministic for
+/// the same data and never equal to another label.
+fn relabel_prefix(triples: &[Triple], needs_relabel: &impl Fn(&str) -> bool) -> Option<String> {
+    fn labels(t: &Triple, out: &mut Vec<String>) {
+        if let NamedOrBlankNode::BlankNode(b) = &t.subject {
+            out.push(b.as_str().to_string());
+        }
+        match &t.object {
+            Term::BlankNode(b) => out.push(b.as_str().to_string()),
+            Term::Triple(inner) => labels(inner, out),
+            _ => {}
+        }
+    }
+    let mut all = Vec::new();
+    for t in triples {
+        labels(t, &mut all);
+    }
+    if !all.iter().any(|l| needs_relabel(l)) {
+        return None;
+    }
+    let mut salt = 0;
+    loop {
+        let prefix = format!("h{salt}x");
+        if !all.iter().any(|l| l.starts_with(&prefix)) {
+            return Some(prefix);
+        }
+        salt += 1;
+    }
+}
+
+/// Whether `label` matches Turtle's `BLANK_NODE_LABEL` after `_:`:
+/// `(PN_CHARS_U | [0-9]) ((PN_CHARS | '.')* PN_CHARS)?`.
+fn is_turtle_label(label: &str) -> bool {
+    fn pn_chars_base(c: char) -> bool {
+        matches!(c,
+            'A'..='Z' | 'a'..='z'
+            | '\u{C0}'..='\u{D6}' | '\u{D8}'..='\u{F6}' | '\u{F8}'..='\u{2FF}'
+            | '\u{370}'..='\u{37D}' | '\u{37F}'..='\u{1FFF}' | '\u{200C}'..='\u{200D}'
+            | '\u{2070}'..='\u{218F}' | '\u{2C00}'..='\u{2FEF}' | '\u{3001}'..='\u{D7FF}'
+            | '\u{F900}'..='\u{FDCF}' | '\u{FDF0}'..='\u{FFFD}' | '\u{10000}'..='\u{EFFFF}')
+    }
+    fn pn_chars(c: char) -> bool {
+        pn_chars_base(c)
+            || matches!(c, '_' | '-' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')
+    }
+    let mut chars = label.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(pn_chars_base(first) || first == '_' || first.is_ascii_digit()) {
+        return false;
+    }
+    let rest: Vec<char> = chars.collect();
+    rest.iter().all(|&c| pn_chars(c) || c == '.') && rest.last().is_none_or(|&c| pn_chars(c))
+}
+
+/// A stand-in IRI prefix that no term of `triples` contains.
+fn stand_in_marker(triples: &[Triple]) -> String {
+    let mut salt = 0;
+    loop {
+        let marker = format!("urn:hali-stand-in-{salt}-");
+        if !triples.iter().any(|t| t.to_string().contains(&marker)) {
+            return marker;
+        }
+        salt += 1;
+    }
+}
+
+/// Writes every character `escape` selects as a Turtle `\u` or `\U` escape.
+fn escape_turtle(text: &str, escape: &impl Fn(char) -> bool) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        let n = u32::from(c);
+        if !escape(c) {
+            out.push(c);
+        } else if n <= 0xFFFF {
+            write!(out, "\\u{n:04X}").expect("writing to a String");
+        } else {
+            write!(out, "\\U{n:08X}").expect("writing to a String");
+        }
+    }
+    out
 }
 
 /// Reads a text file, if it exists.

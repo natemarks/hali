@@ -45,6 +45,21 @@
           }
         },
         {
+          "if": {"properties": {"rule": {"const": "STORE_LOCKED"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "path": {"type": "string"},
+                  "reason": {"enum": ["timeout", "changed"]}
+                },
+                "required": ["path", "reason"]
+              }
+            }
+          }
+        },
+        {
           "if": {"properties": {"rule": {"const": "SHAPES_INVALID"}}, "required": ["rule"]},
           "then": {
             "properties": {
@@ -294,6 +309,31 @@
                   "resources": {"type": "array", "minItems": 1, "items": {"type": "string"}}
                 },
                 "required": ["path", "resources"]
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"rule": {"const": "READ_ONLY_QUERY"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {"type": "object", "maxProperties": 0}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"rule": {"const": "QUERY_FAILED"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "reason": {"enum": ["service", "timeout", "too_large"]},
+                  "service": {"type": "string"}
+                },
+                "required": ["reason"],
+                "if": {"properties": {"reason": {"const": "service"}}},
+                "then": {"required": ["service"]}
               }
             }
           }
