@@ -180,6 +180,12 @@ enum Command {
         #[arg(long)]
         brief: bool,
     },
+    /// Run a read-only SPARQL query (SELECT, ASK, CONSTRUCT, DESCRIBE) over all named graphs
+    Query {
+        /// The SPARQL query text; the §3.4 prefixes are predeclared
+        #[arg(value_name = "SPARQL")]
+        query: String,
+    },
     /// Manage the relation kinds: the standard relations and their sub-properties
     #[command(subcommand)]
     Relation(RelationCommand),
@@ -680,6 +686,9 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
     }
     if let Command::Relink { .. } = &cli.command {
         return relink(cli, &ctx, &config);
+    }
+    if let Command::Query { query } = &cli.command {
+        return run_query(cli, query);
     }
     // Usage errors come before the store is read.
     if let Command::Concept(ConceptCommand::Edit {
@@ -1310,7 +1319,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
         Command::Schema { .. } | Command::Generate(_) => {
             unreachable!("handled before the store is loaded")
         }
-        Command::Scan { .. } | Command::Relink { .. } => {
+        Command::Scan { .. } | Command::Relink { .. } | Command::Query { .. } => {
             unreachable!("handled before the store is loaded")
         }
         Command::Describe { brief } => {
@@ -2914,6 +2923,102 @@ struct FindOutput {
 struct ErrorOutput<'a> {
     schema_version: u32,
     error: &'a Error,
+}
+
+/// `hali query`: the text is parsed after the config and before the store is read; an absent data
+/// dir is queried as the core graph alone. `--dry-run` and `--yes` change nothing.
+fn run_query(cli: &Cli, text: &str) -> Result<(), Error> {
+    use core::query::{self, Answer, Limits};
+    let prepared = query::parse(text)?;
+    let dir = paths::data_dir(env).map_err(|_| Error::store_io(None))?;
+    let store = storage::load(&dir)?;
+    match query::run(&store, &prepared, Limits::default())? {
+        Answer::Boolean(b) if cli.json => println!("{{\"head\":{{}},\"boolean\":{b}}}"),
+        Answer::Boolean(b) => println!("{b}"),
+        Answer::Solutions { variables, rows } if cli.json => {
+            let bindings: Vec<serde_json::Value> = rows
+                .iter()
+                .map(|row| {
+                    let cells = variables
+                        .iter()
+                        .zip(row)
+                        .filter_map(|(v, cell)| Some((v.clone(), result_term(cell.as_ref()?))));
+                    serde_json::Value::Object(cells.collect())
+                })
+                .collect();
+            print_json(&serde_json::json!({
+                "head": {"vars": variables},
+                "results": {"bindings": bindings},
+            }));
+        }
+        Answer::Solutions { variables, rows } => {
+            let header: Vec<String> = variables.iter().map(|v| printable(v)).collect();
+            println!("{}", header.join("\t"));
+            for row in &rows {
+                let cells: Vec<String> = row
+                    .iter()
+                    .map(|cell| cell.as_ref().map_or(String::new(), cell_text))
+                    .collect();
+                println!("{}", cells.join("\t"));
+            }
+        }
+        Answer::Triples(triples) => {
+            let keep_layout = |c: char| escaped(c) && c != '\n' && c != '\t';
+            print!("{}", storage::turtle_document(triples, keep_layout));
+        }
+    }
+    Ok(())
+}
+
+/// A term in the W3C SPARQL 1.1 Query Results JSON format.
+fn result_term(term: &oxigraph::model::Term) -> serde_json::Value {
+    use oxigraph::model::Term;
+    use serde_json::json;
+    match term {
+        Term::NamedNode(n) => json!({"type": "uri", "value": n.as_str()}),
+        Term::BlankNode(b) => json!({"type": "bnode", "value": b.as_str()}),
+        Term::Literal(l) => {
+            if let Some(language) = l.language() {
+                json!({"type": "literal", "value": l.value(), "xml:lang": language})
+            } else if l.datatype() == oxigraph::model::vocab::xsd::STRING {
+                json!({"type": "literal", "value": l.value()})
+            } else {
+                json!({"type": "literal", "value": l.value(), "datatype": l.datatype().as_str()})
+            }
+        }
+        Term::Triple(t) => json!({"type": "triple", "value": {
+            "subject": result_term(&t.subject.clone().into()),
+            "predicate": result_term(&t.predicate.clone().into()),
+            "object": result_term(&t.object),
+        }}),
+    }
+}
+
+/// A SELECT cell in text mode: the N-Triples form of the term, IRIs shortened through the
+/// prefix table, every part escaped for the terminal (spec §9.3).
+fn cell_text(term: &oxigraph::model::Term) -> String {
+    use oxigraph::model::Term;
+    match term {
+        Term::NamedNode(n) => printable(&compact(&format!("<{}>", n.as_str()))),
+        Term::BlankNode(b) => printable(&format!("_:{}", b.as_str())),
+        Term::Literal(l) => {
+            let value = l.value().replace('\\', "\\\\").replace('"', "\\\"");
+            let mut cell = format!("\"{}\"", printable(&value));
+            if let Some(language) = l.language() {
+                cell.push_str(&format!("@{}", printable(language)));
+            } else if l.datatype() != oxigraph::model::vocab::xsd::STRING {
+                let datatype = compact(&format!("<{}>", l.datatype().as_str()));
+                cell.push_str(&format!("^^{}", printable(&datatype)));
+            }
+            cell
+        }
+        Term::Triple(t) => format!(
+            "<<( {} {} {} )>>",
+            cell_text(&t.subject.clone().into()),
+            cell_text(&t.predicate.clone().into()),
+            cell_text(&t.object)
+        ),
+    }
 }
 
 fn print_json(value: &impl Serialize) {

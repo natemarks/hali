@@ -314,6 +314,31 @@
           }
         },
         {
+          "if": {"properties": {"rule": {"const": "READ_ONLY_QUERY"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {"type": "object", "maxProperties": 0}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"rule": {"const": "QUERY_FAILED"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "reason": {"enum": ["service", "timeout", "too_large"]},
+                  "service": {"type": "string"}
+                },
+                "required": ["reason"],
+                "if": {"properties": {"reason": {"const": "service"}}},
+                "then": {"required": ["service"]}
+              }
+            }
+          }
+        },
+        {
           "if": {"properties": {"rule": {"const": "HASH_MISMATCH"}}, "required": ["rule"]},
           "then": {
             "properties": {
