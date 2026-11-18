@@ -303,6 +303,23 @@ mod goal {
         ("cli_dry_run__add_agent_dry_run_json", "add"),
     ];
 
+    /// Snapshots written by the active goal (#25): hidden from a build without the goal feature
+    /// (the `new` schema and the `FILES_DIR_UNUSABLE` branch they name do not exist until the
+    /// goal is met).
+    const GOAL_SNAPS_25: &[&str] = &[
+        "cli_dry_run__new_agent_dry_run_json",
+        "cli_dry_run__new_dry_run_json",
+        "cli_new__files_dir_unusable_json_envelope",
+        "cli_new__new_json",
+    ];
+
+    #[cfg(feature = "goal")]
+    const GOAL_STDOUT_GOLDENS_25: &[(&str, &str)] = &[
+        ("cli_dry_run__new_agent_dry_run_json", "new"),
+        ("cli_dry_run__new_dry_run_json", "new"),
+        ("cli_new__new_json", "new"),
+    ];
+
     /// Every stdout snapshot's row.
     #[allow(unused_assignments, unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
@@ -321,6 +338,8 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_24);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_23);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_13);
+        #[cfg(feature = "goal")]
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_25);
         // The goldens #24 rewrites are hidden without the goal feature (see `goldens`), and so
         // are their rows.
         let mut hidden_24: &[&str] = GOAL_SNAPS_24;
@@ -399,6 +418,11 @@ mod goal {
         {
             pending_13 = &[];
         }
+        let mut pending_25: &[&str] = GOAL_SNAPS_25;
+        #[cfg(feature = "goal")]
+        {
+            pending_25 = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -420,6 +444,7 @@ mod goal {
                 || pending_24.contains(&stem.as_str())
                 || pending_23.contains(&stem.as_str())
                 || pending_13.contains(&stem.as_str())
+                || pending_25.contains(&stem.as_str())
             {
                 continue;
             }
@@ -533,6 +558,8 @@ mod goal {
         assert!(goldens.len() >= 85, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 89, "found only {} goldens", goldens.len());
         assert!(goldens.len() >= 94, "found only {} goldens", goldens.len());
+        #[cfg(feature = "goal")]
+        assert!(goldens.len() >= 100, "found only {} goldens", goldens.len());
         for g in &goldens {
             let name = schema_name(g)
                 .unwrap_or_else(|| panic!("golden `{}` is not mapped to a schema", g.stem));
@@ -609,6 +636,11 @@ mod goal {
         // schema.
         if command == "add_agent" {
             return "add".to_string();
+        }
+        // `cli_dry_run__new_agent_dry_run_json` is the dry run of `new --agent` (#25): the `new`
+        // schema.
+        if command == "new_agent" {
+            return "new".to_string();
         }
         command.replace('_', " ")
     }
@@ -935,6 +967,154 @@ mod goal {
         cases.push((error("FILE_UNREADABLE", json!({"path": "/a/b"})), true));
         cases.push((error("FILE_UNREADABLE", json!({})), false));
         cases.push((error("FILE_UNREADABLE", json!({"path": null})), false));
+        let v = validator("error");
+        for (instance, valid) in cases {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema error` should {} {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #25: `hali schema new` is served, and `new` is in the list in sorted place, between
+    /// `forget` and `refresh`.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn new_schema_is_listed() {
+        let listed = fetch_list();
+        assert!(listed.len() >= 27, "{listed:?}");
+        let at = listed
+            .iter()
+            .position(|n| n == "new")
+            .expect("new is listed");
+        assert_eq!(listed[at - 1], "forget");
+        assert_eq!(listed[at + 1], "refresh");
+        assert!(listed.windows(2).all(|w| w[0] < w[1]), "sorted: {listed:?}");
+        assert_eq!(fetch("new")["title"], "hali new --json");
+    }
+
+    /// #25: what the `new` schema accepts and refuses: one Resource record, in a real or a
+    /// dry-run payload, nothing else allowed.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn new_schema_accepts_and_rejects() {
+        let changes = || json!([{"op": "add", "triple": "<a:b> <a:c> <a:d> ."}]);
+        let real = || json!({"schema_version": 1, "resource": record()});
+        let dry = || {
+            let mut v = real();
+            v["dry_run"] = json!(true);
+            v["changes"] = changes();
+            v
+        };
+        let with = |base: Value, key: &str, value: Value| {
+            let mut v = base;
+            v[key] = value;
+            v
+        };
+        let without = |base: Value, key: &str| {
+            let mut v = base;
+            v.as_object_mut().unwrap().remove(key);
+            v
+        };
+        let cases: Vec<(&str, Value, bool)> = vec![
+            ("real", real(), true),
+            ("dry run", dry(), true),
+            (
+                "dry run, no changes",
+                with(dry(), "changes", json!([])),
+                true,
+            ),
+            (
+                "no schema_version",
+                without(real(), "schema_version"),
+                false,
+            ),
+            ("version 2", with(real(), "schema_version", json!(2)), false),
+            ("no resource", without(real(), "resource"), false),
+            (
+                "resource is a list",
+                with(real(), "resource", json!([])),
+                false,
+            ),
+            (
+                "resource without a title",
+                with(real(), "resource", {
+                    let mut r = record();
+                    r.as_object_mut().unwrap().remove("title");
+                    r
+                }),
+                false,
+            ),
+            (
+                "resource with an extra key",
+                with(real(), "resource", {
+                    let mut r = record();
+                    r["content"] = json!("x");
+                    r
+                }),
+                false,
+            ),
+            ("extra key", with(real(), "path", json!("/a/b")), false),
+            (
+                "the add payload",
+                json!({"schema_version": 1, "added": [record()], "existing": []}),
+                false,
+            ),
+            ("dry_run alone", with(real(), "dry_run", json!(true)), false),
+            ("changes alone", with(real(), "changes", changes()), false),
+            ("dry_run false", with(dry(), "dry_run", json!(false)), false),
+            ("dry run without changes", without(dry(), "changes"), false),
+            (
+                "bad op",
+                with(
+                    dry(),
+                    "changes",
+                    json!([{"op": "replace", "triple": "<a:b> <a:c> <a:d> ."}]),
+                ),
+                false,
+            ),
+        ];
+        let v = validator("new");
+        for (name, instance, valid) in cases {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema new` should {} `{name}`: {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #25: the `error` schema has a branch for `FILES_DIR_UNUSABLE`: the `path` (a string, or
+    /// null when `HOME` is unset) and one of the five reasons.
+    #[cfg(feature = "goal")]
+    #[test]
+    fn files_dir_unusable_error_branch() {
+        let unusable = |details: Value| error("FILES_DIR_UNUSABLE", details);
+        let mut cases: Vec<(Value, bool)> = Vec::new();
+        for reason in [
+            "unresolved",
+            "relative",
+            "not_a_directory",
+            "own_dir",
+            "cannot_create",
+        ] {
+            cases.push((unusable(json!({"path": "/a/b", "reason": reason})), true));
+            cases.push((unusable(json!({"path": null, "reason": reason})), true));
+        }
+        cases.push((
+            unusable(json!({"path": "/a/b", "reason": "exploded"})),
+            false,
+        ));
+        cases.push((unusable(json!({"path": "/a/b"})), false));
+        cases.push((unusable(json!({"reason": "relative"})), false));
+        cases.push((unusable(json!({})), false));
+        cases.push((unusable(json!({"path": 5, "reason": "relative"})), false));
+        cases.push((unusable(json!({"path": "/a/b", "reason": 5})), false));
         let v = validator("error");
         for (instance, valid) in cases {
             let errs = problems(&v, &instance);
@@ -2882,7 +3062,7 @@ mod goal {
     #[test]
     fn relink_schema_is_listed() {
         let listed = fetch_list();
-        assert_eq!(listed.len(), 26, "{listed:?}");
+        assert!(listed.len() >= 26, "{listed:?}");
         let at = listed
             .iter()
             .position(|n| n == "relink")

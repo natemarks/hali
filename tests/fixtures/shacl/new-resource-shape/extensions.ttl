@@ -1,0 +1,11 @@
+@prefix hali: <https://w3id.org/hali#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix ex: <http://example.org/shapes#> .
+
+ex:NeedsDescription a sh:NodeShape ;
+	sh:targetClass hali:Resource ;
+	sh:property ex:DescriptionRequired .
+ex:DescriptionRequired sh:path dcterms:description ;
+	sh:minCount 1 ;
+	sh:message "Every Resource needs a description"@en .

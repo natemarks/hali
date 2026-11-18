@@ -1,0 +1,5 @@
+---
+source: tests/cli_new.rs
+expression: out.stdout
+---
+{"schema_version":1,"resource":{"id":"018bcfe5-6801-710a-adec-89025cc1beeb","path":"/TMP/home/Documents/hali/weekly-review.md","title":"Weekly review","media_type":"text/markdown","editable":true,"missing":false,"stale":false,"types":[],"tags":[],"byte_size":16,"modified":"2026-10-24T09:30:00Z"}}
