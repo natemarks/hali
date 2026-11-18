@@ -134,7 +134,7 @@ mod goal {
         assert_eq!(out.stderr, "");
         assert_eq!(
             out.stdout,
-            "add\nconcept add\nconcept edit\nconcept list\nconcept remove\nconcept rename\nconcept show\ndescribe\nedit\nerror\nfind\nforget\nrefresh\nrelate\nrelation add\nrelation list\nrelation remove\nrelink\nscan\nschema\nshow\ntype add\ntype list\ntype remove\nunrelate\nvalidate\n"
+            "add\nconcept add\nconcept edit\nconcept list\nconcept remove\nconcept rename\nconcept show\ndescribe\nedit\nerror\nfind\nforget\nnew\nrefresh\nrelate\nrelation add\nrelation list\nrelation remove\nrelink\nscan\nschema\nshow\ntype add\ntype list\ntype remove\nunrelate\nvalidate\n"
         );
     }
 

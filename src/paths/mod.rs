@@ -308,3 +308,55 @@ fn real_target(path: &Path) -> PathBuf {
     }
     path.to_path_buf()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_files_dir_resolves_the_real_target_without_creating_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let real = root.join("real");
+        std::fs::create_dir(&real).unwrap();
+        std::os::unix::fs::symlink(&real, root.join("link")).unwrap();
+        let home = root.to_str().unwrap().to_string();
+        let env = |k: &str| (k == "HOME").then(|| home.clone());
+        let data = root.join("data");
+        let own = [data.as_path()];
+        let get = |dir: &str| new_files_dir(env, Some(dir), &own);
+
+        // Through a symlink, and through `..` past a missing component; nothing is made.
+        let linked = format!("{home}/link/a/b");
+        assert_eq!(get(&linked), Ok(format!("{home}/real/a/b")));
+        let dotted = format!("{home}/nope/../real/c");
+        assert_eq!(get(&dotted), Ok(format!("{home}/real/c")));
+        assert!(!real.join("a").exists() && !root.join("nope").exists());
+        assert_eq!(get("~/real"), Ok(format!("{home}/real")));
+
+        assert_eq!(
+            get("docs"),
+            Err(FilesDirError::Relative {
+                path: "docs".to_string()
+            })
+        );
+        let inside = format!("{home}/data/files");
+        assert_eq!(
+            get(&inside),
+            Err(FilesDirError::OwnDir {
+                path: inside.clone()
+            })
+        );
+        std::fs::write(root.join("afile"), b"").unwrap();
+        let file = format!("{home}/afile");
+        assert_eq!(
+            get(&file),
+            Err(FilesDirError::NotADirectory { path: file.clone() })
+        );
+        let none = |_: &str| None;
+        assert_eq!(
+            new_files_dir(none, None, &own),
+            Err(FilesDirError::Unresolved)
+        );
+    }
+}
