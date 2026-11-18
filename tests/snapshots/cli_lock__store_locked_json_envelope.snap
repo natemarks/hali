@@ -1,0 +1,5 @@
+---
+source: tests/cli_lock.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"STORE_LOCKED","message":"another hali process holds the store lock /TMP/data/.lock; gave up after 5 s","details":{"path":"/TMP/data/.lock","reason":"timeout"},"suggested_fix":"Wait for the other hali process to finish (it may be waiting at a confirmation prompt), then retry.","suggested_command":null}}

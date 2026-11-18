@@ -496,6 +496,51 @@ impl Error {
         .fix("Check that the data dir is a directory you can read and write.")
     }
 
+    /// Another process holds the store lock `path` (`reason` `timeout`), or wrote the store
+    /// first while this writer had no data dir to lock (`changed`); nothing was written.
+    pub fn store_locked(path: &Path, reason: storage::LockReason) -> Error {
+        let (message, reason) = match reason {
+            storage::LockReason::Timeout => (
+                format!(
+                    "another hali process holds the store lock {}; gave up after 5 s",
+                    path.display()
+                ),
+                "timeout",
+            ),
+            storage::LockReason::Changed => (
+                format!(
+                    "another hali process wrote the store first (lock {}); nothing was written",
+                    path.display()
+                ),
+                "changed",
+            ),
+        };
+        Error::new(
+            "STORE_LOCKED",
+            3,
+            message,
+            json!({"path": path.display().to_string(), "reason": reason}),
+        )
+        .fix("Wait for the other hali process to finish (it may be waiting at a confirmation prompt), then retry.")
+    }
+
+    /// The data dir is not owned by the user, or is group- or world-writable: `STORE_IO`.
+    pub fn store_dir_unsafe(path: &Path, reason: &str) -> Error {
+        Error::new(
+            "STORE_IO",
+            3,
+            format!(
+                "the data dir {} is {reason}; hali will not use it",
+                path.display()
+            ),
+            json!({"path": path.display().to_string()}),
+        )
+        .fix(&format!(
+            "Make the data dir your own and not writable by others (chmod go-w {}), then retry.",
+            shell_quote(&path.display().to_string())
+        ))
+    }
+
     /// The state dir (spec §4) cannot be resolved from the environment.
     pub fn state_dir_unresolved() -> Error {
         Error::new(
@@ -767,6 +812,8 @@ impl From<storage::Error> for Error {
             storage::Error::Unparseable { file, line, column } => {
                 Error::store_unparseable(&file, line, column)
             }
+            storage::Error::Locked { path, reason } => Error::store_locked(&path, reason),
+            storage::Error::UnsafeDir { path, reason } => Error::store_dir_unsafe(&path, reason),
         }
     }
 }

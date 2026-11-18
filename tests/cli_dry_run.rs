@@ -306,7 +306,14 @@ fn dry_run_errors_match_the_real_run() {
                 assert!(dry.stderr.starts_with("error: "), "{what}: {}", dry.stderr);
             }
             assert_eq!(dry_env.state(), dry_before, "{what}: dry run wrote");
-            assert_eq!(real_env.state(), real_before, "{what}: real run wrote");
+            // A refused real run still creates the store lock (spec §3.3), and nothing else.
+            let real_after = match real_env.state() {
+                State::Dir(entries) => {
+                    State::Dir(entries.into_iter().filter(|(n, _)| n != ".lock").collect())
+                }
+                other => other,
+            };
+            assert_eq!(real_after, real_before, "{what}: real run wrote");
         }
     }
 }

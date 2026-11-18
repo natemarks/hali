@@ -6,8 +6,13 @@
 //! It also reads cataloged files (`inspect`, `stat`), only ever read-only, and walks
 //! directories for them (`walk`).
 
+mod lock;
 pub mod state;
+mod store_file;
 pub mod walk;
+
+pub use lock::Writer;
+pub use store_file::dir_problem;
 
 use crate::ontology::{CORE_TTL, PREFIXES, SHAPES_TTL};
 use oxigraph::model::vocab::rdf;
@@ -15,7 +20,6 @@ use oxigraph::model::{GraphNameRef, NamedNode, Triple};
 use oxttl::{TurtleParser, TurtleSerializer};
 use std::fs;
 use std::io::ErrorKind;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 
 pub use oxigraph::store::Store;
@@ -67,38 +71,27 @@ pub enum Error {
         line: u64,
         column: u64,
     },
+    /// The store lock `path` (`<data dir>/.lock`) was not got, or the store changed under it.
+    Locked { path: PathBuf, reason: LockReason },
+    /// The data dir is someone else's, or group- or world-writable (`dir_problem`).
+    UnsafeDir { path: PathBuf, reason: &'static str },
 }
 
-/// Loads the embedded core ontology and shapes, and the files in `dir`. A missing dir or file
-/// is an empty graph; nothing is created.
-pub fn load(dir: &Path) -> Result<Store, Error> {
-    let io = |path: &Path| Error::Io {
-        path: path.to_path_buf(),
-    };
-    let store = Store::new().map_err(|_| io(dir))?;
-    for core in [CORE_TTL, SHAPES_TTL] {
-        parse_into(&store, core.as_bytes(), graph("core").as_ref().into())
-            .expect("the embedded core ontology and shapes are valid Turtle");
-    }
+/// Why a lock attempt failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LockReason {
+    /// Another process held the lock for the whole 5 s wait.
+    Timeout,
+    /// The data dir was absent at first, and a store file appeared before this writer locked.
+    Changed,
+}
 
-    match fs::metadata(dir) {
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(store),
-        Err(_) => return Err(io(dir)),
-        Ok(meta) if !meta.is_dir() => return Err(io(dir)),
-        Ok(_) => {}
-    }
-    for name in ["vocabulary", "resources", "extensions"] {
-        let file = format!("{name}.ttl");
-        let path = dir.join(&file);
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == ErrorKind::NotFound => continue,
-            Err(_) => return Err(io(&path)),
-        };
-        parse_into(&store, &bytes, graph(name).as_ref().into())
-            .map_err(|(line, column)| Error::Unparseable { file, line, column })?;
-    }
-    Ok(store)
+/// Loads the embedded core ontology and shapes, and the files in `dir`, under a shared lock on
+/// `<dir>/.lock` held only while loading (spec §3.3). A missing dir or file is an empty graph, a
+/// missing `.lock` is read without a lock, and nothing is created.
+pub fn load(dir: &Path) -> Result<Store, Error> {
+    let _shared = lock::shared(dir)?;
+    store_file::load_files(dir)
 }
 
 /// Parses Turtle into one named graph. On a syntax error, returns its 1-based line and column.
@@ -177,19 +170,6 @@ pub fn to_turtle(store: &Store, file: File) -> String {
     out.push('\n');
     out.push_str(&body);
     out
-}
-
-/// Writes one file's graph into `dir`, creating `dir` (mode 0700) if needed.
-pub fn save(dir: &Path, store: &Store, file: File) -> Result<(), Error> {
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(dir)
-        .map_err(|_| Error::Io {
-            path: dir.to_path_buf(),
-        })?;
-    let path = dir.join(file.name());
-    fs::write(&path, to_turtle(store, file)).map_err(|_| Error::Io { path })
 }
 
 /// Reads a text file, if it exists.

@@ -116,6 +116,7 @@ fn json(s: &str) -> serde_json::Value {
 fn dir_entries(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
+        .filter(|e| e.as_ref().unwrap().file_name() != ".lock")
         .map(|e| e.unwrap().file_name().into_string().unwrap())
         .collect();
     names.sort();

@@ -216,12 +216,14 @@ pub fn assert_dry_run_matches_real_run(store: Option<&Path>, args: &[&str]) -> s
     assert_eq!(added, wrote_added, "{args:?}: added triples");
     assert_eq!(removed, wrote_removed, "{args:?}: removed triples");
 
-    // Every other file is byte-identical.
+    // Every other file is byte-identical, but for the store lock a real run creates (spec §3.3).
     let other = |l: &Option<Listing>| -> Listing {
         l.clone()
             .unwrap_or_default()
             .into_iter()
-            .filter(|(name, _)| name != "vocabulary.ttl" && name != "resources.ttl")
+            .filter(|(name, _)| {
+                !matches!(name.as_str(), "vocabulary.ttl" | "resources.ttl" | ".lock")
+            })
             .collect()
     };
     assert_eq!(other(&real.before), other(&after), "{args:?}: other files");
