@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 # Criterion 15 and the guard (#25): `new` joins the schema list, so exactly three existing
-# goldens change, each by gaining `"new",` between `"forget",` and `"refresh",` (the schema list
+# goldens change, each by gaining `"new",` right after `"forget",` (before `"query"`; the schema list
 # of cli_schema, cli_relink and cli_scan); no other existing golden may change. The new
 # cli_new__* and cli_dry_run__new_* goldens are the goal's own and locked.
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
@@ -20,8 +20,8 @@ lists=(
     tests/snapshots/cli_scan__schema_list_json.snap
 )
 for snap in "${lists[@]}"; do
-    if ! grep -qF '"forget","new","refresh"' "$snap"; then
-        echo "MISSING: $snap does not list \"new\" between \"forget\" and \"refresh\""
+    if ! grep -qF '"forget","new","' "$snap" || [ "$(grep -o '"new"' "$snap" | wc -l)" -ne 1 ]; then
+        echo "MISSING: $snap does not list \"new\" exactly once, right after \"forget\""
         status=1
         continue
     fi
@@ -31,7 +31,7 @@ for snap in "${lists[@]}"; do
         status=1
         continue
     fi
-    if ! diff -q <(git show "$base:$snap") <(sed 's/"forget","new","refresh"/"forget","refresh"/' "$snap") >/dev/null; then
+    if ! diff -q <(git show "$base:$snap") <(sed 's/"forget","new","/"forget","/' "$snap") >/dev/null; then
         echo "CHANGED: $snap differs from $base by more than the name \"new\""
         status=1
     fi
