@@ -115,7 +115,6 @@ mod goal {
     // ---- criterion 1: list ----------------------------------------------------------------
 
     #[test]
-    #[cfg(feature = "goal")]
     fn schema_lists_names_json() {
         let env = Env::new();
         let out = env.run(["schema", "--json"]);
@@ -128,7 +127,6 @@ mod goal {
     }
 
     #[test]
-    #[cfg(feature = "goal")]
     fn schema_lists_names_text() {
         let env = Env::new();
         let out = env.run(["schema"]);
@@ -168,7 +166,6 @@ mod goal {
     /// #28: `skill install` has a bare draft 2020-12 schema, the same in text and `--json`
     /// mode, with no `$id` and no external `$ref`; a usage error for an unknown name lists it.
     #[test]
-    #[cfg(feature = "goal")]
     fn skill_install_schema_is_a_document() {
         let env = Env::new();
         let text = env.run(["schema", "skill", "install"]);

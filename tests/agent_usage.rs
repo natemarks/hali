@@ -298,7 +298,6 @@ mod goal {
     /// #28: the guide names the command that installs the skill (the skill's
     /// `references/usage.md` is this file).
     #[test]
-    #[cfg(feature = "goal")]
     fn guide_names_skill_install() {
         let text = guide_text();
         assert!(

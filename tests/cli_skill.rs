@@ -75,7 +75,6 @@ mod guard {
     }
 }
 
-#[cfg(feature = "goal")]
 mod goal {
     use assert_cmd::Command;
     use serde_json::{Value, json};

@@ -178,7 +178,6 @@ fn dry_run_writes_nothing_for_every_subcommand() {
 
 /// `hali --dry-run skill install` over a pre-existing, differing `SKILL.md` says "would update"
 /// and leaves the whole temp HOME (modes, mtimes, bytes) as it was.
-#[cfg(feature = "goal")]
 #[test]
 fn dry_run_skill_install_over_a_differing_file_writes_nothing() {
     use std::os::unix::fs::PermissionsExt;

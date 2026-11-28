@@ -369,7 +369,6 @@ mod goal {
         "cli_skill__install_json",
     ];
 
-    #[cfg(feature = "goal")]
     const GOAL_STDOUT_GOLDENS_28: &[(&str, &str)] = &[
         ("cli_skill__dry_run_json", "skill install"),
         ("cli_skill__install_json", "skill install"),
@@ -396,7 +395,6 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_9);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_13);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_25);
-        #[cfg(feature = "goal")]
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_28);
         // The goldens #24 rewrites are hidden without the goal feature (see `goldens`), and so
         // are their rows.
@@ -405,7 +403,6 @@ mod goal {
             hidden_24 = &[];
         }
         let mut hidden_28: &[&str] = GOAL_SNAPS_28;
-        #[cfg(feature = "goal")]
         {
             hidden_28 = &[];
         }
@@ -498,7 +495,6 @@ mod goal {
             pending_25 = &[];
         }
         let mut pending_28: &[&str] = GOAL_SNAPS_28;
-        #[cfg(feature = "goal")]
         {
             pending_28 = &[];
         }
@@ -1851,7 +1847,6 @@ mod goal {
     /// key required, nothing else allowed. #28 adds the `skill` key (`{installed, binary,
     /// stale}`) to both branches, required, last.
     #[test]
-    #[cfg(feature = "goal")]
     fn describe_schema_accepts_and_rejects() {
         let counts = || json!({"resources": 1, "concepts": 1, "types": 1, "relation_kinds": 1, "relations": 0});
         let skill = || json!({"installed": null, "binary": "0.1.0", "stale": false});
@@ -2099,7 +2094,6 @@ mod goal {
     /// #28: what the `skill install` schema accepts and refuses: a real branch and a dry-run
     /// branch, every key required, `action` one of three words, nothing else allowed.
     #[test]
-    #[cfg(feature = "goal")]
     fn skill_install_schema_accepts_and_rejects() {
         let file = |path: &str, action: &str| json!({"path": path, "action": action});
         let real = || {
@@ -2221,7 +2215,6 @@ mod goal {
     /// #28: the `error` schema has a branch for `SKILL_DIR_UNUSABLE`: the `path` (a string, or
     /// null when `HOME` is unset) and one of the six reasons.
     #[test]
-    #[cfg(feature = "goal")]
     fn skill_dir_unusable_error_branch() {
         let unusable = |details: Value| error("SKILL_DIR_UNUSABLE", details);
         let mut cases: Vec<(Value, bool)> = Vec::new();

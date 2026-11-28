@@ -5,7 +5,6 @@
 //! Unresolved>`: `($HOME/.claude/skills/hali, $HOME/.agents/skills/hali)`. An unset, empty or
 //! relative `HOME` is `Unresolved`; no other variable (`CLAUDE_CONFIG_DIR`, `XDG_*`) counts.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::paths;
     use std::path::PathBuf;

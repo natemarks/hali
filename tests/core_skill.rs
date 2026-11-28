@@ -19,7 +19,6 @@
 //! - `action(current: Option<&[u8]>, new: &[u8]) -> &'static str`: `"created"` for no current
 //!   file, `"unchanged"` for equal bytes, `"updated"` otherwise.
 
-#[cfg(feature = "goal")]
 mod goal {
     use hali::core::{guide, skill};
 

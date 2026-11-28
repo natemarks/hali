@@ -19,10 +19,8 @@
 //!   `--dry-run` only ever follows `hali ` directly, and `--yes` appears only in a paragraph that
 //!   says `never`, `consent` or `approval`.
 
-#[cfg(feature = "goal")]
 mod example_world;
 
-#[cfg(feature = "goal")]
 mod goal {
     use crate::example_world::{Kind, commands, parse_line, parse_with_clap};
     use std::process::Command;
