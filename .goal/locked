@@ -1,0 +1,17 @@
+tests/core_skill.rs
+tests/paths_skill.rs
+tests/skill_doc.rs
+tests/cli_skill.rs
+tests/snapshots/cli_skill__install_json.snap
+tests/snapshots/cli_skill__dry_run_json.snap
+tests/snapshots/cli_skill__error_json_envelope.snap
+tests/snapshots/cli_describe__describe_json.snap
+tests/snapshots/cli_describe__describe_brief_json.snap
+tests/snapshots/cli_describe__describe_json_empty.snap
+tests/snapshots/cli_schema__schema_list_json.snap
+tests/cli_describe.rs
+tests/cli_schema.rs
+tests/schema_contract.rs
+tests/dry_run_guard.rs
+tests/agent_usage.rs
+tests/example_world/mod.rs

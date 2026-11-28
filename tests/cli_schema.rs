@@ -115,6 +115,7 @@ mod goal {
     // ---- criterion 1: list ----------------------------------------------------------------
 
     #[test]
+    #[cfg(feature = "goal")]
     fn schema_lists_names_json() {
         let env = Env::new();
         let out = env.run(["schema", "--json"]);
@@ -127,6 +128,7 @@ mod goal {
     }
 
     #[test]
+    #[cfg(feature = "goal")]
     fn schema_lists_names_text() {
         let env = Env::new();
         let out = env.run(["schema"]);
@@ -134,7 +136,7 @@ mod goal {
         assert_eq!(out.stderr, "");
         assert_eq!(
             out.stdout,
-            "add\nconcept add\nconcept edit\nconcept list\nconcept remove\nconcept rename\nconcept show\ndescribe\nedit\nerror\nfind\nforget\nnew\nquery\nrefresh\nrelate\nrelation add\nrelation list\nrelation remove\nrelink\nscan\nschema\nshow\ntype add\ntype list\ntype remove\nunrelate\nvalidate\n"
+            "add\nconcept add\nconcept edit\nconcept list\nconcept remove\nconcept rename\nconcept show\ndescribe\nedit\nerror\nfind\nforget\nnew\nquery\nrefresh\nrelate\nrelation add\nrelation list\nrelation remove\nrelink\nscan\nschema\nshow\nskill install\ntype add\ntype list\ntype remove\nunrelate\nvalidate\n"
         );
     }
 
@@ -161,6 +163,37 @@ mod goal {
             external_refs(&doc, &mut refs);
             assert!(refs.is_empty(), "{name}: external $ref {refs:?}");
         }
+    }
+
+    /// #28: `skill install` has a bare draft 2020-12 schema, the same in text and `--json`
+    /// mode, with no `$id` and no external `$ref`; a usage error for an unknown name lists it.
+    #[test]
+    #[cfg(feature = "goal")]
+    fn skill_install_schema_is_a_document() {
+        let env = Env::new();
+        let text = env.run(["schema", "skill", "install"]);
+        let json = env.run(["schema", "--json", "skill", "install"]);
+        for (mode, out) in [("text", &text), ("--json", &json)] {
+            assert_eq!(out.code, Some(0), "{mode}: {}", out.stderr);
+            assert_eq!(out.stderr, "", "{mode}");
+        }
+        assert_eq!(text.stdout, json.stdout);
+        let doc = one_line_json(&text.stdout);
+        assert_eq!(
+            doc["$schema"], "https://json-schema.org/draft/2020-12/schema",
+            "skill install"
+        );
+        assert!(doc.get("$id").is_none());
+        let mut refs = Vec::new();
+        external_refs(&doc, &mut refs);
+        assert!(refs.is_empty(), "external $ref {refs:?}");
+
+        let bad = env.run(["schema", "nope"]);
+        assert_eq!(bad.code, Some(2), "{}", bad.stderr);
+        assert!(bad.stderr.contains("skill install"), "{}", bad.stderr);
+        // `skill` alone is a group, not a schema.
+        let group = env.run(["schema", "skill"]);
+        assert_eq!(group.code, Some(2), "{}", group.stderr);
     }
 
     // ---- criterion 2: one schema is a bare draft 2020-12 document ---------------------------

@@ -1,0 +1,5 @@
+---
+source: tests/cli_skill.rs
+expression: out.stdout
+---
+{"schema_version":1,"version":"<VERSION>","files":[{"path":"/TMP/home/.claude/skills/hali/SKILL.md","action":"created"},{"path":"/TMP/home/.claude/skills/hali/references/usage.md","action":"created"}]}

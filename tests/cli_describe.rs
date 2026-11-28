@@ -29,7 +29,9 @@
 
 mod goal {
     use assert_cmd::Command;
-    use serde_json::{Value, json};
+    use serde_json::Value;
+    #[cfg(feature = "goal")]
+    use serde_json::json;
     use std::collections::BTreeMap;
     use std::ffi::OsStr;
     use std::os::unix::fs::symlink;
@@ -38,7 +40,8 @@ mod goal {
     use tempfile::TempDir;
 
     const NOW: &str = "2026-10-24T09:30:00Z";
-    const KEYS: [&str; 7] = [
+    #[cfg(feature = "goal")]
+    const KEYS: [&str; 8] = [
         "schema_version",
         "core_version",
         "store",
@@ -46,6 +49,7 @@ mod goal {
         "concepts",
         "types",
         "relation_kinds",
+        "skill",
     ];
 
     struct Env {
@@ -213,12 +217,17 @@ mod goal {
         v
     }
 
+    #[cfg(feature = "goal")]
     fn snapshot_stdout(name: &str, out: &Out) {
         assert_eq!(out.code, Some(0), "{}", out.stderr);
         assert_eq!(out.stderr, "");
+        // The binary version is redacted (the crate version changes with every release).
+        let version = format!("\"binary\":\"{}\"", env!("CARGO_PKG_VERSION"));
+        assert_eq!(out.stdout.matches(&version).count(), 1, "{}", out.stdout);
+        let stdout = out.stdout.replace(&version, "\"binary\":\"<VERSION>\"");
         // The locked snapshots are named without the `goal__` module segment.
         insta::with_settings!({prepend_module_to_snapshot => false}, {
-            insta::assert_snapshot!(name, out.stdout);
+            insta::assert_snapshot!(name, stdout);
         });
     }
 
@@ -235,13 +244,21 @@ mod goal {
         v["results"].clone()
     }
 
-    const FULL_TEXT: &str = "core_version\t0.1.0\n\
+    #[cfg(feature = "goal")]
+    const FULL_TEXT: &str = concat!(
+        "core_version\t0.1.0\n\
         store\t/TMP/data\n\
         resources\t5\n\
         concepts\t1\n\
         types\t1\n\
         relation_kinds\t10\n\
-        relations\t6\n";
+        relations\t6\n\
+        skill_installed\t-\n\
+        skill_binary\t",
+        env!("CARGO_PKG_VERSION"),
+        "\nskill_stale\tfalse\n"
+    );
+    #[cfg(feature = "goal")]
     const LISTS_TEXT: &str = "concept\tml\tml\n\
         type\tNote\tNote\t\n\
         relation_kind\tannotates\tannotates\tdcterms:references\n\
@@ -258,6 +275,7 @@ mod goal {
     // ---- criterion 1: the full object --------------------------------------------------------
 
     #[test]
+    #[cfg(feature = "goal")]
     fn describe_json() {
         let env = Env::new();
         let out = env.run(["describe", "--json"]);
@@ -265,6 +283,7 @@ mod goal {
     }
 
     #[test]
+    #[cfg(feature = "goal")]
     fn describe_lists_match_list_commands() {
         let env = Env::new();
         let v = ok(&env.run(["describe", "--json"]));
@@ -302,6 +321,7 @@ mod goal {
     // ---- criterion 2: --brief ----------------------------------------------------------------
 
     #[test]
+    #[cfg(feature = "goal")]
     fn describe_brief_json() {
         let env = Env::new();
         let out = env.run(["describe", "--brief", "--json"]);
@@ -328,6 +348,7 @@ mod goal {
     // ---- criterion 3: an absent or empty store -----------------------------------------------
 
     #[test]
+    #[cfg(feature = "goal")]
     fn describe_absent_store() {
         let env = Env::absent();
         let before = env.tree();
@@ -354,6 +375,7 @@ mod goal {
     }
 
     #[test]
+    #[cfg(feature = "goal")]
     fn describe_empty_dir_matches_absent() {
         let absent = Env::absent();
         let empty = Env::empty();
@@ -494,6 +516,7 @@ mod goal {
     // ---- criterion 7: text -------------------------------------------------------------------
 
     #[test]
+    #[cfg(feature = "goal")]
     fn describe_text() {
         let env = Env::new();
         let out = env.run(["describe"]);
@@ -503,6 +526,7 @@ mod goal {
     }
 
     #[test]
+    #[cfg(feature = "goal")]
     fn describe_brief_text() {
         let env = Env::new();
         let out = env.run(["describe", "--brief"]);
@@ -713,6 +737,7 @@ mod goal {
     // ---- criterion 11: the schema list -------------------------------------------------------
 
     #[test]
+    #[cfg(feature = "goal")]
     fn schema_lists_describe() {
         let env = Env::new();
         let v = ok(&env.run(["schema", "--json"]));
@@ -742,6 +767,7 @@ mod goal {
                 "scan",
                 "schema",
                 "show",
+                "skill install",
                 "type add",
                 "type list",
                 "type remove",

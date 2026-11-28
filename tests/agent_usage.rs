@@ -33,7 +33,7 @@
 //!   (bare), `roots.json`, and one paragraph holding `--prune --yes`, `forget` and `without
 //!   asking`;
 //! - hygiene: no §9.3-escaped character but LF, at most 300 lines, each snippet marker on a
-//!   line of its own exactly once and nowhere else, and no mention of `skill install` (#28).
+//!   line of its own exactly once and nowhere else; and (#28) it mentions `hali skill install`.
 
 mod example_world;
 
@@ -293,9 +293,17 @@ mod goal {
                 "{marker} is not on a line of its own"
             );
         }
+    }
+
+    /// #28: the guide names the command that installs the skill (the skill's
+    /// `references/usage.md` is this file).
+    #[test]
+    #[cfg(feature = "goal")]
+    fn guide_names_skill_install() {
+        let text = guide_text();
         assert!(
-            !text.contains("skill install"),
-            "the guide mentions `skill install` (#28 has not landed)"
+            text.contains("hali skill install"),
+            "the guide does not mention `hali skill install`"
         );
     }
 }

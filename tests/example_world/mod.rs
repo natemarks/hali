@@ -292,7 +292,7 @@ impl Node {
     }
 }
 
-const MUTATING: [&str; 17] = [
+const MUTATING: [&str; 18] = [
     "add",
     "new",
     "edit",
@@ -310,6 +310,7 @@ const MUTATING: [&str; 17] = [
     "type remove",
     "relation add",
     "relation remove",
+    "skill install",
 ];
 const READ_ONLY: [&str; 10] = [
     "describe",

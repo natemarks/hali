@@ -356,6 +356,25 @@ mod goal {
         ("cli_new__new_json", "new"),
     ];
 
+    /// Snapshots written or rewritten by the active goal (#28): hidden from a build without the
+    /// goal feature (the `skill install` schema, the `SKILL_DIR_UNUSABLE` branch and the `skill`
+    /// key of `describe` they name do not exist until the goal is met; the three `describe`
+    /// goldens are rewritten with the new key).
+    const GOAL_SNAPS_28: &[&str] = &[
+        "cli_describe__describe_brief_json",
+        "cli_describe__describe_json",
+        "cli_describe__describe_json_empty",
+        "cli_skill__dry_run_json",
+        "cli_skill__error_json_envelope",
+        "cli_skill__install_json",
+    ];
+
+    #[cfg(feature = "goal")]
+    const GOAL_STDOUT_GOLDENS_28: &[(&str, &str)] = &[
+        ("cli_skill__dry_run_json", "skill install"),
+        ("cli_skill__install_json", "skill install"),
+    ];
+
     /// Every stdout snapshot's row.
     #[allow(unused_assignments, unused_mut)]
     fn stdout_goldens() -> Vec<(&'static str, &'static str)> {
@@ -377,13 +396,20 @@ mod goal {
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_9);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_13);
         rows.extend_from_slice(GOAL_STDOUT_GOLDENS_25);
+        #[cfg(feature = "goal")]
+        rows.extend_from_slice(GOAL_STDOUT_GOLDENS_28);
         // The goldens #24 rewrites are hidden without the goal feature (see `goldens`), and so
         // are their rows.
         let mut hidden_24: &[&str] = GOAL_SNAPS_24;
         {
             hidden_24 = &[];
         }
-        rows.retain(|(stem, _)| !hidden_24.contains(stem));
+        let mut hidden_28: &[&str] = GOAL_SNAPS_28;
+        #[cfg(feature = "goal")]
+        {
+            hidden_28 = &[];
+        }
+        rows.retain(|(stem, _)| !hidden_24.contains(stem) && !hidden_28.contains(stem));
         rows
     }
 
@@ -471,6 +497,11 @@ mod goal {
         {
             pending_25 = &[];
         }
+        let mut pending_28: &[&str] = GOAL_SNAPS_28;
+        #[cfg(feature = "goal")]
+        {
+            pending_28 = &[];
+        }
         let mut out = Vec::new();
         for entry in std::fs::read_dir(snapshots_dir()).unwrap() {
             let path = entry.unwrap().path();
@@ -497,6 +528,7 @@ mod goal {
                 || pending_5.contains(&stem.as_str())
                 || pending_13.contains(&stem.as_str())
                 || pending_25.contains(&stem.as_str())
+                || pending_28.contains(&stem.as_str())
             {
                 continue;
             }
@@ -672,6 +704,10 @@ mod goal {
     /// The command a dry-run golden belongs to, from its stem:
     /// `cli_dry_run__concept_add_dry_run_json` -> `concept add`.
     fn dry_run_command(stem: &str) -> String {
+        // `cli_skill__dry_run_json` is the dry run of `skill install` (#28).
+        if stem == "cli_skill__dry_run_json" {
+            return "skill install".to_string();
+        }
         let rest = stem.strip_prefix("cli_dry_run__").unwrap_or_else(|| {
             panic!("{stem}: a dry-run golden is named cli_dry_run__<command>_dry_run...")
         });
@@ -1812,13 +1848,16 @@ mod goal {
     }
 
     /// #19: what the `describe` schema accepts and refuses: a full and a brief branch, every
-    /// key required, nothing else allowed.
+    /// key required, nothing else allowed. #28 adds the `skill` key (`{installed, binary,
+    /// stale}`) to both branches, required, last.
     #[test]
+    #[cfg(feature = "goal")]
     fn describe_schema_accepts_and_rejects() {
         let counts = || json!({"resources": 1, "concepts": 1, "types": 1, "relation_kinds": 1, "relations": 0});
+        let skill = || json!({"installed": null, "binary": "0.1.0", "stale": false});
         let brief = || {
             json!({"schema_version": 1, "core_version": "0.1.0", "store": "/data/hali",
-                "counts": counts()})
+                "counts": counts(), "skill": skill()})
         };
         let full = || {
             let mut v = brief();
@@ -1903,7 +1942,84 @@ mod goal {
             ),
             (
                 "extra key in full".into(),
-                with(full(), "skill", json!({})),
+                with(full(), "exists", json!(true)),
+                false,
+            ),
+            // The `skill` key (#28): required in both forms, with three typed fields.
+            ("full minus skill".into(), without(full(), "skill"), false),
+            ("brief minus skill".into(), without(brief(), "skill"), false),
+            (
+                "skill installed".into(),
+                with(
+                    brief(),
+                    "skill",
+                    json!({"installed": "0.1.0", "binary": "0.1.0", "stale": false}),
+                ),
+                true,
+            ),
+            (
+                "skill stale".into(),
+                with(
+                    full(),
+                    "skill",
+                    json!({"installed": "9.9.9", "binary": "0.1.0", "stale": true}),
+                ),
+                true,
+            ),
+            (
+                "skill empty".into(),
+                with(brief(), "skill", json!({})),
+                false,
+            ),
+            (
+                "skill null".into(),
+                with(brief(), "skill", json!(null)),
+                false,
+            ),
+            (
+                "skill without installed".into(),
+                with(brief(), "skill", json!({"binary": "0.1.0", "stale": false})),
+                false,
+            ),
+            (
+                "skill without binary".into(),
+                with(brief(), "skill", json!({"installed": null, "stale": false})),
+                false,
+            ),
+            (
+                "skill without stale".into(),
+                with(
+                    brief(),
+                    "skill",
+                    json!({"installed": null, "binary": "0.1.0"}),
+                ),
+                false,
+            ),
+            (
+                "skill installed a number".into(),
+                with(
+                    brief(),
+                    "skill",
+                    json!({"installed": 1, "binary": "0.1.0", "stale": false}),
+                ),
+                false,
+            ),
+            (
+                "skill binary null".into(),
+                with(
+                    brief(),
+                    "skill",
+                    json!({"installed": null, "binary": null, "stale": false}),
+                ),
+                false,
+            ),
+            (
+                "skill stale a string".into(),
+                with(
+                    brief(),
+                    "skill",
+                    json!({"installed": null, "binary": "0.1.0", "stale": "no"}),
+                ),
                 false,
             ),
             (
@@ -1975,6 +2091,171 @@ mod goal {
                 errs.is_empty(),
                 valid,
                 "`hali schema describe` should {} `{name}`: {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #28: what the `skill install` schema accepts and refuses: a real branch and a dry-run
+    /// branch, every key required, `action` one of three words, nothing else allowed.
+    #[test]
+    #[cfg(feature = "goal")]
+    fn skill_install_schema_accepts_and_rejects() {
+        let file = |path: &str, action: &str| json!({"path": path, "action": action});
+        let real = || {
+            json!({"schema_version": 1, "version": "0.1.0", "files": [
+                file("/h/.claude/skills/hali/SKILL.md", "created"),
+                file("/h/.claude/skills/hali/references/usage.md", "updated"),
+                file("/h/.agents/skills/hali/SKILL.md", "unchanged"),
+            ]})
+        };
+        let dry = || {
+            let mut v = real();
+            v["dry_run"] = json!(true);
+            v["changes"] = json!([]);
+            v
+        };
+        let with = |base: Value, key: &str, value: Value| {
+            let mut v = base;
+            v[key] = value;
+            v
+        };
+        let without = |base: Value, key: &str| {
+            let mut v = base;
+            v.as_object_mut().unwrap().remove(key);
+            v
+        };
+        let v = validator("skill install");
+        let cases: Vec<(String, Value, bool)> = vec![
+            ("real".into(), real(), true),
+            ("dry run".into(), dry(), true),
+            (
+                "one file".into(),
+                with(real(), "files", json!([file("/h/a", "created")])),
+                true,
+            ),
+            ("no version".into(), without(real(), "version"), false),
+            ("no files".into(), without(real(), "files"), false),
+            (
+                "no schema_version".into(),
+                without(real(), "schema_version"),
+                false,
+            ),
+            (
+                "version 2".into(),
+                with(real(), "schema_version", json!(2)),
+                false,
+            ),
+            (
+                "version a number".into(),
+                with(real(), "version", json!(1)),
+                false,
+            ),
+            (
+                "files a string".into(),
+                with(real(), "files", json!("a")),
+                false,
+            ),
+            (
+                "action deleted".into(),
+                with(real(), "files", json!([file("/h/a", "deleted")])),
+                false,
+            ),
+            (
+                "action would create".into(),
+                with(real(), "files", json!([file("/h/a", "would create")])),
+                false,
+            ),
+            (
+                "file without action".into(),
+                with(real(), "files", json!([{"path": "/h/a"}])),
+                false,
+            ),
+            (
+                "file without path".into(),
+                with(real(), "files", json!([{"action": "created"}])),
+                false,
+            ),
+            (
+                "path a number".into(),
+                with(real(), "files", json!([{"path": 5, "action": "created"}])),
+                false,
+            ),
+            (
+                "file extra key".into(),
+                with(
+                    real(),
+                    "files",
+                    json!([{"path": "/h/a", "action": "created", "mode": "0600"}]),
+                ),
+                false,
+            ),
+            ("extra key".into(), with(real(), "total", json!(3)), false),
+            (
+                "dry_run alone".into(),
+                with(real(), "dry_run", json!(true)),
+                false,
+            ),
+            (
+                "changes alone".into(),
+                with(real(), "changes", json!([])),
+                false,
+            ),
+            (
+                "dry_run false".into(),
+                with(dry(), "dry_run", json!(false)),
+                false,
+            ),
+        ];
+        for (name, instance, valid) in cases {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema skill install` should {} `{name}`: {instance}; errors: {errs:?}",
+                if valid { "accept" } else { "reject" }
+            );
+        }
+    }
+
+    /// #28: the `error` schema has a branch for `SKILL_DIR_UNUSABLE`: the `path` (a string, or
+    /// null when `HOME` is unset) and one of the six reasons.
+    #[test]
+    #[cfg(feature = "goal")]
+    fn skill_dir_unusable_error_branch() {
+        let unusable = |details: Value| error("SKILL_DIR_UNUSABLE", details);
+        let mut cases: Vec<(Value, bool)> = Vec::new();
+        for reason in [
+            "unresolved",
+            "not_a_directory",
+            "symlink",
+            "not_a_file",
+            "unsafe",
+            "cannot_create",
+        ] {
+            cases.push((unusable(json!({"path": "/a/b", "reason": reason})), true));
+            cases.push((unusable(json!({"path": null, "reason": reason})), true));
+        }
+        cases.push((
+            unusable(json!({"path": "/a/b", "reason": "exploded"})),
+            false,
+        ));
+        // The FILES_DIR_UNUSABLE reasons that are not the skill's.
+        for reason in ["relative", "own_dir"] {
+            cases.push((unusable(json!({"path": "/a/b", "reason": reason})), false));
+        }
+        cases.push((unusable(json!({"path": "/a/b"})), false));
+        cases.push((unusable(json!({"reason": "symlink"})), false));
+        cases.push((unusable(json!({})), false));
+        cases.push((unusable(json!({"path": 5, "reason": "symlink"})), false));
+        cases.push((unusable(json!({"path": "/a/b", "reason": 5})), false));
+        let v = validator("error");
+        for (instance, valid) in cases {
+            let errs = problems(&v, &instance);
+            assert_eq!(
+                errs.is_empty(),
+                valid,
+                "`hali schema error` should {} {instance}; errors: {errs:?}",
                 if valid { "accept" } else { "reject" }
             );
         }
