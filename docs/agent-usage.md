@@ -11,7 +11,8 @@ hali keeps an RDF ontology (SKOS, OWL 2, SHACL) that describes the user's local 
 place: their titles, Types, Concepts and relations. Run `hali help agents` for the full
 guide.
 
-- Set `HALI_AGENT=<your agent name>` on every hali command you run.
+- Name yourself on commands that write: `--agent <name>` after the subcommand, or
+  `HALI_AGENT=<name>` (never in front of a read-only command).
 - Read first: `hali describe --json`, then `hali find --json` and `hali show <ref> --json`;
   read a file at its `path` directly.
 - Before any change, run it with `hali --dry-run` first, show the user the `changes`, and run
@@ -23,9 +24,10 @@ guide.
 ## Words
 
 A **Resource** is one cataloged file. A **Type** is a class of Resources (`Paper`, `Note`). A
-**Concept** is a controlled tag a Resource carries (`ml`), in one scheme with broader and
+**Concept** is a controlled term a Resource carries (`ml`), in one scheme with broader and
 narrower Concepts. A **relation kind** links two Resources (`annotates`). hali never writes,
-moves or deletes a cataloged file; it writes only its own store.
+moves or deletes a cataloged file; it writes its own store and state, the new files that `new`
+creates, and the skill files of `hali skill install`.
 
 ## A first session
 
@@ -36,8 +38,8 @@ which `ideas.md` annotates the paper, and one Missing Resource whose file moved 
 
 ```sh
 # orient: the vocabulary, the counts and the store path
-HALI_AGENT=claude hali describe --json
-# read: find by tag (narrower Concepts included), then show one Resource
+hali describe --json
+# read: find by Concept (narrower Concepts included), then show one Resource
 hali find --tag computing --json
 hali show ~/papers/ldp.pdf --json
 hali find --related-to ~/papers/ldp.pdf --json
@@ -56,8 +58,8 @@ hali scan --list
 
 ## 1. Orientation
 
-Set `HALI_AGENT` to your agent name (see "Agent identity" below), then run
-`hali describe --json` once. It prints the core ontology version, the store path, the counts
+Run `hali describe --json` once (read-only commands need no agent name; see "Agent identity"
+below). It prints the core ontology version, the store path, the counts
 and every Concept, Type and relation kind, so you can use the user's own vocabulary instead of
 guessing. `hali describe --brief --json` prints only the version, the store and the counts.
 `hali schema` lists the names of the JSON Schemas of every `--json` output; `hali schema find`
@@ -186,8 +188,11 @@ not UTF-8 is a usage error (exit 2). `hali show <ref> --json` shows the attribut
 
 ```
 HALI_AGENT=claude hali --dry-run add ~/papers/ldp.pdf --type Paper --tag ml
-hali --dry-run --agent claude scan ~/notes
+hali --dry-run scan ~/notes --agent claude
 ```
+
+Put `--agent <name>` after the subcommand, and set `HALI_AGENT` only for commands that write,
+never in front of a read-only command.
 
 ## 10. Scan roots
 

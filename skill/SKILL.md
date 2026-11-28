@@ -8,21 +8,32 @@ allowed-tools: Bash(hali describe *), Bash(hali find *), Bash(hali show *), Bash
 # hali
 
 hali keeps an RDF ontology (SKOS, OWL 2, SHACL) that describes the user's local files in
-place: their titles, Types, Concepts (controlled tags) and the relations between them. It
-never writes, moves or deletes a cataloged file; it writes only its own store. The full usage
-guide is [references/usage.md](references/usage.md) (the same text as `hali help agents`).
+place: their titles, Types, Concepts and the relations between them. It never writes, moves
+or deletes a cataloged file; it writes its own store and state, the new files that `new`
+creates, and the files of this skill (`hali skill install`). The full usage guide is
+[references/usage.md](references/usage.md) (the same text as `hali help agents`).
 
 ## 1. Name yourself
 
-Set `HALI_AGENT=<your agent name>` on every hali command you run, or pass `--agent <name>`.
-The name is recorded only on the catalog records that `add`, `scan` and `new` create.
+On a command that writes, pass `--agent <name>` (your agent name) after the subcommand, so
+the command still starts with `hali --dry-run` or the subcommand. The dry run comes first, the
+real run only after the user's approval (section 4):
+
+```
+hali --dry-run add ~/papers/ldp.pdf --type Paper --agent claude
+hali add ~/papers/ldp.pdf --type Paper --agent claude
+```
+
+The name is recorded only on the catalog records that `add`, `scan` and `new` create, so
+read-only commands need no name: run them without one. `HALI_AGENT=<name>` in the environment
+works too, but use it only for writes, never in front of a read-only command.
 
 ## 2. Orient first
 
-Run `HALI_AGENT=claude hali describe --json` once, before anything else. It prints the core
-ontology version, the store path, the counts and every Concept, Type and relation kind, so use
-the user's own vocabulary instead of guessing. `hali describe --brief --json` prints only the
-version, the store and the counts.
+Run `hali describe --json` once, before anything else. It prints the core ontology version,
+the store path, the counts and every Concept, Type and relation kind, so use the user's own
+vocabulary instead of guessing. `hali describe --brief --json` prints only the version, the
+store and the counts.
 
 ## 3. Read before anything else
 
