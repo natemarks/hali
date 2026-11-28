@@ -198,6 +198,80 @@ mod goal {
             .collect()
     }
 
+    /// Review round 1: an env-var assignment before a read-only command would not match the
+    /// `Bash(hali describe *)` rules, so the agent is told to name itself with `--agent <name>`
+    /// on write commands only. Glossary: a Concept is never a "tag", and hali does not write
+    /// "only its own store".
+    #[test]
+    fn body_agent_naming_and_glossary() {
+        let text = rendered();
+        let (_, body) = split(&text);
+        let read_only: Vec<String> = commands()
+            .iter()
+            .filter(|n| n.kind == Kind::ReadOnly && n.path.len() == 1)
+            .map(|n| n.path[0].clone())
+            .collect();
+        let mut problems = Vec::new();
+        for (i, line) in body.lines().enumerate() {
+            for (at, _) in line.match_indices("HALI_AGENT=") {
+                let after_assign = line[at..].split_once(' ').map_or("", |(_, rest)| rest);
+                if let Some(rest) = after_assign.trim_start().strip_prefix("hali ") {
+                    let command = rest.split_whitespace().find(|w| !w.starts_with("--"));
+                    if command.is_some_and(|c| read_only.iter().any(|r| r == c)) {
+                        problems.push(format!(
+                            "body line {}: a read-only command starts with an env-var assignment: {line:?}",
+                            i + 1
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+
+        let found = mentions(body);
+        assert!(
+            found
+                .iter()
+                .any(|(_, m)| { m.starts_with("hali --dry-run ") && m.contains(" --agent ") }),
+            "no `hali --dry-run … --agent <name>` example for a write command"
+        );
+        assert!(
+            found.iter().any(|(_, m)| {
+                m.starts_with("hali ")
+                    && !m.starts_with("hali --dry-run")
+                    && m.contains(" --agent ")
+                    && !read_only
+                        .iter()
+                        .any(|r| m.split_whitespace().nth(1) == Some(r.as_str()))
+            }),
+            "no `hali <write command> … --agent <name>` example"
+        );
+        assert!(
+            body.contains("--agent <name>") || body.contains("`--agent`"),
+            "the body does not tell agents to pass `--agent <name>`"
+        );
+
+        // A Concept is not a "tag" (flag names such as `--tag` and `--add-tag` are fine).
+        for (i, line) in body.lines().enumerate() {
+            let words = line.split(|c: char| !(c.is_alphanumeric() || c == '-'));
+            for w in words {
+                let w = w.to_lowercase();
+                if (w == "tag" || w == "tags") && !w.starts_with('-') {
+                    problems.push(format!(
+                        "body line {}: a Concept is not a \"tag\": {line:?}",
+                        i + 1
+                    ));
+                }
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+        let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            !flat.contains("only its own store") && !flat.contains("writes only its own"),
+            "hali also writes the files `hali new` creates and the skill files"
+        );
+    }
+
     #[test]
     fn body() {
         let text = rendered();

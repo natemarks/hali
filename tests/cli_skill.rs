@@ -1106,6 +1106,27 @@ mod goal {
         let v = ok(&env.run(["describe", "--brief", "--json"]));
         assert_eq!(v["skill"]["installed"], Value::Null, "{v}");
         assert_eq!(v["skill"]["binary"], VERSION);
+        assert_eq!(
+            v["skill"]["stale"], true,
+            "no readable version is stale: {v}"
+        );
+    }
+
+    #[test]
+    fn describe_skill_is_not_read_through_a_symlinked_hali_dir() {
+        let env = Env::new();
+        mkdir(&env.home().join(".claude/skills"), 0o700);
+        let elsewhere = env.root.join("elsewhere");
+        mkdir(&elsewhere, 0o700);
+        std::fs::write(
+            elsewhere.join("SKILL.md"),
+            "---\nname: hali\nmetadata:\n  hali-version: \"1.0.0\"\n---\n",
+        )
+        .unwrap();
+        symlink(&elsewhere, env.claude()).unwrap();
+        let v = ok(&env.run(["describe", "--brief", "--json"]));
+        assert_eq!(v["skill"]["installed"], Value::Null, "{v}");
+        assert_eq!(v["skill"]["stale"], true, "{v}");
     }
 
     #[test]
@@ -1116,6 +1137,7 @@ mod goal {
         // `run` has a 30 second timeout: a blocking open would fail the test.
         let v = ok(&env.run(["describe", "--brief", "--json"]));
         assert_eq!(v["skill"]["installed"], Value::Null, "{v}");
+        assert_eq!(v["skill"]["stale"], true, "{v}");
     }
 
     // ---- criterion: schema and help ----------------------------------------------------------
@@ -1173,5 +1195,213 @@ mod goal {
         for flag in ["--agents", "--print"] {
             assert!(install.stdout.contains(flag), "install --help lacks {flag}");
         }
+    }
+
+    // ---- review round 1: ownership and modes of every directory written into ---------------
+
+    fn skip_root(what: &str) -> bool {
+        if is_root() {
+            eprintln!("skipping {what}: running as root, permission bits do not stop root");
+            return true;
+        }
+        false
+    }
+
+    /// Every directory the install writes into must be owned by the euid and not group- or
+    /// world-writable: `~/.claude`, `skills`, `hali`, `references` (HOME's mode is not checked).
+    #[test]
+    fn error_unsafe_every_written_directory() {
+        // `~/.claude/skills` at 0777.
+        let env = Env::new();
+        mkdir(&env.home().join(".claude"), 0o700);
+        mkdir(&env.home().join(".claude/skills"), 0o777);
+        assert_unusable(&env, "unsafe", Some("/TMP/home/.claude/skills"), &[]);
+
+        // `~/.claude` at 0775.
+        let env = Env::new();
+        mkdir(&env.home().join(".claude"), 0o775);
+        assert_unusable(&env, "unsafe", Some("/TMP/home/.claude"), &[]);
+        assert!(!env.home().join(".claude/skills").exists());
+    }
+
+    #[test]
+    fn error_unsafe_agents_location_writes_nothing_anywhere() {
+        let env = Env::new();
+        mkdir(&env.home().join(".claude"), 0o700);
+        mkdir(&env.home().join(".agents"), 0o700);
+        mkdir(&env.home().join(".agents/skills"), 0o777);
+        assert_unusable(
+            &env,
+            "unsafe",
+            Some("/TMP/home/.agents/skills"),
+            &["--agents"],
+        );
+        assert!(
+            !env.home().join(".claude/skills").exists(),
+            "the claude location was written before the agents location was checked"
+        );
+    }
+
+    #[test]
+    fn error_unsafe_home_not_owned() {
+        if skip_root("error_unsafe_home_not_owned") {
+            return;
+        }
+        if Path::new("/.claude").exists() {
+            eprintln!("skipping error_unsafe_home_not_owned: /.claude exists on this machine");
+            return;
+        }
+        // `/` is owned by root, not the euid. A dry run only looks, so nothing can be written.
+        let env = Env::new();
+        let out = env.run_with(
+            &[],
+            &[("HOME", OsStr::new("/"))],
+            ["--dry-run", "--json", "skill", "install"],
+        );
+        let e = unusable(&out, "unsafe");
+        assert_eq!(e["details"]["path"], "/", "{}", out.stderr);
+    }
+
+    /// A guard that lasts: ordinary 0755 directories owned by the user are accepted, and HOME's
+    /// own mode is not checked.
+    #[test]
+    fn unsafe_check_accepts_user_owned_0755() {
+        let env = Env::new();
+        for d in [
+            ".claude",
+            ".claude/skills",
+            ".claude/skills/hali",
+            ".claude/skills/hali/references",
+        ] {
+            mkdir(&env.home().join(d), 0o755);
+        }
+        std::fs::set_permissions(env.home(), std::fs::Permissions::from_mode(0o777)).unwrap();
+        let v = ok(&env.run(["skill", "install", "--json"]));
+        expect_files(&v, &[(CLAUDE_SKILL, "created"), (CLAUDE_USAGE, "created")]);
+    }
+
+    // ---- review round 1: a file with the right bytes but the wrong mode ---------------------
+
+    #[test]
+    fn right_bytes_wrong_mode_is_updated() {
+        let env = Env::new();
+        ok(&env.run(["skill", "install", "--json"]));
+        let files = [
+            env.claude().join("SKILL.md"),
+            env.claude().join("references/usage.md"),
+        ];
+        for f in &files {
+            std::fs::set_permissions(f, std::fs::Permissions::from_mode(0o666)).unwrap();
+        }
+        let v = ok(&env.run(["skill", "install", "--json"]));
+        expect_files(&v, &[(CLAUDE_SKILL, "updated"), (CLAUDE_USAGE, "updated")]);
+        for f in &files {
+            assert_eq!(mode(f), 0o600, "{}", f.display());
+        }
+        let v = ok(&env.run(["skill", "install", "--json"]));
+        expect_files(
+            &v,
+            &[(CLAUDE_SKILL, "unchanged"), (CLAUDE_USAGE, "unchanged")],
+        );
+    }
+
+    // ---- review round 1: both locations are the same directory ------------------------------
+
+    fn assert_aliased(env: &Env) {
+        let v = ok(&env.run(["skill", "install", "--agents", "--json"]));
+        expect_files(
+            &v,
+            &[
+                (CLAUDE_SKILL, "created"),
+                (CLAUDE_USAGE, "created"),
+                (AGENTS_SKILL, "unchanged"),
+                (AGENTS_USAGE, "unchanged"),
+            ],
+        );
+        for loc in [env.claude(), env.agents()] {
+            assert_eq!(
+                std::fs::read_to_string(loc.join("SKILL.md")).unwrap(),
+                expected_skill()
+            );
+            assert_eq!(
+                std::fs::read(loc.join("references/usage.md")).unwrap(),
+                guide()
+            );
+        }
+    }
+
+    #[test]
+    fn agents_symlinked_to_claude() {
+        let env = Env::new();
+        mkdir(&env.home().join(".claude"), 0o700);
+        symlink(env.home().join(".claude"), env.home().join(".agents")).unwrap();
+        assert_aliased(&env);
+    }
+
+    #[test]
+    fn agents_skills_symlinked_to_claude_skills() {
+        let env = Env::new();
+        mkdir(&env.home().join(".claude/skills"), 0o700);
+        mkdir(&env.home().join(".agents"), 0o700);
+        symlink(
+            env.home().join(".claude/skills"),
+            env.home().join(".agents/skills"),
+        )
+        .unwrap();
+        assert_aliased(&env);
+    }
+
+    // ---- review round 1: what the error message says about writes ---------------------------
+
+    #[test]
+    fn cannot_create_found_before_writing_says_nothing_was_written() {
+        if skip_root("cannot_create_found_before_writing_says_nothing_was_written") {
+            return;
+        }
+        let env = Env::new();
+        let claude = env.home().join(".claude");
+        mkdir(&claude, 0o700);
+        let _restore = Restore(claude.clone());
+        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o000)).unwrap();
+        for args in [
+            &["--dry-run", "--json", "skill", "install"][..],
+            &["--json", "skill", "install"][..],
+        ] {
+            let out = env.run(args);
+            let e = unusable(&out, "cannot_create");
+            let message = e["message"].as_str().unwrap();
+            assert!(
+                message.ends_with("nothing was written"),
+                "{args:?}: message {message:?} does not end with \"nothing was written\""
+            );
+        }
+    }
+
+    #[test]
+    fn cannot_create_after_a_write_began_does_not_say_nothing_was_written() {
+        if skip_root("cannot_create_after_a_write_began") {
+            return;
+        }
+        let env = Env::new();
+        let agents = env.home().join(".agents");
+        mkdir(&agents, 0o700);
+        let _restore = Restore(agents.clone());
+        std::fs::set_permissions(&agents, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let out = env.run(["--json", "skill", "install", "--agents"]);
+        let e = unusable(&out, "cannot_create");
+        let message = e["message"].as_str().unwrap();
+        assert!(
+            !message.contains("nothing was written"),
+            "the claude files were written, yet the message says: {message:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(env.claude().join("SKILL.md")).unwrap(),
+            expected_skill(),
+            "the claude location is written before the agents location fails"
+        );
+        assert_eq!(
+            std::fs::read(env.claude().join("references/usage.md")).unwrap(),
+            guide()
+        );
     }
 }
