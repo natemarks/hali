@@ -14,10 +14,8 @@
 //! - `help`, `help <command>…` and `help nope` behave as before; the root help's `help` row
 //!   names `agents`.
 
-#[cfg(feature = "goal")]
 mod example_world;
 
-#[cfg(feature = "goal")]
 mod goal {
     use crate::example_world::{
         BIN, Out, SNIPPET_END, SNIPPET_START, World, guide_bytes, is_escaped, snippet_section,

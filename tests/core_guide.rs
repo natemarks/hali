@@ -8,10 +8,8 @@
 //!   no LF after the last (the CLI adds the trailing LF); non-empty, at most 25 lines, no
 //!   marker in it, and it names `hali help agents`, `HALI_AGENT` and `hali --dry-run`.
 
-#[cfg(feature = "goal")]
 mod example_world;
 
-#[cfg(feature = "goal")]
 mod goal {
     use crate::example_world::{SNIPPET_END, SNIPPET_START, guide_text, snippet_section};
     use hali::core::guide;

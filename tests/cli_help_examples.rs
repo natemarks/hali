@@ -16,10 +16,8 @@
 //! - `help_examples_snapshot` pins every command path with its examples. It is not locked: the
 //!   spec gives no expected text, so the implementer accepts the snapshot after review.
 
-#[cfg(feature = "goal")]
 mod example_world;
 
-#[cfg(feature = "goal")]
 mod goal {
     use crate::example_world::{
         BIN, Kind, Node, World, commands, example_block, parse_line, parse_with_clap,

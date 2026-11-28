@@ -35,10 +35,8 @@
 //! - hygiene: no §9.3-escaped character but LF, at most 300 lines, each snippet marker on a
 //!   line of its own exactly once and nowhere else, and no mention of `skill install` (#28).
 
-#[cfg(feature = "goal")]
 mod example_world;
 
-#[cfg(feature = "goal")]
 mod goal {
     use crate::example_world::{
         SNIPPET_END, SNIPPET_START, World, expected_exit, guide_text, is_escaped, parse_line,
