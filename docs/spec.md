@@ -605,7 +605,7 @@ Sources:
 - **The release `install.sh`** runs `hali skill install` only if `~/.claude` is a directory and `hali skill --help` succeeds; otherwise it prints a note and exits 0.
 - **Usage guide:** `docs/agent-usage.md` is the single source. It is embedded at build time: `hali help agents` prints `docs/agent-usage.md` verbatim (exit 0). It is copied as the skill's `references/usage.md`, and linked from the README. A unit test asserts that every `hali …` command it mentions exists in the clap tree, and its `sh` examples run as annotated.
 - **Other projects:** `hali help agents --snippet` prints a block for other repos' `AGENTS.md`/`CLAUDE.md`: the lines of the guide strictly between the line `<!-- hali:snippet:start -->` and the line `<!-- hali:snippet:end -->`, plus a line feed (at most 25 lines). hali never edits other repos.
-- **`help agents`** is like `generate`: it ignores `--json`, `--dry-run`, `--yes` and `--agent`, reads no `HALI_AGENT`, config, store or state, takes no lock, creates nothing and has no JSON form. Extra arguments are a usage error (exit 2); a closed stdout exits 1 with nothing on stderr.
+- **`help agents`** is like `generate`: it ignores `--json`, `--dry-run`, `--yes` and a valid `--agent` (an empty or control-character one is a usage error, exit 2, before dispatch, as everywhere in §9.6), reads no `HALI_AGENT`, config, store or state, takes no lock, creates nothing and has no JSON form. Extra arguments are a usage error (exit 2); a closed stdout exits 1 with nothing on stderr.
 
 ---
 

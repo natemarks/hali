@@ -15,8 +15,8 @@ pub const ADD: &str = "Examples:
 
 pub const NEW: &str = "Examples:
   hali --dry-run new \"Reading list\" --type Note --tag ml
-  hali new \"Meeting notes\" --json
-  hali new \"Draft\" --path-only";
+  hali --dry-run --json new \"Meeting notes\"
+  hali --dry-run new \"Draft\" --path-only";
 
 pub const CONCEPT: &str = "Examples:
   hali concept list --json
@@ -24,7 +24,7 @@ pub const CONCEPT: &str = "Examples:
 
 pub const CONCEPT_ADD: &str = "Examples:
   hali --dry-run concept add \"linked data\" --broader computing
-  hali concept add databases --json";
+  hali --dry-run --json concept add databases";
 
 pub const CONCEPT_SHOW: &str = "Examples:
   hali concept show ml --json
@@ -62,7 +62,7 @@ pub const SCAN: &str = "Examples:
   hali --dry-run scan ~/papers --exclude \"*.tmp\"
   hali scan --list --json
   hali --dry-run --json scan --prune
-  hali scan";
+  hali --dry-run scan";
 
 pub const RELATE: &str = "Examples:
   hali --dry-run relate ~/notes/todo.md annotates ~/papers/ldp.pdf
@@ -87,7 +87,7 @@ pub const RELATION: &str = "Examples:
 
 pub const RELATION_ADD: &str = "Examples:
   hali --dry-run relation add cites --parent dcterms:references
-  hali relation add summarizes --parent dcterms:relation --json";
+  hali --dry-run --json relation add summarizes --parent dcterms:relation";
 
 pub const RELATION_LIST: &str = "Examples:
   hali relation list --json
@@ -118,7 +118,7 @@ pub const TYPE: &str = "Examples:
 
 pub const TYPE_ADD: &str = "Examples:
   hali --dry-run type add Article --parent Paper
-  hali type add Book --json";
+  hali --dry-run --json type add Book";
 
 pub const TYPE_LIST: &str = "Examples:
   hali type list --json

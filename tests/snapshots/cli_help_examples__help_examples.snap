@@ -17,8 +17,8 @@ Examples:
 == hali new ==
 Examples:
   hali --dry-run new "Reading list" --type Note --tag ml
-  hali new "Meeting notes" --json
-  hali new "Draft" --path-only
+  hali --dry-run --json new "Meeting notes"
+  hali --dry-run new "Draft" --path-only
 
 == hali concept ==
 Examples:
@@ -28,7 +28,7 @@ Examples:
 == hali concept add ==
 Examples:
   hali --dry-run concept add "linked data" --broader computing
-  hali concept add databases --json
+  hali --dry-run --json concept add databases
 
 == hali concept show ==
 Examples:
@@ -75,7 +75,7 @@ Examples:
   hali --dry-run scan ~/papers --exclude "*.tmp"
   hali scan --list --json
   hali --dry-run --json scan --prune
-  hali scan
+  hali --dry-run scan
 
 == hali relate ==
 Examples:
@@ -106,7 +106,7 @@ Examples:
 == hali relation add ==
 Examples:
   hali --dry-run relation add cites --parent dcterms:references
-  hali relation add summarizes --parent dcterms:relation --json
+  hali --dry-run --json relation add summarizes --parent dcterms:relation
 
 == hali relation list ==
 Examples:
@@ -144,7 +144,7 @@ Examples:
 == hali type add ==
 Examples:
   hali --dry-run type add Article --parent Paper
-  hali type add Book --json
+  hali --dry-run --json type add Book
 
 == hali type list ==
 Examples:

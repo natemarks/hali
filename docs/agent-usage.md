@@ -8,7 +8,7 @@ repository's `AGENTS.md` or `CLAUDE.md`.
 ## hali
 
 hali keeps an RDF ontology (SKOS, OWL 2, SHACL) that describes the user's local files in
-place: their titles, Types, Concepts (tags) and relations. Run `hali help agents` for the full
+place: their titles, Types, Concepts and relations. Run `hali help agents` for the full
 guide.
 
 - Set `HALI_AGENT=<your agent name>` on every hali command you run.
@@ -23,7 +23,7 @@ guide.
 ## Words
 
 A **Resource** is one cataloged file. A **Type** is a class of Resources (`Paper`, `Note`). A
-**Concept** is a topic a Resource is tagged with (`ml`), in one scheme with broader and
+**Concept** is a controlled tag a Resource carries (`ml`), in one scheme with broader and
 narrower Concepts. A **relation kind** links two Resources (`annotates`). hali never writes,
 moves or deletes a cataloged file; it writes only its own store.
 
@@ -46,7 +46,7 @@ hali find --tag computers --json  # exit 1
 # preview a change; nothing is written
 hali --dry-run --json edit ~/notes/todo.md --add-tag computing
 HALI_AGENT=claude hali --dry-run new "Reading list" --tag ml
-# repairs: what is Missing, and where it went
+# Relink: what is Missing, and where it went
 hali find --missing --json
 hali --dry-run relink --json
 # anything find cannot express
@@ -60,7 +60,8 @@ Set `HALI_AGENT` to your agent name (see "Agent identity" below), then run
 `hali describe --json` once. It prints the core ontology version, the store path, the counts
 and every Concept, Type and relation kind, so you can use the user's own vocabulary instead of
 guessing. `hali describe --brief --json` prints only the version, the store and the counts.
-`hali schema` lists the JSON Schemas of every `--json` output; `hali schema find` prints one,
+`hali schema` lists the names of the JSON Schemas of every `--json` output; `hali schema find`
+prints one,
 and `hali schema error` the error envelope's.
 
 ## 2. Read first
@@ -86,7 +87,8 @@ An empty result is exit 0 with an empty list, never an error.
 Every command that writes accepts `--dry-run`. Put it straight after `hali`, before the
 subcommand: `hali --dry-run concept add "linked data" --broader computing`. A dry run prints
 the same payload as the real run plus `"dry_run": true` and `changes`, the exact triples it
-would add or remove, and writes nothing (no store, no lock, no file).
+would add or remove, and writes nothing (no store, no file). It takes a shared lock to load the store, so it can wait
+and report `STORE_LOCKED`.
 
 1. Run the command with `hali --dry-run` (and `--json` if you parse it).
 2. Show the user what would change: the summary and the `changes`.
@@ -131,12 +133,16 @@ text mode the same error is one `error:` line and one `hint:` line on stderr.
 ## 6. Confirmation and `--yes`
 
 `forget`, `scan --prune`, `concept remove`, `type remove`, `relation remove` and
-`relink --force` are destructive. On a terminal they ask; without one (as for an agent) they
+`relink --force` are destructive. On a terminal they ask `[y/N]`; without one (as for an agent) they
 refuse with `CONFIRMATION_REQUIRED` (exit 1) and write nothing:
 
 ```json
 {"schema_version":1,"error":{"rule":"CONFIRMATION_REQUIRED","message":"forget needs confirmation, but stdin or stderr is not a terminal; nothing was written","details":{"command":"forget","declined":false},"suggested_fix":"Run it again with --yes to confirm, or with --dry-run to see what it would change.","suggested_command":"hali forget <id> --yes"}}
 ```
+
+Never answer a hali `[y/N]` confirmation yourself: not by typing `y`, not by piping `yes`, not
+by adding `--yes`. Only the user may. If a prompt appears or `CONFIRMATION_REQUIRED` is
+returned, stop and ask the user.
 
 `--yes` confirms without asking. Never add `--yes` on your own: use it only with the user's
 explicit consent to that exact command, after they have seen its dry run (for example
@@ -151,7 +157,7 @@ Always report absolute paths to the user: the `path` of a record is the file's r
 `~/` path your shell expands, but repeat the absolute `path` from the output. Use
 `--path-only` for one path per line: `hali find --tag ml --path-only`,
 `hali show ~/papers/ldp.pdf --path-only`, and `hali new "Meeting notes" --path-only` (after a
-dry run) for the path of the file it creates. hali never opens an editor.
+dry run and the user's approval) for the path of the file it creates. hali never opens an editor.
 
 ## 8. SPARQL queries
 
