@@ -22,6 +22,8 @@
 //! - Concepts `computing` and `ml` (`ml` is narrower than `computing`);
 //! - Types `Paper` and `Note`;
 //! - the relation kind `annotates`, a sub-property of `dcterms:relation`;
+//! - the unused Concept `drafts` and the unused relation kind `supersedes` (a sub-property of
+//!   `dcterms:relation`), so `concept remove` and `relation remove` examples can run;
 //! - `~/papers/ldp.pdf` cataloged by `hali add --type Paper --tag ml`;
 //! - `hali scan ~/notes`: registers `ideas.md`, `todo.md` and `old.pdf` (untyped, untagged) and
 //!   remembers `~/notes` as a Scan root;
@@ -488,6 +490,15 @@ impl World {
             "relation",
             "add",
             "annotates",
+            "--parent",
+            "dcterms:relation",
+        ]);
+        // Unused, so `concept remove` and `relation remove` examples have something to remove.
+        w.setup(&["concept", "add", "drafts"]);
+        w.setup(&[
+            "relation",
+            "add",
+            "supersedes",
             "--parent",
             "dcterms:relation",
         ]);
