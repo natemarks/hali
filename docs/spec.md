@@ -469,7 +469,7 @@ hali generate completions <bash|zsh|fish>
 
 ### 9.6 Agent identity
 - `--agent NAME` is a global flag, accepted before or after the subcommand, and overrides the `HALI_AGENT` environment variable. An empty or whitespace-only `HALI_AGENT` counts as unset. With neither set, the user Person is the Agent.
-- **Name rules:** the name is trimmed. An empty or whitespace-only `--agent` (`--agent ""` is not a reset), a name with a control character, or a `HALI_AGENT` that is not valid UTF-8 is a usage error (exit 2), raised before the store is read. `HALI_AGENT` is checked on every command except `schema`, which reads no identity.
+- **Name rules:** the name is trimmed. An empty or whitespace-only `--agent` (`--agent ""` is not a reset), a name with a control character, or a `HALI_AGENT` that is not valid UTF-8 is a usage error (exit 2), raised before the store is read. `HALI_AGENT` is checked on every command except `schema`, `help` and `generate`, which read no identity.
 - **Minting and reuse:** an Agent is matched by a `prov:SoftwareAgent` in `resources.ttl` whose `foaf:name` equals the trimmed name exactly (case-sensitive); when several match, the first by IRI. An unknown name mints `urn:uuid:` with `a prov:SoftwareAgent`, `foaf:name` (a simple literal holding the name, never parsed as Turtle or SPARQL) and `prov:actedOnBehalfOf` the user Person, minting the Person first if absent. Ids are minted in the order Resource, catalog record, Person (first time), SoftwareAgent (first time).
 - **Scope:** attribution is written only for the catalog records hali creates: `add`, `scan` and `new` (on newly cataloged Resources); `new` also writes `prov:wasAttributedTo` the same Agent on the Resource itself. Nothing is minted unless a record is written. Every other command accepts `--agent` and ignores it: same output, no Agent minted, and an existing record's `prov:wasAttributedTo` never changes.
 - **hali itself** is never recorded as an Agent: with no name given, no SoftwareAgent is minted, and the name `hali` is not special.
@@ -583,7 +583,7 @@ Sources:
 ### 11.1 The CLI surface
 - **Orientation:** `describe`, `schema`, `help agents`.
 - **Output:** bounded, paged JSON; exit 0 for empty results; structured errors with `suggested_command`; `--dry-run` everywhere; never interactive without a TTY.
-- **`--help`** starts with 2-4 real examples (including one with `--json` and one with `--dry-run`). The man page is generated from the same clap definitions.
+- **`--help`** and `-h` of the root, of every group and of every visible command start with an `Examples:` block: 2-4 real command lines, indented two spaces, then a blank line. Each has at least one with `--json`; a command that can write, a group and the root also have one with `hali --dry-run` (the flag straight after `hali`, the prefix form §11.2 pre-approves). Examples name Resources by path, never by UUID. `help`, `help agents` and the hidden `generate` are exempt. `hali help <command>…` prints the same text as `hali <command>… --help`; the nested `hali <group> help <command>` form does not exist. The man page is generated from the same clap definitions.
 
 ### 11.2 The skill (`skill/SKILL.md`, embedded in the binary)
 - **Frontmatter:** portable, with `name: hali`, a short third-person description that leads with trigger words ("find, open, tag or catalog local files and documents; ontology, concepts, types, related files; hali"), and `metadata: {hali-version: X.Y.Z}`.
@@ -603,8 +603,9 @@ Sources:
 - **`hali skill install`** writes the embedded skill to `~/.claude/skills/hali/`. `--agents` also writes `~/.agents/skills/hali/` (Codex; opencode reads both), `--print` writes it to stdout, and `--dry-run` is supported.
 - **`hali describe`** reports `skill: {installed, binary, stale}`.
 - **The release `install.sh`** runs `hali skill install` only if `~/.claude` is a directory and `hali skill --help` succeeds; otherwise it prints a note and exits 0.
-- **Usage guide:** `docs/agent-usage.md` is the single source. It is embedded for `hali help agents`, copied as the skill's `references/usage.md`, and linked from the README. A unit test asserts that every `hali …` command it mentions exists in the clap tree.
-- **Other projects:** `hali help agents --snippet` prints a block for other repos' `AGENTS.md`/`CLAUDE.md`. hali never edits other repos.
+- **Usage guide:** `docs/agent-usage.md` is the single source. It is embedded at build time: `hali help agents` prints `docs/agent-usage.md` verbatim (exit 0). It is copied as the skill's `references/usage.md`, and linked from the README. A unit test asserts that every `hali …` command it mentions exists in the clap tree, and its `sh` examples run as annotated.
+- **Other projects:** `hali help agents --snippet` prints a block for other repos' `AGENTS.md`/`CLAUDE.md`: the lines of the guide strictly between the line `<!-- hali:snippet:start -->` and the line `<!-- hali:snippet:end -->`, plus a line feed (at most 25 lines). hali never edits other repos.
+- **`help agents`** is like `generate`: it ignores `--json`, `--dry-run`, `--yes` and `--agent`, reads no `HALI_AGENT`, config, store or state, takes no lock, creates nothing and has no JSON form. Extra arguments are a usage error (exit 2); a closed stdout exits 1 with nothing on stderr.
 
 ---
 

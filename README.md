@@ -19,6 +19,7 @@ In Neovim: `:Hali find`, `:Hali concepts`, `:Hali types`, `:Hali related`, `:Hal
 ## Docs
 
 - [Specification](docs/spec.md)
+- [Agent usage guide](docs/agent-usage.md) (also `hali help agents`)
 - [Glossary](GLOSSARY.md)
 - [Architecture decisions](docs/adr/)
 - [Contributor and agent guide](AGENTS.md)
