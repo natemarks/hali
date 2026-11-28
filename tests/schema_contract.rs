@@ -28,6 +28,10 @@ mod goal {
         ("cli_validate__validate_json_violations", "validate"),
     ];
 
+    /// Snapshots of text that is not `--json` output, so outside the JSON contract: the
+    /// `--help` examples of every command (#27).
+    const TEXT_SNAPS: &[&str] = &["cli_help_examples__help_examples"];
+
     /// Snapshots written by the active goal (#10). A build without the goal feature does not
     /// see them, because the schemas they name do not exist until the goal is met; settle
     /// removes the tags below, which makes every one of them visible and mapped.
@@ -474,7 +478,8 @@ mod goal {
                 continue;
             }
             let stem = path.file_stem().unwrap().to_str().unwrap().to_string();
-            if hidden.contains(&stem.as_str())
+            if TEXT_SNAPS.contains(&stem.as_str())
+                || hidden.contains(&stem.as_str())
                 || pending.contains(&stem.as_str())
                 || pending_16.contains(&stem.as_str())
                 || pending_14.contains(&stem.as_str())

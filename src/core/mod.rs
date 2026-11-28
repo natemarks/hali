@@ -4,6 +4,7 @@
 pub mod concept;
 pub mod config;
 pub mod describe;
+pub mod guide;
 pub mod query;
 pub mod relation;
 pub mod relink;

@@ -33,8 +33,10 @@ fn without_hidden(command: clap::Command) -> clap::Command {
         .filter(|sub| !sub.is_hide_set())
         .cloned()
         .collect();
+    // hali defines its own `help` subcommand (`help agents`), so clap must not add one.
     let mut rebuilt = clap::Command::new("hali")
         .bin_name("hali")
+        .disable_help_subcommand(true)
         .args(command.get_arguments().cloned())
         .subcommands(visible);
     rebuilt = rebuilt.styles(command.get_styles().clone());

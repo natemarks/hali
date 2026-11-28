@@ -7,6 +7,7 @@ use crate::core::{
 };
 use crate::{media_type, ontology, paths, storage};
 use clap::{CommandFactory, Parser, Subcommand};
+mod examples;
 mod generate;
 use serde::Serialize;
 use std::ffi::OsString;
@@ -21,7 +22,14 @@ use std::process::ExitCode;
 const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Parser)]
-#[command(name = "hali", bin_name = "hali", version, about)]
+#[command(
+    name = "hali",
+    bin_name = "hali",
+    version,
+    about,
+    disable_help_subcommand = true,
+    before_help = examples::HALI
+)]
 struct Cli {
     /// Print JSON instead of text
     #[arg(long, global = true)]
@@ -42,6 +50,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Catalog files in place; re-adding a cataloged file returns its Resource
+    #[command(before_help = examples::ADD)]
     Add {
         /// Files to catalog (symlinks are resolved to the real path)
         #[arg(required = true, value_name = "PATH")]
@@ -60,6 +69,7 @@ enum Command {
         new: bool,
     },
     /// Create a markdown file holding `# <title>` in files.dir and catalog it; never opens it
+    #[command(before_help = examples::NEW)]
     New {
         /// The title; the file is named after it (`<slug>.md`, `-2`, `-3`, … when taken)
         title: String,
@@ -75,6 +85,7 @@ enum Command {
     },
     /// Manage the Concepts of the topics scheme
     #[command(subcommand)]
+    #[command(before_help = examples::CONCEPT)]
     Concept(ConceptCommand),
     /// Edit a Resource: its title, its Types and its tags
     #[command(group(
@@ -83,6 +94,7 @@ enum Command {
             .multiple(true)
             .args(["title", "add_types", "remove_types", "add_tags", "remove_tags"])
     ))]
+    #[command(before_help = examples::EDIT)]
     Edit {
         /// A path or a full UUID
         #[arg(value_name = "REF")]
@@ -104,6 +116,7 @@ enum Command {
         remove_tags: Vec<String>,
     },
     /// Remove a Resource and its catalog record from the ontology; the file is left alone
+    #[command(before_help = examples::FORGET)]
     Forget {
         /// A path or a full UUID
         #[arg(value_name = "REF")]
@@ -119,6 +132,7 @@ enum Command {
             .multiple(false)
             .args(["refs", "all"])
     ))]
+    #[command(before_help = examples::REFRESH)]
     Refresh {
         /// Paths or full UUIDs; always re-hashed
         #[arg(value_name = "REF")]
@@ -128,6 +142,7 @@ enum Command {
         all: bool,
     },
     /// Register the files under a directory, refresh changed ones and report vanished ones
+    #[command(before_help = examples::SCAN)]
     Scan {
         /// The Scan root: a directory (symlinks are resolved to the real path); without it,
         /// every remembered root with its own settings
@@ -162,6 +177,7 @@ enum Command {
         force: bool,
     },
     /// Relate Resource A to Resource B by a relation kind; only this direction is stored
+    #[command(before_help = examples::RELATE)]
     Relate {
         /// A path or a full UUID
         #[arg(value_name = "A")]
@@ -174,6 +190,7 @@ enum Command {
         to: String,
     },
     /// Repair Missing Resources: search roots for their files, or record where one moved
+    #[command(before_help = examples::RELINK)]
     Relink {
         /// With PATH: a path or a full UUID of the Resource that moved
         #[arg(value_name = "REF")]
@@ -189,12 +206,14 @@ enum Command {
         force: bool,
     },
     /// Print the core ontology version, the store path, the counts and the vocabulary
+    #[command(before_help = examples::DESCRIBE)]
     Describe {
         /// Only the version, the store path and the counts
         #[arg(long)]
         brief: bool,
     },
     /// Run a read-only SPARQL query (SELECT, ASK, CONSTRUCT, DESCRIBE) over all named graphs
+    #[command(before_help = examples::QUERY)]
     Query {
         /// The SPARQL query text; the §3.4 prefixes are predeclared
         #[arg(value_name = "SPARQL")]
@@ -202,8 +221,10 @@ enum Command {
     },
     /// Manage the relation kinds: the standard relations and their sub-properties
     #[command(subcommand)]
+    #[command(before_help = examples::RELATION)]
     Relation(RelationCommand),
     /// Remove the relation of Resource A to Resource B by exactly this relation kind
+    #[command(before_help = examples::UNRELATE)]
     Unrelate {
         /// A path or a full UUID
         #[arg(value_name = "A")]
@@ -216,11 +237,13 @@ enum Command {
         to: String,
     },
     /// Print the JSON Schema of a command's --json output, or of the error envelope
+    #[command(before_help = examples::SCHEMA)]
     Schema {
         /// A command path as separate words (`concept add`) or `error`; omit to list the names
         name: Vec<String>,
     },
     /// List Resources, with filters, a sort and paging
+    #[command(before_help = examples::FIND)]
     Find {
         /// Only titles containing this text, case-insensitively
         #[arg(long)]
@@ -267,8 +290,10 @@ enum Command {
     },
     /// Manage the Types: the classes under hali:Resource
     #[command(subcommand)]
+    #[command(before_help = examples::TYPE)]
     Type(TypeCommand),
     /// Show one Resource with its catalog record
+    #[command(before_help = examples::SHOW)]
     Show {
         /// A path or a full UUID
         #[arg(value_name = "REF")]
@@ -278,6 +303,7 @@ enum Command {
         path_only: bool,
     },
     /// Check the store against the SHACL shapes; writes nothing
+    #[command(before_help = examples::VALIDATE)]
     Validate {
         /// Maximum number of results
         #[arg(long, default_value_t = 50, allow_hyphen_values = true, value_parser = parse_limit)]
@@ -286,10 +312,29 @@ enum Command {
         #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
         offset: usize,
     },
+    /// Print the help of hali or of a command; `hali help agents` prints the agent usage guide
+    Help {
+        #[command(subcommand)]
+        topic: Option<HelpTopic>,
+    },
     /// Print the man page or shell completions
     #[command(hide = true, subcommand_required = true, arg_required_else_help = true)]
     #[command(subcommand)]
     Generate(generate::Generate),
+}
+
+/// What `hali help` prints: the agent usage guide, or the help of the command named.
+#[derive(Subcommand)]
+enum HelpTopic {
+    /// Print the agent usage guide (docs/agent-usage.md)
+    Agents {
+        /// Print only the block for another repository's AGENTS.md or CLAUDE.md
+        #[arg(long)]
+        snippet: bool,
+    },
+    /// A command path: its help, as `hali <command>… --help` prints it
+    #[command(external_subcommand)]
+    Command(Vec<OsString>),
 }
 
 /// Field names in record order; a newtype so clap reads it as one value, not a list.
@@ -306,6 +351,7 @@ enum SortArg {
 #[derive(Subcommand)]
 enum ConceptCommand {
     /// Add a Concept
+    #[command(before_help = examples::CONCEPT_ADD)]
     Add {
         /// Its preferred label
         #[arg(value_parser = parse_label)]
@@ -315,12 +361,14 @@ enum ConceptCommand {
         broader: Vec<String>,
     },
     /// Show a Concept with its narrower Concepts and the number of Resources tagged with it
+    #[command(before_help = examples::CONCEPT_SHOW)]
     Show {
         /// A slug or a label
         #[arg(value_name = "CONCEPT")]
         reference: String,
     },
     /// Rename a Concept: the old preferred label becomes an alternative label
+    #[command(before_help = examples::CONCEPT_RENAME)]
     Rename {
         /// A slug or a label
         #[arg(value_name = "CONCEPT")]
@@ -336,6 +384,7 @@ enum ConceptCommand {
             .multiple(true)
             .args(["add_alt", "remove_alt", "add_broader", "remove_broader"])
     ))]
+    #[command(before_help = examples::CONCEPT_EDIT)]
     Edit {
         /// A slug or a label
         #[arg(value_name = "CONCEPT")]
@@ -354,12 +403,14 @@ enum ConceptCommand {
         remove_broader: Vec<String>,
     },
     /// Remove a Concept that nothing is tagged with and no other Concept is under
+    #[command(before_help = examples::CONCEPT_REMOVE)]
     Remove {
         /// A slug or a label
         #[arg(value_name = "CONCEPT")]
         reference: String,
     },
     /// List Concepts, sorted by label
+    #[command(before_help = examples::CONCEPT_LIST)]
     List {
         /// Maximum number of results
         #[arg(long, default_value_t = 50, allow_hyphen_values = true, value_parser = parse_limit)]
@@ -373,6 +424,7 @@ enum ConceptCommand {
 #[derive(Subcommand)]
 enum TypeCommand {
     /// Add a Type
+    #[command(before_help = examples::TYPE_ADD)]
     Add {
         /// Its name: the IRI local name and the label
         #[arg(value_parser = parse_type_name)]
@@ -382,6 +434,7 @@ enum TypeCommand {
         parent: Option<String>,
     },
     /// List Types, sorted by label
+    #[command(before_help = examples::TYPE_LIST)]
     List {
         /// Maximum number of results
         #[arg(long, default_value_t = 50, allow_hyphen_values = true, value_parser = parse_limit)]
@@ -391,6 +444,7 @@ enum TypeCommand {
         offset: usize,
     },
     /// Remove a Type that no Resource has and no other Type is under
+    #[command(before_help = examples::TYPE_REMOVE)]
     Remove {
         /// A name or a label
         #[arg(value_name = "TYPE")]
@@ -401,6 +455,7 @@ enum TypeCommand {
 #[derive(Subcommand)]
 enum RelationCommand {
     /// Add a relation kind under a standard relation
+    #[command(before_help = examples::RELATION_ADD)]
     Add {
         /// Its name: the IRI local name and the label
         #[arg(value_parser = parse_relation_name)]
@@ -410,6 +465,7 @@ enum RelationCommand {
         parent: String,
     },
     /// List the relation kinds, sorted by label
+    #[command(before_help = examples::RELATION_LIST)]
     List {
         /// Maximum number of results
         #[arg(long, default_value_t = 50, allow_hyphen_values = true, value_parser = parse_limit)]
@@ -419,6 +475,7 @@ enum RelationCommand {
         offset: usize,
     },
     /// Remove a relation kind that no relation uses and no other kind is under
+    #[command(before_help = examples::RELATION_REMOVE)]
     Remove {
         /// A relation kind
         #[arg(value_name = "RELATION")]
@@ -629,6 +686,9 @@ pub fn run() -> ExitCode {
     if let Command::Generate(what) = &cli.command {
         return generate::run(what);
     }
+    if let Command::Help { topic } = &cli.command {
+        return help(topic.as_ref());
+    }
     let (clock, ids) = match injected() {
         Ok(injected) => injected,
         Err(message) => {
@@ -642,6 +702,49 @@ pub fn run() -> ExitCode {
             report(&err, cli.json);
             ExitCode::from(err.exit_code())
         }
+    }
+}
+
+/// `hali help [agents [--snippet] | <command>…]`: reads no identity, config, store or state and
+/// writes only to stdout (stderr for a usage error). A closed stdout exits 1, silently.
+fn help(topic: Option<&HelpTopic>) -> ExitCode {
+    let words: &[OsString] = match topic {
+        Some(HelpTopic::Agents { snippet }) => {
+            let text = if *snippet {
+                format!("{}\n", core::guide::snippet())
+            } else {
+                core::guide::text().to_string()
+            };
+            let mut stdout = std::io::stdout().lock();
+            return match stdout
+                .write_all(text.as_bytes())
+                .and_then(|()| stdout.flush())
+            {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(_) => ExitCode::from(1),
+            };
+        }
+        Some(HelpTopic::Command(words)) => words,
+        None => &[],
+    };
+    // The help of `hali <words>…` is what `hali <words>… --help` prints; words after a `--`
+    // are not command names.
+    let argv: Vec<OsString> = std::iter::once(OsString::from("hali"))
+        .chain(words.iter().take_while(|w| *w != "--").cloned())
+        .chain(std::iter::once(OsString::from("--help")))
+        .collect();
+    match Cli::command().try_get_matches_from(&argv) {
+        Err(err) if err.kind() == clap::error::ErrorKind::DisplayHelp => {
+            let _ = err.print();
+            ExitCode::SUCCESS
+        }
+        _ => match command().try_get_matches_from(&argv) {
+            Err(plain) => usage(plain),
+            Ok(_) => usage(command().error(
+                clap::error::ErrorKind::InvalidSubcommand,
+                "help takes command names only",
+            )),
+        },
     }
 }
 
@@ -1395,7 +1498,7 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                 Some(&confirmation),
             )?;
         }
-        Command::Schema { .. } | Command::Generate(_) => {
+        Command::Schema { .. } | Command::Generate(_) | Command::Help { .. } => {
             unreachable!("handled before the store is loaded")
         }
         Command::Scan { .. } | Command::Relink { .. } | Command::Query { .. } => {
