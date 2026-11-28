@@ -7,6 +7,7 @@
 //! directories for them (`walk`).
 
 mod lock;
+pub mod skill;
 pub mod state;
 mod store_file;
 pub mod walk;

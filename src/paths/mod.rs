@@ -30,6 +30,19 @@ pub fn state_dir(env: impl Fn(&str) -> Option<String>) -> Result<PathBuf, Unreso
     xdg_dir(&env, "XDG_STATE_HOME", ".local/state").map(|base| base.join("hali"))
 }
 
+/// The two skill directories (spec §11.3): `$HOME/.claude/skills/hali` and
+/// `$HOME/.agents/skills/hali`. Only `HOME` is read; unset, empty or relative is `Unresolved`.
+pub fn skill_dirs(env: impl Fn(&str) -> Option<String>) -> Result<(PathBuf, PathBuf), Unresolved> {
+    let home = non_empty(&env, "HOME")
+        .map(PathBuf::from)
+        .filter(|h| h.is_absolute())
+        .ok_or(Unresolved)?;
+    Ok((
+        home.join(".claude/skills/hali"),
+        home.join(".agents/skills/hali"),
+    ))
+}
+
 /// The most bytes of `user-dirs.dirs` read: it holds a few short lines.
 const MAX_USER_DIRS: u64 = 64 * 1024;
 
