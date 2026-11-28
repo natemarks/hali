@@ -47,6 +47,8 @@ const CASES: &[(&str, &str, &[&str])] = &[
     ("scan", "store", &["scan", "src/ontology", "--prune", "--force"]),
     ("schema", "store", &["schema"]),
     ("show", "store", &["show", STORED]),
+    // Writes into HOME only (`~/.claude`, `~/.agents`), never into a store: a dry run leaves the whole temp HOME as it was.
+    ("skill install", "store", &["skill", "install", "--agents"]),
     ("type add", "store", &["type", "add", "GuardProbe"]),
     ("type list", "store", &["type", "list"]),
     ("type remove", "store", &["type", "remove", "Paper"]),
@@ -170,6 +172,59 @@ fn dry_run_writes_nothing_for_every_subcommand() {
             for json in [false, true] {
                 run_case(name, fixture, argv, with_store, json);
             }
+        }
+    }
+}
+
+/// `hali --dry-run skill install` over a pre-existing, differing `SKILL.md` says "would update"
+/// and leaves the whole temp HOME (modes, mtimes, bytes) as it was.
+#[test]
+fn dry_run_skill_install_over_a_differing_file_writes_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let own = home.join(".claude/skills/hali");
+    std::fs::create_dir_all(&own).unwrap();
+    for d in [
+        home.join(".claude"),
+        home.join(".claude/skills"),
+        own.clone(),
+    ] {
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    std::fs::write(own.join("SKILL.md"), "my own edits\n").unwrap();
+    std::fs::set_permissions(own.join("SKILL.md"), std::fs::Permissions::from_mode(0o600)).unwrap();
+    for d in ["cfg", "share"] {
+        std::fs::create_dir_all(root.path().join(d)).unwrap();
+    }
+    let before = snapshot(root.path());
+    for json in [false, true] {
+        let mut args = vec!["--dry-run"];
+        if json {
+            args.push("--json");
+        }
+        args.extend_from_slice(&["skill", "install", "--agents"]);
+        let out = Command::cargo_bin("hali")
+            .unwrap()
+            .env_clear()
+            .env("HALI_DATA_DIR", root.path().join("data"))
+            .env("XDG_CONFIG_HOME", root.path().join("cfg"))
+            .env("XDG_DATA_HOME", root.path().join("share"))
+            .env("HOME", &home)
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(snapshot(root.path()), before, "{args:?}: a dry run wrote");
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        if json {
+            assert!(stdout.contains("\"action\":\"updated\""), "{stdout}");
+        } else {
+            assert!(stdout.contains("would update skill file"), "{stdout}");
         }
     }
 }

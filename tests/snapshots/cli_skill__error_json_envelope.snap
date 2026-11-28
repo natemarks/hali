@@ -1,0 +1,5 @@
+---
+source: tests/cli_skill.rs
+expression: out.stderr
+---
+{"schema_version":1,"error":{"rule":"SKILL_DIR_UNUSABLE","message":"cannot install the skill: /TMP/home/.claude is not a directory; nothing was written","details":{"path":"/TMP/home/.claude","reason":"not_a_directory"},"suggested_fix":"Move what is in the way aside, then run hali skill install again.","suggested_command":null}}

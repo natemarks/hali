@@ -26,7 +26,7 @@ pub fn dir_problem(uid: u32, mode: u32, euid: u32) -> Option<&'static str> {
 }
 
 /// The effective uid of this process.
-fn euid() -> u32 {
+pub(super) fn euid() -> u32 {
     // SAFETY: geteuid takes no arguments, touches no memory and always succeeds.
     unsafe { libc::geteuid() }
 }

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hali skill install --json",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "version": {"type": "string"},
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {"type": "string"},
+              "action": {"enum": ["created", "updated", "unchanged"]}
+            },
+            "required": ["path", "action"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["schema_version", "version", "files"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "version": {"type": "string"},
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {"type": "string"},
+              "action": {"enum": ["created", "updated", "unchanged"]}
+            },
+            "required": ["path", "action"],
+            "additionalProperties": false
+          }
+        },
+        "dry_run": {"const": true},
+        "changes": {"type": "array", "maxItems": 0}
+      },
+      "required": ["schema_version", "version", "files", "dry_run", "changes"],
+      "additionalProperties": false
+    }
+  ]
+}

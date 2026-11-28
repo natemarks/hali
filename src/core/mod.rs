@@ -12,6 +12,7 @@ pub mod resource;
 pub mod roots;
 pub mod scan;
 pub mod schema;
+pub mod skill;
 pub mod types;
 pub mod validate;
 
@@ -767,6 +768,81 @@ impl Error {
             json!({"path": path, "reason": reason}),
         )
         .fix(fix)
+    }
+
+    /// The skill cannot be installed (spec §11.3): `path` is the offending path (`None` when
+    /// `unresolved`); `reason` is `unresolved`, `not_a_directory`, `symlink`, `not_a_file`,
+    /// `unsafe` or `cannot_create`. For `unsafe`, `problem` says what is wrong (`not owned by
+    /// you`, `writable by group or others`); `home` is set when `path` is HOME itself; `written`
+    /// once a directory or file was created or replaced before the problem was met.
+    pub fn skill_dir_unusable(
+        path: Option<&str>,
+        reason: &str,
+        problem: Option<&str>,
+        home: bool,
+        written: bool,
+    ) -> Error {
+        let again = "then run hali skill install again.";
+        let (why, fix) = match reason {
+            "unresolved" => (
+                "HOME is not set to an absolute path".to_string(),
+                format!("Set HOME to your home directory, {again}"),
+            ),
+            "not_a_directory" if home => (
+                "is not a directory".to_string(),
+                format!("Set HOME to your home directory, {again}"),
+            ),
+            "unsafe" if home => (
+                "is not owned by you".to_string(),
+                format!("Set HOME to your own home directory, {again}"),
+            ),
+            "unsafe" => match (problem, path) {
+                (Some(p @ "writable by group or others"), Some(path)) => (
+                    format!("is {p}"),
+                    format!(
+                        "Make it not writable by others (chmod go-w {}), {again}",
+                        shell_quote(path)
+                    ),
+                ),
+                (p, _) => (
+                    format!("is {}", p.unwrap_or("not owned by you")),
+                    format!("Make it owned by you, or move it aside, {again}"),
+                ),
+            },
+            "not_a_directory" => (
+                "is not a directory".to_string(),
+                format!("Move what is in the way aside, {again}"),
+            ),
+            "symlink" => (
+                "is a symbolic link, which hali does not follow there".to_string(),
+                format!("Replace the symbolic link with a real directory or file, {again}"),
+            ),
+            "not_a_file" => (
+                "is not a regular file".to_string(),
+                format!("Move what is in the way aside, {again}"),
+            ),
+            _ if home => (
+                "cannot be created or written".to_string(),
+                format!("Set HOME to your own home directory, {again}"),
+            ),
+            _ => (
+                "cannot be created or written".to_string(),
+                format!("Check that you can read and write it and the directory above it, {again}"),
+            ),
+        };
+        // What was created or replaced before the problem was met stays.
+        let tail = if written { "" } else { "; nothing was written" };
+        let message = match path {
+            Some(path) => format!("cannot install the skill: {path} {why}{tail}"),
+            None => format!("cannot install the skill: {why}{tail}"),
+        };
+        Error::new(
+            "SKILL_DIR_UNUSABLE",
+            3,
+            message,
+            json!({"path": path, "reason": reason}),
+        )
+        .fix(&fix)
     }
 
     /// A new file at `path` has the size and content of the Missing Resources `resources`

@@ -862,6 +862,7 @@ mod goal {
                 "scan",
                 "schema",
                 "show",
+                "skill install",
                 "type add",
                 "type list",
                 "type remove",
@@ -869,7 +870,7 @@ mod goal {
                 "validate"
             ])
         );
-        assert_eq!(v["schemas"].as_array().unwrap().len(), 28);
+        assert_eq!(v["schemas"].as_array().unwrap().len(), 29);
         let out = env.run(["schema", "refresh"]);
         assert_eq!(out.code, Some(0), "{}", out.stderr);
         assert_eq!(out.stderr, "");
