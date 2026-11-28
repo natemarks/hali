@@ -22,9 +22,19 @@
         },
         "concepts": {"type": "array", "items": {"$ref": "#/$defs/concept"}},
         "types": {"type": "array", "items": {"$ref": "#/$defs/type"}},
-        "relation_kinds": {"type": "array", "items": {"$ref": "#/$defs/relation_kind"}}
+        "relation_kinds": {"type": "array", "items": {"$ref": "#/$defs/relation_kind"}},
+        "skill": {
+          "type": "object",
+          "properties": {
+            "installed": {"type": ["string", "null"]},
+            "binary": {"type": "string"},
+            "stale": {"type": "boolean"}
+          },
+          "required": ["installed", "binary", "stale"],
+          "additionalProperties": false
+        }
       },
-      "required": ["schema_version", "core_version", "store", "counts", "concepts", "types", "relation_kinds"],
+      "required": ["schema_version", "core_version", "store", "counts", "concepts", "types", "relation_kinds", "skill"],
       "additionalProperties": false
     },
     {
@@ -43,9 +53,19 @@
           },
           "required": ["resources", "concepts", "types", "relation_kinds", "relations"],
           "additionalProperties": false
+        },
+        "skill": {
+          "type": "object",
+          "properties": {
+            "installed": {"type": ["string", "null"]},
+            "binary": {"type": "string"},
+            "stale": {"type": "boolean"}
+          },
+          "required": ["installed", "binary", "stale"],
+          "additionalProperties": false
         }
       },
-      "required": ["schema_version", "core_version", "store", "counts"],
+      "required": ["schema_version", "core_version", "store", "counts", "skill"],
       "additionalProperties": false
     }
   ]

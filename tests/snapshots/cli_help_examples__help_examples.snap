@@ -165,3 +165,14 @@ Examples:
 Examples:
   hali validate --json
   hali validate --limit 10
+
+== hali skill ==
+Examples:
+  hali skill install --json
+  hali --dry-run skill install --agents
+
+== hali skill install ==
+Examples:
+  hali --dry-run --json skill install --agents
+  hali skill install
+  hali skill install --print

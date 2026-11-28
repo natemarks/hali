@@ -48,7 +48,6 @@ const CASES: &[(&str, &str, &[&str])] = &[
     ("schema", "store", &["schema"]),
     ("show", "store", &["show", STORED]),
     // Writes into HOME only (`~/.claude`, `~/.agents`), never into a store: a dry run leaves the whole temp HOME as it was.
-    #[cfg(feature = "goal")]
     ("skill install", "store", &["skill", "install", "--agents"]),
     ("type add", "store", &["type", "add", "GuardProbe"]),
     ("type list", "store", &["type", "list"]),

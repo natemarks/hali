@@ -211,3 +211,4 @@ root for a bare scan, so never run it without the user's approval of that dry ru
 
 Every `--help` starts with examples: `hali find --help`, or `hali help find`. `hali --help`
 lists every command and the global flags `--json`, `--dry-run`, `--yes` and `--agent`.
+`hali skill install` installs this guide with the hali skill for Claude Code.

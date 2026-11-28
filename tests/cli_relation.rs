@@ -1740,7 +1740,7 @@ mod goal {
             .iter()
             .map(|n| n.as_str().unwrap())
             .collect();
-        assert_eq!(names.len(), 28, "{names:?}");
+        assert_eq!(names.len(), 29, "{names:?}");
         let mut sorted = names.clone();
         sorted.sort_unstable();
         assert_eq!(names, sorted, "the names are sorted");

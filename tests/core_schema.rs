@@ -53,6 +53,7 @@ mod goal {
                 "scan",
                 "schema",
                 "show",
+                "skill install",
                 "type add",
                 "type list",
                 "type remove",

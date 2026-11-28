@@ -202,6 +202,21 @@
           }
         },
         {
+          "if": {"properties": {"rule": {"const": "SKILL_DIR_UNUSABLE"}}, "required": ["rule"]},
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "path": {"type": ["string", "null"]},
+                  "reason": {"enum": ["unresolved", "not_a_directory", "symlink", "not_a_file", "unsafe", "cannot_create"]}
+                },
+                "required": ["path", "reason"]
+              }
+            }
+          }
+        },
+        {
           "if": {"properties": {"rule": {"const": "UNKNOWN_RESOURCE"}}, "required": ["rule"]},
           "then": {
             "properties": {

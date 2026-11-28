@@ -135,3 +135,12 @@ pub const SHOW: &str = "Examples:
 pub const VALIDATE: &str = "Examples:
   hali validate --json
   hali validate --limit 10";
+
+pub const SKILL: &str = "Examples:
+  hali skill install --json
+  hali --dry-run skill install --agents";
+
+pub const SKILL_INSTALL: &str = "Examples:
+  hali --dry-run --json skill install --agents
+  hali skill install
+  hali skill install --print";

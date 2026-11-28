@@ -312,6 +312,10 @@ enum Command {
         #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
         offset: usize,
     },
+    /// Install the agent skill for Claude Code (and, with --agents, Codex and opencode)
+    #[command(subcommand)]
+    #[command(before_help = examples::SKILL)]
+    Skill(SkillCommand),
     /// Print the help of hali or of a command; `hali help agents` prints the agent usage guide
     Help {
         #[command(subcommand)]
@@ -321,6 +325,20 @@ enum Command {
     #[command(hide = true, subcommand_required = true, arg_required_else_help = true)]
     #[command(subcommand)]
     Generate(generate::Generate),
+}
+
+#[derive(Subcommand)]
+enum SkillCommand {
+    /// Write the skill (SKILL.md and references/usage.md) to ~/.claude/skills/hali/
+    #[command(before_help = examples::SKILL_INSTALL)]
+    Install {
+        /// Also write it to ~/.agents/skills/hali/ (Codex; opencode reads both)
+        #[arg(long, conflicts_with = "print")]
+        agents: bool,
+        /// Print SKILL.md to stdout instead, and write nothing
+        #[arg(long)]
+        print: bool,
+    },
 }
 
 /// What `hali help` prints: the agent usage guide, or the help of the command named.
@@ -785,6 +803,10 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
         cli.agent.as_deref(),
         std::env::var_os("HALI_AGENT").as_deref(),
     )?;
+    // `skill install` reads no config, store or state.
+    if let Command::Skill(SkillCommand::Install { agents, print }) = &cli.command {
+        return skill_install(cli, *agents, *print);
+    }
     if let Command::Scan { .. } = &cli.command {
         scan_usage(&cli.command)?;
     }
@@ -1501,15 +1523,24 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
         Command::Schema { .. } | Command::Generate(_) | Command::Help { .. } => {
             unreachable!("handled before the store is loaded")
         }
-        Command::Scan { .. } | Command::Relink { .. } | Command::Query { .. } => {
+        Command::Scan { .. }
+        | Command::Relink { .. }
+        | Command::Query { .. }
+        | Command::Skill(_) => {
             unreachable!("handled before the store is loaded")
         }
         Command::Describe { brief } => {
             let described = describe::describe(&ctx, &store, &dir.to_string_lossy(), *brief);
+            // Only the ~/.claude location is reported; without HOME the skill is not installed.
+            let installed = paths::skill_dirs(env)
+                .ok()
+                .and_then(|(claude, _)| storage::skill::read_installed(&claude.join("SKILL.md")));
+            let skill = core::skill::state(installed.as_deref());
             if cli.json {
                 print_json(&DescribeOutput {
                     schema_version: SCHEMA_VERSION,
                     description: &described,
+                    skill: &skill,
                 });
             } else {
                 let c = &described.counts;
@@ -1521,6 +1552,12 @@ fn execute(cli: &Cli, clock: Box<dyn Clock>, ids: Box<dyn IdGen>) -> Result<(), 
                     ("types", c.types.to_string()),
                     ("relation_kinds", c.relation_kinds.to_string()),
                     ("relations", c.relations.to_string()),
+                    (
+                        "skill_installed",
+                        skill.installed.clone().unwrap_or_else(|| "-".to_string()),
+                    ),
+                    ("skill_binary", skill.binary.clone()),
+                    ("skill_stale", skill.stale.to_string()),
                 ];
                 for (name, value) in lines {
                     println!("{name}\t{}", printable(&value));
@@ -3114,6 +3151,7 @@ struct DescribeOutput<'a> {
     schema_version: u32,
     #[serde(flatten)]
     description: &'a describe::Description,
+    skill: &'a core::skill::State,
 }
 
 #[derive(Serialize)]
@@ -3149,6 +3187,87 @@ struct FindOutput {
 struct ErrorOutput<'a> {
     schema_version: u32,
     error: &'a Error,
+}
+
+/// `hali skill install [--agents] [--print]` (spec §11.3): reads `HOME` only (no config, store
+/// or state, no lock). Every directory and file of both locations is checked before anything is
+/// written; a dry run stops after the checks. `--print` reads no `HOME` and ignores `--json`
+/// and `--dry-run`.
+fn skill_install(cli: &Cli, agents: bool, print: bool) -> Result<(), Error> {
+    if print {
+        print!("{}", core::skill::skill_md());
+        return Ok(());
+    }
+    let (claude, agents_dir) =
+        paths::skill_dirs(env).map_err(|_| Error::skill_dir_unusable(None, "unresolved"))?;
+    let mut dirs = vec![claude];
+    if agents {
+        dirs.push(agents_dir);
+    }
+    let files = core::skill::files();
+    let files: Vec<(&str, &[u8])> = files.iter().map(|(n, t)| (*n, t.as_bytes())).collect();
+    let unusable = |e: storage::skill::Unusable| {
+        Error::skill_dir_unusable(Some(&e.path.to_string_lossy()), e.reason)
+    };
+    let mut checked = Vec::new();
+    for dir in &dirs {
+        checked.push(storage::skill::check(dir, &files).map_err(unusable)?);
+    }
+    let reported: Vec<SkillFile> = checked
+        .iter()
+        .flat_map(|c| &c.files)
+        .map(|f| SkillFile {
+            path: f.path.to_string_lossy().into_owned(),
+            action: core::skill::action(f.current.as_deref(), &f.new),
+        })
+        .collect();
+    if !cli.dry_run {
+        for c in &mut checked {
+            storage::skill::install(c).map_err(unusable)?;
+        }
+    }
+    let payload = SkillInstallOutput {
+        schema_version: SCHEMA_VERSION,
+        version: env!("CARGO_PKG_VERSION"),
+        files: &reported,
+    };
+    if cli.json {
+        if cli.dry_run {
+            print_json(&DryRunOutput {
+                payload,
+                dry_run: true,
+                changes: &[],
+            });
+        } else {
+            print_json(&payload);
+        }
+        return Ok(());
+    }
+    for f in &reported {
+        let action = match (cli.dry_run, f.action) {
+            (true, "created") => "would create",
+            (true, "updated") => "would update",
+            (_, action) => action,
+        };
+        println!("{action} skill file {}", printable(&f.path));
+    }
+    if cli.dry_run {
+        eprintln!("note: dry run; nothing was written");
+    }
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct SkillFile {
+    path: String,
+    action: &'static str,
+}
+
+#[derive(Serialize)]
+struct SkillInstallOutput<'a> {
+    schema_version: u32,
+    version: &'static str,
+    files: &'a [SkillFile],
 }
 
 /// `hali query`: the text is parsed after the config and before the store is read; an absent data
