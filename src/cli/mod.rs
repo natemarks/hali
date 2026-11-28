@@ -3198,21 +3198,19 @@ fn skill_install(cli: &Cli, agents: bool, print: bool) -> Result<(), Error> {
         print!("{}", core::skill::skill_md());
         return Ok(());
     }
-    let (claude, agents_dir) =
-        paths::skill_dirs(env).map_err(|_| Error::skill_dir_unusable(None, "unresolved"))?;
+    let (claude, agents_dir) = paths::skill_dirs(env)
+        .map_err(|_| Error::skill_dir_unusable(None, "unresolved", None, false, false))?;
     let mut dirs = vec![claude];
     if agents {
         dirs.push(agents_dir);
     }
     let files = core::skill::files();
     let files: Vec<(&str, &[u8])> = files.iter().map(|(n, t)| (*n, t.as_bytes())).collect();
-    let unusable = |e: storage::skill::Unusable| {
-        Error::skill_dir_unusable(Some(&e.path.to_string_lossy()), e.reason)
+    let unusable = |e: storage::skill::Unusable, written: bool| {
+        let path = e.path.to_string_lossy();
+        Error::skill_dir_unusable(Some(&path), e.reason, e.problem, e.home, written)
     };
-    let mut checked = Vec::new();
-    for dir in &dirs {
-        checked.push(storage::skill::check(dir, &files).map_err(unusable)?);
-    }
+    let mut checked = storage::skill::check(&dirs, &files).map_err(|e| unusable(e, false))?;
     let reported: Vec<SkillFile> = checked
         .iter()
         .flat_map(|c| &c.files)
@@ -3222,8 +3220,9 @@ fn skill_install(cli: &Cli, agents: bool, print: bool) -> Result<(), Error> {
         })
         .collect();
     if !cli.dry_run {
+        let mut wrote = false;
         for c in &mut checked {
-            storage::skill::install(c).map_err(unusable)?;
+            storage::skill::install(c, &mut wrote).map_err(|e| unusable(e, wrote))?;
         }
     }
     let payload = SkillInstallOutput {

@@ -4,10 +4,11 @@
 //! A skill dir is `<base>/<a>/<b>/<own>` (`$HOME/.claude/skills/hali`): `<base>` must be a
 //! directory and is never created; `<a>` and `<b>` are followed when they are symlinks (the
 //! user's choice) and created when missing; `<own>` and every directory below it are hali's own:
-//! never followed, created when missing, and refused unless owned by the effective user and not
-//! group- or world-writable. Everything is checked through directory descriptors before anything
-//! is written, and every write goes through them too: a file is never opened for writing by
-//! name, only a fresh temp file created with `O_EXCL|O_NOFOLLOW` and renamed over it.
+//! never followed and created when missing. `<base>` (HOME) must be owned by the effective user
+//! (its mode is not checked); every other directory there must be owned by the effective user
+//! and not group- or world-writable. Everything is checked through directory descriptors before
+//! anything is written, and every write goes through them too: a file is never opened for writing
+//! by name, only a fresh temp file created with `O_EXCL|O_NOFOLLOW` and renamed over it.
 
 use super::store_file::{dir_problem, euid};
 use std::ffi::{CStr, CString};
@@ -33,12 +34,25 @@ const FOLLOWED: usize = 2;
 pub struct Unusable {
     pub path: PathBuf,
     pub reason: &'static str,
+    /// `path` is `<base>` (HOME) itself.
+    pub home: bool,
+    /// For `unsafe`: `dir_problem`'s reason (`not owned by you`, `writable by group or others`).
+    pub problem: Option<&'static str>,
 }
 
 fn unusable(path: &Path, reason: &'static str) -> Unusable {
     Unusable {
         path: path.to_path_buf(),
         reason,
+        home: false,
+        problem: None,
+    }
+}
+
+fn not_safe(path: &Path, problem: &'static str) -> Unusable {
+    Unusable {
+        problem: Some(problem),
+        ..unusable(path, "unsafe")
     }
 }
 
@@ -48,7 +62,10 @@ pub struct Planned {
     pub path: PathBuf,
     /// The bytes an install writes.
     pub new: Vec<u8>,
-    /// The bytes there now (at most 1 MiB and one byte of them); `None` when there is no file.
+    /// The bytes there now (at most 1 MiB and one byte of them); `None` when there is no file;
+    /// empty when the file there is replaced whatever its bytes (it cannot be read, is not the
+    /// effective user's, or is group- or world-writable). In a location that is the same
+    /// directory as an earlier one, the new bytes: the earlier one writes them.
     pub current: Option<Vec<u8>>,
     dir: usize,
     name: CString,
@@ -68,23 +85,63 @@ struct Dir {
 pub struct Checked {
     dirs: Vec<Dir>,
     pub files: Vec<Planned>,
+    /// The same directory as an earlier location (through a followed symlink): not written.
+    alias: bool,
 }
 
-/// Checks the skill dir `dir` and the files `files` (paths relative to it, `/`-separated, with
-/// their new bytes), and reads the files there now. Writes nothing.
-pub fn check(dir: &Path, files: &[(&str, &[u8])]) -> Result<Checked, Unusable> {
+/// Checks the skill dirs `dirs` and the files `files` in each (paths relative to it,
+/// `/`-separated, with their new bytes), and reads the files there now. Writes nothing. A dir
+/// whose `<a>` or `<b>` is the same directory as an earlier dir's (same device and inode) is that
+/// dir again: its files read as already holding their new bytes, and `install` skips it.
+pub fn check(dirs: &[PathBuf], files: &[(&str, &[u8])]) -> Result<Vec<Checked>, Unusable> {
+    let mut checked: Vec<Checked> = Vec::new();
+    for dir in dirs {
+        let mut c = check_one(dir, files)?;
+        if checked.iter().any(|earlier| same_dir(earlier, &c)) {
+            c.alias = true;
+            for file in &mut c.files {
+                file.current = Some(file.new.clone());
+            }
+        }
+        checked.push(c);
+    }
+    Ok(checked)
+}
+
+/// Whether `a` and `b` have the same open directory at the same followed depth.
+fn same_dir(a: &Checked, b: &Checked) -> bool {
+    (1..=FOLLOWED).any(|i| match (&a.dirs[i].fd, &b.dirs[i].fd) {
+        (Some(x), Some(y)) => match (x.metadata(), y.metadata()) {
+            (Ok(x), Ok(y)) => (x.dev(), x.ino()) == (y.dev(), y.ino()),
+            _ => false,
+        },
+        _ => false,
+    })
+}
+
+fn check_one(dir: &Path, files: &[(&str, &[u8])]) -> Result<Checked, Unusable> {
     let base = dir
         .ancestors()
         .nth(FOLLOWED + 1)
         .expect("a skill dir is <base>/<a>/<b>/<own>");
+    let at_home = |e: Unusable| Unusable { home: true, ..e };
     let base_fd = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_NONBLOCK)
         .open(base)
         .map_err(|e| match e.raw_os_error() {
-            Some(libc::ENOENT | libc::ENOTDIR | libc::ELOOP) => unusable(base, "not_a_directory"),
-            _ => unusable(base, "cannot_create"),
+            Some(libc::ENOENT | libc::ENOTDIR | libc::ELOOP) => {
+                at_home(unusable(base, "not_a_directory"))
+            }
+            _ => at_home(unusable(base, "cannot_create")),
         })?;
+    // HOME must be the effective user's; its mode is not checked (private-group homes are 0775).
+    let meta = base_fd
+        .metadata()
+        .map_err(|_| at_home(unusable(base, "cannot_create")))?;
+    if meta.uid() != euid() {
+        return Err(at_home(not_safe(base, "not owned by you")));
+    }
     let mut dirs = vec![Dir {
         path: base.to_path_buf(),
         name: CString::default(),
@@ -136,12 +193,17 @@ pub fn check(dir: &Path, files: &[(&str, &[u8])]) -> Result<Checked, Unusable> {
     Ok(Checked {
         dirs,
         files: planned,
+        alias: false,
     })
 }
 
 /// Creates what `check` found missing (mode 0700) and writes every file whose bytes differ,
-/// atomically (mode 0600). A file that is already right is not touched.
-pub fn install(checked: &mut Checked) -> Result<(), Unusable> {
+/// atomically (mode 0600). A file that is already right is not touched. `wrote` is set once a
+/// directory or file has been created or replaced, also when a later step then fails.
+pub fn install(checked: &mut Checked, wrote: &mut bool) -> Result<(), Unusable> {
+    if checked.alias {
+        return Ok(());
+    }
     for i in 1..checked.dirs.len() {
         if checked.dirs[i].fd.is_some() {
             continue;
@@ -152,7 +214,7 @@ pub fn install(checked: &mut Checked) -> Result<(), Unusable> {
                 .fd
                 .as_ref()
                 .expect("a parent comes first, so it is open by now");
-            create_dir(parent, &d.name, &d.path)?
+            create_dir(parent, &d.name, &d.path, wrote)?
         };
         checked.dirs[i].fd = Some(made);
     }
@@ -165,6 +227,7 @@ pub fn install(checked: &mut Checked) -> Result<(), Unusable> {
             .as_ref()
             .expect("every directory is open by now");
         write_file(dir, &file.name, &file.new, &file.path)?;
+        *wrote = true;
     }
     Ok(())
 }
@@ -290,7 +353,8 @@ fn kind_at(dir: &File, name: &CStr) -> io::Result<Kind> {
     })
 }
 
-/// A directory that is followed when it is a symlink: open, missing (`None`), or a problem.
+/// A directory that is followed when it is a symlink: open (and checked by its descriptor like
+/// an own directory), missing (`None`), or a problem.
 fn probe_followed(parent: &File, name: &CStr, path: &Path) -> Result<Option<File>, Unusable> {
     let err = match open_at(
         parent,
@@ -298,7 +362,10 @@ fn probe_followed(parent: &File, name: &CStr, path: &Path) -> Result<Option<File
         libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NONBLOCK,
         0,
     ) {
-        Ok(fd) => return Ok(Some(fd)),
+        Ok(fd) => {
+            check_dir(&fd, path)?;
+            return Ok(Some(fd));
+        }
         Err(e) => e,
     };
     match kind_at(parent, name) {
@@ -324,7 +391,7 @@ fn probe_own(parent: &File, name: &CStr, path: &Path) -> Result<Option<File>, Un
         0,
     ) {
         Ok(fd) => {
-            check_own(&fd, path)?;
+            check_dir(&fd, path)?;
             Ok(Some(fd))
         }
         Err(_) => match kind_at(parent, name) {
@@ -336,15 +403,15 @@ fn probe_own(parent: &File, name: &CStr, path: &Path) -> Result<Option<File>, Un
     }
 }
 
-/// An own directory, by its descriptor: a directory of the effective user, not group- or
-/// world-writable.
-fn check_own(fd: &File, path: &Path) -> Result<(), Unusable> {
+/// A directory written into, by its descriptor: a directory of the effective user, not group-
+/// or world-writable.
+fn check_dir(fd: &File, path: &Path) -> Result<(), Unusable> {
     let meta = fd.metadata().map_err(|_| unusable(path, "cannot_create"))?;
     if !meta.is_dir() {
         return Err(unusable(path, "not_a_directory"));
     }
     match dir_problem(meta.uid(), meta.mode(), euid()) {
-        Some(_) => Err(unusable(path, "unsafe")),
+        Some(problem) => Err(not_safe(path, problem)),
         None => Ok(()),
     }
 }
@@ -373,8 +440,13 @@ fn probe_file(dir: &File, name: &CStr, path: &Path) -> Result<Option<Vec<u8>>, U
         // A file hali cannot read is replaced, like any other that differs.
         Err(_) => return Ok(Some(Vec::new())),
     };
-    if !file.metadata().is_ok_and(|m| m.is_file()) {
+    let meta = file.metadata().map_err(|_| unusable(path, "not_a_file"))?;
+    if !meta.is_file() {
         return Err(unusable(path, "not_a_file"));
+    }
+    // Someone else's file, or one others may write, is replaced whatever its bytes.
+    if dir_problem(meta.uid(), meta.mode(), euid()).is_some() {
+        return Ok(Some(Vec::new()));
     }
     let mut bytes = Vec::new();
     match file.take(MAX_INSTALLED + 1).read_to_end(&mut bytes) {
@@ -384,11 +456,12 @@ fn probe_file(dir: &File, name: &CStr, path: &Path) -> Result<Option<Vec<u8>>, U
 }
 
 /// Creates the directory `name` in `parent` with mode 0700, whatever the umask, and opens it.
-fn create_dir(parent: &File, name: &CStr, path: &Path) -> Result<File, Unusable> {
+fn create_dir(parent: &File, name: &CStr, path: &Path, wrote: &mut bool) -> Result<File, Unusable> {
     // SAFETY: `name` is NUL-terminated and outlives the call, and `parent` is open.
     if unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) } != 0 {
         return Err(unusable(path, "cannot_create"));
     }
+    *wrote = true;
     let fd = open_at(
         parent,
         name,
@@ -399,7 +472,7 @@ fn create_dir(parent: &File, name: &CStr, path: &Path) -> Result<File, Unusable>
     // Made by this process, so it is the effective user's unless it was swapped meanwhile.
     let meta = fd.metadata().map_err(|_| unusable(path, "cannot_create"))?;
     if meta.uid() != euid() {
-        return Err(unusable(path, "unsafe"));
+        return Err(not_safe(path, "not owned by you"));
     }
     fd.set_permissions(std::fs::Permissions::from_mode(0o700))
         .map_err(|_| unusable(path, "cannot_create"))?;

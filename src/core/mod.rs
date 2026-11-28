@@ -772,14 +772,43 @@ impl Error {
 
     /// The skill cannot be installed (spec §11.3): `path` is the offending path (`None` when
     /// `unresolved`); `reason` is `unresolved`, `not_a_directory`, `symlink`, `not_a_file`,
-    /// `unsafe` or `cannot_create`.
-    pub fn skill_dir_unusable(path: Option<&str>, reason: &str) -> Error {
+    /// `unsafe` or `cannot_create`. For `unsafe`, `problem` says what is wrong (`not owned by
+    /// you`, `writable by group or others`); `home` is set when `path` is HOME itself; `written`
+    /// once a directory or file was created or replaced before the problem was met.
+    pub fn skill_dir_unusable(
+        path: Option<&str>,
+        reason: &str,
+        problem: Option<&str>,
+        home: bool,
+        written: bool,
+    ) -> Error {
         let again = "then run hali skill install again.";
         let (why, fix) = match reason {
             "unresolved" => (
                 "HOME is not set to an absolute path".to_string(),
                 format!("Set HOME to your home directory, {again}"),
             ),
+            "not_a_directory" if home => (
+                "is not a directory".to_string(),
+                format!("Set HOME to your home directory, {again}"),
+            ),
+            "unsafe" if home => (
+                "is not owned by you".to_string(),
+                format!("Set HOME to your own home directory, {again}"),
+            ),
+            "unsafe" => match (problem, path) {
+                (Some(p @ "writable by group or others"), Some(path)) => (
+                    format!("is {p}"),
+                    format!(
+                        "Make it not writable by others (chmod go-w {}), {again}",
+                        shell_quote(path)
+                    ),
+                ),
+                (p, _) => (
+                    format!("is {}", p.unwrap_or("not owned by you")),
+                    format!("Make it owned by you, or move it aside, {again}"),
+                ),
+            },
             "not_a_directory" => (
                 "is not a directory".to_string(),
                 format!("Move what is in the way aside, {again}"),
@@ -792,26 +821,17 @@ impl Error {
                 "is not a regular file".to_string(),
                 format!("Move what is in the way aside, {again}"),
             ),
-            "unsafe" => (
-                "is not owned by you, or is writable by group or others".to_string(),
-                match path {
-                    Some(p) => format!(
-                        "Make it your own and not writable by others (chmod go-w {}), {again}",
-                        shell_quote(p)
-                    ),
-                    None => format!("Make it your own and not writable by others, {again}"),
-                },
+            _ if home => (
+                "cannot be created or written".to_string(),
+                format!("Set HOME to your own home directory, {again}"),
             ),
             _ => (
                 "cannot be created or written".to_string(),
-                format!("Check that you can write to the directory above it, {again}"),
+                format!("Check that you can read and write it and the directory above it, {again}"),
             ),
         };
-        // A file cannot be created while writing, after files that were: they stay.
-        let tail = match reason {
-            "cannot_create" => "",
-            _ => "; nothing was written",
-        };
+        // What was created or replaced before the problem was met stays.
+        let tail = if written { "" } else { "; nothing was written" };
         let message = match path {
             Some(path) => format!("cannot install the skill: {path} {why}{tail}"),
             None => format!("cannot install the skill: {why}{tail}"),
