@@ -21,8 +21,9 @@
 //!   below the unwritable directory; the message of the golden is `cannot install the skill:
 //!   <path> is not a directory; nothing was written` and its `suggested_fix` is `Move what is in
 //!   the way aside, then run hali skill install again.`;
-//! - a dry run reports the same `SKILL_DIR_UNUSABLE` errors as a real run, except `cannot_create`
-//!   (a dry run only looks, it cannot know that a directory is unwritable);
+//! - a dry run reports the same `SKILL_DIR_UNUSABLE` errors as a real run for everything found
+//!   while checking (including `cannot_create` when a directory cannot be opened); only a
+//!   failure while writing, which a dry run never reaches, is specific to a real run;
 //! - the text of `describe` gains `skill_installed` (`-` for none), `skill_binary` and
 //!   `skill_stale` (`true` or `false`) lines straight after `relations`, before the lists;
 //! - the real-run text is one `created|updated|unchanged skill file <path>` line per file, and
