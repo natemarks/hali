@@ -7,7 +7,7 @@
 
 #[cfg(feature = "goal")]
 mod goal {
-    use hali::paths::skill_dirs;
+    use hali::paths;
     use std::path::PathBuf;
 
     fn env_of(vars: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
@@ -25,12 +25,12 @@ mod goal {
 
     #[test]
     fn skill_dirs() {
-        let (claude, agents) = skill_dirs(env_of(&[("HOME", "/home/u")])).unwrap();
+        let (claude, agents) = paths::skill_dirs(env_of(&[("HOME", "/home/u")])).unwrap();
         assert_eq!(claude, PathBuf::from("/home/u/.claude/skills/hali"));
         assert_eq!(agents, PathBuf::from("/home/u/.agents/skills/hali"));
 
         // Only HOME counts.
-        let (claude, agents) = skill_dirs(env_of(&[
+        let (claude, agents) = paths::skill_dirs(env_of(&[
             ("HOME", "/home/u"),
             ("CLAUDE_CONFIG_DIR", "/elsewhere"),
             ("XDG_CONFIG_HOME", "/xdg"),
@@ -52,7 +52,7 @@ mod goal {
             ),
         ];
         for (what, vars) in unresolved {
-            assert!(skill_dirs(env_of(&vars)).is_err(), "{what}");
+            assert!(paths::skill_dirs(env_of(&vars)).is_err(), "{what}");
         }
     }
 }
