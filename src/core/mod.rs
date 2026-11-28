@@ -12,6 +12,7 @@ pub mod resource;
 pub mod roots;
 pub mod scan;
 pub mod schema;
+pub mod skill;
 pub mod types;
 pub mod validate;
 
@@ -767,6 +768,61 @@ impl Error {
             json!({"path": path, "reason": reason}),
         )
         .fix(fix)
+    }
+
+    /// The skill cannot be installed (spec §11.3): `path` is the offending path (`None` when
+    /// `unresolved`); `reason` is `unresolved`, `not_a_directory`, `symlink`, `not_a_file`,
+    /// `unsafe` or `cannot_create`.
+    pub fn skill_dir_unusable(path: Option<&str>, reason: &str) -> Error {
+        let again = "then run hali skill install again.";
+        let (why, fix) = match reason {
+            "unresolved" => (
+                "HOME is not set to an absolute path".to_string(),
+                format!("Set HOME to your home directory, {again}"),
+            ),
+            "not_a_directory" => (
+                "is not a directory".to_string(),
+                format!("Move what is in the way aside, {again}"),
+            ),
+            "symlink" => (
+                "is a symbolic link, which hali does not follow there".to_string(),
+                format!("Replace the symbolic link with a real directory or file, {again}"),
+            ),
+            "not_a_file" => (
+                "is not a regular file".to_string(),
+                format!("Move what is in the way aside, {again}"),
+            ),
+            "unsafe" => (
+                "is not owned by you, or is writable by group or others".to_string(),
+                match path {
+                    Some(p) => format!(
+                        "Make it your own and not writable by others (chmod go-w {}), {again}",
+                        shell_quote(p)
+                    ),
+                    None => format!("Make it your own and not writable by others, {again}"),
+                },
+            ),
+            _ => (
+                "cannot be created or written".to_string(),
+                format!("Check that you can write to the directory above it, {again}"),
+            ),
+        };
+        // A file cannot be created while writing, after files that were: they stay.
+        let tail = match reason {
+            "cannot_create" => "",
+            _ => "; nothing was written",
+        };
+        let message = match path {
+            Some(path) => format!("cannot install the skill: {path} {why}{tail}"),
+            None => format!("cannot install the skill: {why}{tail}"),
+        };
+        Error::new(
+            "SKILL_DIR_UNUSABLE",
+            3,
+            message,
+            json!({"path": path, "reason": reason}),
+        )
+        .fix(&fix)
     }
 
     /// A new file at `path` has the size and content of the Missing Resources `resources`
